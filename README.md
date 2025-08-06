@@ -209,6 +209,75 @@ export async function consumer() {
 }
 ```
 
+## New Enhancements
+
+### `randomKey(): Promise<string>`
+
+Returns a randomly selected key from the store.
+
+**Requirements**:
+
+* Works only when the store was opened with `{ trackKeys: true }`.
+* Fails with an error if no keys exist or if the backend does not support random access.
+
+**Use Cases**:
+
+* Great for simulating random reads during testing.
+* Useful for sampling load from unpredictable access patterns.
+
+```js
+const key = await kv.randomKey();
+const value = await kv.get(key);
+console.log(`Random entry: ${key} => ${value}`);
+```
+
+---
+
+### `rebuildKeyList(): Promise<void>`
+
+Rebuilds the internal key index from persistent storage (e.g., after a crash or restart).
+
+**Requirements**:
+
+* Only available on disk-based stores with `trackKeys: true`.
+* Should be called at setup phase if index integrity is needed post-restore.
+
+**Use Cases**:
+
+* Ensures `randomKey()` and `list()` behave correctly after test restarts or filesystem-level changes.
+
+```js
+await kv.rebuildKeyList();
+console.log("Key list rebuilt successfully.");
+```
+
+---
+
+## Example: Random Consumer with Rebuild
+
+```javascript
+import { openKv } from "k6/x/kv";
+
+const kv = openKv({
+  backend: "disk",
+  trackKeys: true,
+});
+
+export async function setup() {
+  await kv.clear();
+  await kv.set("alpha", "a");
+  await kv.set("bravo", "b");
+  await kv.set("charlie", "c");
+}
+
+export default async function () {
+  await kv.rebuildKeyList(); // Ensures index is fresh
+  const key = await kv.randomKey();
+  const value = await kv.get(key);
+  console.log(`Random key: ${key}, value: ${value}`);
+}
+```
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.

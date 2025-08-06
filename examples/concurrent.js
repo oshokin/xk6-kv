@@ -16,10 +16,20 @@ export let options = {
       startTime: "5s",
       exec: "consumer",
     },
+    randomConsumer: {
+      executor: "shared-iterations",
+      vus: 1,
+      iterations: 10,
+      startTime: "10s",
+      exec: "randomConsumer",
+    },
   },
 };
 
-const kv = openKv({ backend: "memory" });
+const kv = openKv({
+  backend: "memory",
+  trackKeys: true,
+});
 
 export async function producer() {
   let latestProducerID = 0;
@@ -46,6 +56,23 @@ export async function consumer() {
     await kv.delete(entries[0].key);
   } else {
     console.log("[consumer]<- no tokens available");
+  }
+
+  // Let's simulate a delay between consuming tokens
+  sleep(1);
+}
+
+export async function randomConsumer() {
+  console.log("[randomConsumer]<- attempting random token retrieval");
+
+  // Pick a random key (O(1) when in-memory keys are tracked)
+  try {
+    const randomKey = await kv.randomKey();
+    const value = await kv.get(randomKey);
+    console.log(`[randomConsumer]<- random key: ${randomKey}, value: ${value}`);
+    await kv.delete(randomKey);
+  } catch (err) {
+    console.log(`[randomConsumer]<- no keys available: ${err}`);
   }
 
   // Let's simulate a delay between consuming tokens

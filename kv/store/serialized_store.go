@@ -111,6 +111,16 @@ func (s *SerializedStore) List(prefix string, limit int64) ([]Entry, error) {
 	return entries, nil
 }
 
+// RandomKey returns a random key from the store.
+func (s *SerializedStore) RandomKey() (string, error) {
+	return s.store.RandomKey()
+}
+
+// RebuildKeyList rebuilds the internal key list from storage.
+func (s *SerializedStore) RebuildKeyList() error {
+	return s.store.RebuildKeyList()
+}
+
 // Close closes the underlying store.
 func (s *SerializedStore) Close() error {
 	return s.store.Close()
