@@ -6,7 +6,7 @@ import (
 	"go.k6.io/k6/js/modules"
 	"go.k6.io/k6/js/promises"
 
-	"github.com/oleiade/xk6-kv/kv/store"
+	"github.com/oshokin/xk6-kv/kv/store"
 )
 
 // KV is a key-value database that can be used to store and retrieve data.
@@ -222,6 +222,54 @@ func (k *KV) List(options sobek.Value) *sobek.Promise {
 	return promise
 }
 
+// RandomKey returns a random key from the store, optionally filtered by prefix.
+// Resolves to "" (empty string) when the store is empty.
+func (k *KV) RandomKey(options sobek.Value) *sobek.Promise {
+	promise, resolve, reject := promises.New(k.vu)
+
+	opts := ImportRandomKeyOptions(k.vu.Runtime(), options)
+
+	go func() {
+		if k.store == nil {
+			reject(NewError(DatabaseNotOpenError, "database is not open"))
+			return
+		}
+
+		key, err := k.store.RandomKey(opts.Prefix)
+		if err != nil {
+			reject(err)
+			return
+		}
+
+		resolve(key)
+	}()
+
+	return promise
+}
+
+// RebuildKeyList rebuilds in-memory key indexes from the underlying store if supported.
+// Resolves to true when finished (no-op and true when trackKeys is disabled).
+func (k *KV) RebuildKeyList() *sobek.Promise {
+	promise, resolve, reject := promises.New(k.vu)
+
+	go func() {
+		if k.store == nil {
+			reject(NewError(DatabaseNotOpenError, "database is not open"))
+			return
+		}
+
+		err := k.store.RebuildKeyList()
+		if err != nil {
+			reject(err)
+			return
+		}
+
+		resolve(true)
+	}()
+
+	return promise
+}
+
 // ListEntry is a key-value pair returned by KV.List().
 type ListEntry struct {
 	Key   string `json:"key"`
@@ -267,4 +315,20 @@ func ImportListOptions(rt *sobek.Runtime, options sobek.Value) ListOptions {
 	}
 
 	return listOptions
+}
+
+// RandomKeyOptions allows passing { prefix: string }
+type RandomKeyOptions struct {
+	Prefix string `json:"prefix"`
+}
+
+// ImportRandomKeyOptions instantiates RandomKeyOptions from a sobek.Value.
+func ImportRandomKeyOptions(rt *sobek.Runtime, options sobek.Value) RandomKeyOptions {
+	opts := RandomKeyOptions{}
+	if common.IsNullish(options) {
+		return opts
+	}
+	obj := options.ToObject(rt)
+	opts.Prefix = obj.Get("prefix").String()
+	return opts
 }

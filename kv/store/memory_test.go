@@ -8,7 +8,7 @@ import (
 func TestNewMemoryStore(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore()
+	store := NewMemoryStore(true)
 	if store == nil {
 		t.Fatal("NewMemoryStore() returned nil")
 	}
@@ -23,7 +23,7 @@ func TestNewMemoryStore(t *testing.T) {
 func TestMemoryStore_Get(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore()
+	store := NewMemoryStore(true)
 
 	// Test getting a non-existent key
 	_, err := store.Get("non-existent")
@@ -53,7 +53,7 @@ func TestMemoryStore_Get(t *testing.T) {
 func TestMemoryStore_Set(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore()
+	store := NewMemoryStore(true)
 
 	// Test setting a string value
 	err := store.Set("string-key", "string-value")
@@ -94,7 +94,7 @@ func TestMemoryStore_Set(t *testing.T) {
 func TestMemoryStore_Delete(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore()
+	store := NewMemoryStore(true)
 
 	// Setup
 	store.container["test-key"] = []byte("test-value")
@@ -120,7 +120,7 @@ func TestMemoryStore_Delete(t *testing.T) {
 func TestMemoryStore_Exists(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore()
+	store := NewMemoryStore(true)
 
 	// Test with non-existent key
 	exists, err := store.Exists("non-existent")
@@ -146,7 +146,7 @@ func TestMemoryStore_Exists(t *testing.T) {
 func TestMemoryStore_Clear(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore()
+	store := NewMemoryStore(true)
 
 	// Setup
 	store.container["key1"] = []byte("value1")
@@ -166,7 +166,7 @@ func TestMemoryStore_Clear(t *testing.T) {
 func TestMemoryStore_Size(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore()
+	store := NewMemoryStore(true)
 
 	// Test empty store
 	size, err := store.Size()
@@ -193,7 +193,7 @@ func TestMemoryStore_Size(t *testing.T) {
 func TestMemoryStore_List(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore()
+	store := NewMemoryStore(true)
 
 	// Test empty store
 	entries, err := store.List("", 0)
@@ -277,7 +277,7 @@ func TestMemoryStore_List(t *testing.T) {
 func TestMemoryStore_Close(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore()
+	store := NewMemoryStore(true)
 
 	// Close should be a no-op for MemoryStore
 	err := store.Close()
@@ -289,7 +289,7 @@ func TestMemoryStore_Close(t *testing.T) {
 func TestMemoryStore_Concurrency(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore()
+	store := NewMemoryStore(true)
 	done := make(chan bool)
 
 	// Test concurrent reads and writes
@@ -423,10 +423,228 @@ func TestMemoryStore_TableDriven(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			store := NewMemoryStore()
+			store := NewMemoryStore(true)
 			tc.setup(store)
 			result, err := tc.operation(store)
 			tc.validate(t, result, err)
 		})
+	}
+}
+
+func TestMemoryStore_RandomKey(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(true)
+
+	// Test empty store
+	key, err := store.RandomKey("")
+	if err != nil {
+		t.Fatalf("Unexpected error for empty store: %v", err)
+	}
+
+	if key != "" {
+		t.Fatalf("Expected empty key for empty store, got %q", key)
+	}
+
+	// Populate keys
+	keys := []string{"alpha", "beta", "gamma"}
+	for _, k := range keys {
+		_ = store.Set(k, "some-value")
+	}
+
+	// Test multiple random calls
+	found := make(map[string]bool)
+	for range 1000 {
+		k, err := store.RandomKey("")
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+
+		if k == "" {
+			t.Fatalf("Unexpected empty key from RandomKey on non-empty store")
+		}
+
+		found[k] = true
+	}
+
+	// Ensure all keys were returned at least once
+	for _, k := range keys {
+		if !found[k] {
+			t.Errorf("Key %q was never returned by RandomKey", k)
+		}
+	}
+}
+
+func TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
+	t.Parallel()
+
+	// TrackKeys: true (uses OST for prefixes)
+	s := NewMemoryStore(true)
+
+	// Empty store -> "" (no error)
+	key, err := s.RandomKey("a:")
+	if err != nil {
+		t.Fatalf("unexpected error on empty store: %v", err)
+	}
+
+	if key != "" {
+		t.Fatalf("expected empty key on empty store, got %q", key)
+	}
+
+	// Seed
+	mustMemSet(t, s, "a:1", "v1")
+	mustMemSet(t, s, "a:2", "v2")
+	mustMemSet(t, s, "b:1", "v3")
+
+	// No prefix -> any of the three
+	key, err = s.RandomKey("")
+	if err != nil {
+		t.Fatalf("unexpected error (no prefix): %v", err)
+	}
+
+	if key == "" {
+		t.Fatalf("expected non-empty key")
+	}
+
+	if !(key == "a:1" || key == "a:2" || key == "b:1") {
+		t.Fatalf("unexpected key %q", key)
+	}
+
+	// Prefix "a:" -> only a:*
+	key, err = s.RandomKey("a:")
+	if err != nil {
+		t.Fatalf("unexpected error for prefix a:: %v", err)
+	}
+
+	if key == "" || !strings.HasPrefix(key, "a:") {
+		t.Fatalf("expected key with prefix a:, got %q", key)
+	}
+
+	// No-match prefix -> ""
+	key, err = s.RandomKey("z:")
+	if err != nil {
+		t.Fatalf("unexpected error (no-match prefix): %v", err)
+	}
+
+	if key != "" {
+		t.Fatalf("expected empty key for no-match prefix, got %q", key)
+	}
+
+	// Delete one of the a:* and check still valid
+	mustMemDelete(t, s, "a:1")
+	key, err = s.RandomKey("a:")
+	if err != nil {
+		t.Fatalf("unexpected error after delete: %v", err)
+	}
+
+	if key != "a:2" {
+		t.Fatalf("expected a:2 after deleting a:1, got %q", key)
+	}
+
+	// Clear -> ""
+	mustMemClear(t, s)
+
+	key, err = s.RandomKey("a:")
+	if err != nil {
+		t.Fatalf("unexpected error after clear: %v", err)
+	}
+
+	if key != "" {
+		t.Fatalf("expected empty key after clear, got %q", key)
+	}
+}
+
+func TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
+	t.Parallel()
+
+	// TrackKeys: false (two-pass scan path)
+	s := NewMemoryStore(false)
+
+	// Empty -> ""
+	key, err := s.RandomKey("a:")
+	if err != nil {
+		t.Fatalf("unexpected error on empty store: %v", err)
+	}
+
+	if key != "" {
+		t.Fatalf("expected empty key on empty store, got %q", key)
+	}
+
+	// Seed
+	mustMemSet(t, s, "a:1", "v1")
+	mustMemSet(t, s, "a:2", "v2")
+	mustMemSet(t, s, "b:1", "v3")
+
+	// Prefix "a:" -> must start with a:
+	key, err = s.RandomKey("a:")
+	if err != nil {
+		t.Fatalf("unexpected error for prefix a:: %v", err)
+	}
+
+	if key == "" || !strings.HasPrefix(key, "a:") {
+		t.Fatalf("expected key with prefix a:, got %q", key)
+	}
+
+	// Prefix with no match
+	key, err = s.RandomKey("z:")
+	if err != nil {
+		t.Fatalf("unexpected error for no-match prefix: %v", err)
+	}
+
+	if key != "" {
+		t.Fatalf("expected empty key for no-match prefix, got %q", key)
+	}
+}
+
+func TestMemoryStore_RebuildKeyList_RandomKeyPrefix(t *testing.T) {
+	t.Parallel()
+
+	s := NewMemoryStore(true)
+
+	mustMemSet(t, s, "p:1", "v1")
+	mustMemSet(t, s, "p:2", "v2")
+	mustMemSet(t, s, "q:1", "v3")
+
+	// Simulate index loss and rebuild
+	_ = s.Clear()
+	mustMemSet(t, s, "p:1", "v1")
+	mustMemSet(t, s, "p:2", "v2")
+	mustMemSet(t, s, "q:1", "v3")
+
+	if err := s.RebuildKeyList(); err != nil {
+		t.Fatalf("RebuildKeyList failed: %v", err)
+	}
+
+	k, err := s.RandomKey("p:")
+	if err != nil {
+		t.Fatalf("RandomKey after rebuild err: %v", err)
+	}
+
+	if k == "" || !strings.HasPrefix(k, "p:") {
+		t.Fatalf("expected key with prefix p:, got %q", k)
+	}
+}
+
+func mustMemSet(t *testing.T, s *MemoryStore, k string, v any) {
+	t.Helper()
+
+	if err := s.Set(k, v); err != nil {
+		t.Fatalf("set(%q) failed: %v", k, err)
+	}
+}
+
+func mustMemDelete(t *testing.T, s *MemoryStore, k string) {
+	t.Helper()
+
+	if err := s.Delete(k); err != nil {
+		t.Fatalf("delete(%q) failed: %v", k, err)
+	}
+}
+
+func mustMemClear(t *testing.T, s *MemoryStore) {
+	t.Helper()
+
+	if err := s.Clear(); err != nil {
+		t.Fatalf("clear() failed: %v", err)
 	}
 }

@@ -24,6 +24,13 @@ type Store interface {
 	// List returns all key-value pairs in the store, optionally filtered by prefix and limited to a maximum count.
 	List(prefix string, limit int64) ([]Entry, error)
 
+	// RandomKey returns a random key from the store, optionally restricted by prefix.
+	// If there are no matching keys, it returns "" and a nil error.
+	RandomKey(prefix string) (string, error)
+
+	// RebuildKeyList rebuilds the internal key list from storage.
+	RebuildKeyList() error
+
 	// Close closes the store.
 	Close() error
 }
