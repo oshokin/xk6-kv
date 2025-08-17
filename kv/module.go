@@ -14,7 +14,7 @@ import (
 	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 
-	"github.com/oleiade/xk6-kv/kv/store"
+	"github.com/oshokin/xk6-kv/kv/store"
 )
 
 type (
@@ -91,9 +91,9 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 		var baseStore store.Store
 		switch options.Backend {
 		case "memory":
-			baseStore = store.NewMemoryStore()
+			baseStore = store.NewMemoryStore(options.TrackKeys)
 		case "disk":
-			baseStore = store.NewDiskStore()
+			baseStore = store.NewDiskStore(options.TrackKeys)
 		}
 
 		// Create the serializer based on the serialization option
@@ -129,6 +129,9 @@ type Options struct {
 	//
 	// Valid values are "json" and "string".
 	Serialization string `json:"serialization"`
+
+	// TrackKeys enables or disables in-memory key tracking for faster lookups.
+	TrackKeys bool `json:"trackKeys"`
 }
 
 // NewOptionsFrom creates a new KVOptions instance from a sobek.Value.
@@ -137,6 +140,7 @@ func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
 	opts := Options{
 		Backend:       DefaultBackend,
 		Serialization: DefaultSerialization,
+		TrackKeys:     false,
 	}
 
 	if common.IsNullish(options) {
