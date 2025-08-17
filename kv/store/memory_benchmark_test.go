@@ -28,6 +28,44 @@ func BenchmarkMemoryStore_Get(b *testing.B) {
 	}
 }
 
+func BenchmarkMemoryStore_RandomKey(b *testing.B) {
+	store := NewMemoryStore()
+
+	// Setup: Add some data to the store
+	for i := range 10_000 {
+		_ = store.Set(fmt.Sprintf("key-%d", i), "v")
+	}
+
+	// Reset the timer before the actual benchmark
+	b.ResetTimer()
+
+	// Run the benchmark
+	for range b.N {
+		_, _ = store.RandomKey("")
+	}
+}
+
+func BenchmarkMemoryStore_RandomKey_WithPrefix(b *testing.B) {
+	store := NewMemoryStore()
+
+	// Setup: Add some data to the store
+	for i := range 10_000 {
+		_ = store.Set(fmt.Sprintf("key-%d", i), "v")
+
+		if i < 2_000 {
+			_ = store.Set(fmt.Sprintf("pfx-%d", i), "v")
+		}
+	}
+
+	// Reset the timer before the actual benchmark
+	b.ResetTimer()
+
+	// Run the benchmark
+	for range b.N {
+		_, _ = store.RandomKey("pfx-")
+	}
+}
+
 func BenchmarkMemoryStore_Set(b *testing.B) {
 	store := NewMemoryStore()
 

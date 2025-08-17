@@ -70,6 +70,60 @@ func TestDiskStore_Get(t *testing.T) {
 	_ = store.Close()
 }
 
+func TestDiskStore_RandomKey_NoTracking(t *testing.T) {
+	t.Parallel()
+
+	tempFile := setupTempDiskStore(t)
+	defer os.Remove(tempFile) //nolint:errcheck,forbidigo
+
+	store := NewDiskStore()
+	store.path = tempFile
+
+	// Empty
+	k, err := store.RandomKey("")
+	if err != nil {
+		t.Fatalf("RandomKey(\"\") on empty store returned an error: %v", err)
+	}
+	if k != "" {
+		t.Fatalf("RandomKey(\"\") on empty store returned %q, want \"\"", k)
+	}
+
+	// Seed
+	_ = store.Set("a:1", "v")
+	_ = store.Set("a:2", "v")
+	_ = store.Set("b:1", "v")
+
+	// No prefix
+	k, err = store.RandomKey("")
+	if err != nil {
+		t.Fatalf("RandomKey(\"\") returned an error: %v", err)
+	}
+
+	if k == "" {
+		t.Fatal("RandomKey(\"\") returned empty key, want non-empty key")
+	}
+
+	// Prefix hit
+	k, err = store.RandomKey("a:")
+	if err != nil {
+		t.Fatalf("RandomKey(\"a:\") returned an error: %v", err)
+	}
+
+	if !strings.HasPrefix(k, "a:") {
+		t.Fatalf("RandomKey(\"a:\") returned %q, want key with prefix %q", k, "a:")
+	}
+
+	// prefix miss
+	k, err = store.RandomKey("z:")
+	if err != nil {
+		t.Fatalf("RandomKey(\"z:\") returned an error: %v", err)
+	}
+
+	if k != "" {
+		t.Fatalf("RandomKey(\"z:\") returned %q, want \"\"", k)
+	}
+}
+
 func TestDiskStore_Set(t *testing.T) {
 	t.Parallel()
 

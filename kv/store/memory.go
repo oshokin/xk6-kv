@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"sort"
 	"strings"
 	"sync"
@@ -33,6 +34,46 @@ func (s *MemoryStore) Get(key string) (any, error) {
 
 	// Return the raw bytes - serialization will be handled by the SerializedStore wrapper
 	return value, nil
+}
+
+// RandomKey returns a random key, optionally filtered by prefix.
+// No error when empty or no match; returns "".
+func (s *MemoryStore) RandomKey(prefix string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var (
+		result string
+		count  int
+	)
+
+	// Helper: reservoir-sample the current key
+	sample := func(k string) {
+		count++
+
+		// Replace current sample with probability 1/count (uniform over all seen matches)
+		if rand.IntN(count) == 0 { //nolint:gosec
+			result = k
+		}
+	}
+
+	if prefix == "" {
+		for k := range s.container {
+			sample(k)
+		}
+
+		return result, nil
+	}
+
+	for k := range s.container {
+		if !strings.HasPrefix(k, prefix) {
+			continue
+		}
+
+		sample(k)
+	}
+
+	return result, nil
 }
 
 // Set sets the value for a given key.

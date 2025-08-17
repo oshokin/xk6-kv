@@ -6,6 +6,10 @@ type Store interface {
 	// Get returns the value of a key in the store.
 	Get(key string) (any, error)
 
+	// RandomKey returns a random key optionally filtered by prefix.
+	// It returns "" and nil when the store is empty or when no keys match.
+	RandomKey(prefix string) (string, error)
+
 	// Set sets the value of a key in the store.
 	Set(key string, value any) error
 

@@ -41,6 +41,12 @@ func (s *SerializedStore) Get(key string) (any, error) {
 	return rawValue, nil
 }
 
+// RandomKey returns a random key optionally filtered by prefix.
+// It returns "" and nil when the store is empty or when no keys match.
+func (s *SerializedStore) RandomKey(prefix string) (string, error) {
+	return s.store.RandomKey(prefix)
+}
+
 // Set serializes a value and stores it.
 func (s *SerializedStore) Set(key string, value any) error {
 	// Serialize the value

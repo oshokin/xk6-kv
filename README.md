@@ -125,7 +125,10 @@ While both backends are optimized for performance and suitable for most load tes
   
 - `get(key: string): Promise<any>`
   - Retrieves a value by key. Throws if key doesn't exist.
-  
+
+- `randomKey(options?: RandomKeyOptions): Promise<string>`
+  - Returns a random key, optionally filtered by `{ prefix }`.
+
 - `delete(key: string): Promise<void>`
   - Removes a key-value pair.
 
@@ -140,6 +143,13 @@ While both backends are optimized for performance and suitable for most load tes
   
 - `size(): number`
   - Returns current store size.
+
+### RandomKeyOptions Interface
+```typescript
+interface RandomKeyOptions {
+    prefix?: string;  // Optional prefix filter
+}
+```
 
 ### ListOptions Interface
 ```typescript

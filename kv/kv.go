@@ -84,6 +84,33 @@ func (k *KV) Get(key sobek.Value) *sobek.Promise {
 	return promise
 }
 
+// RandomKey returns a random key from the store, optionally filtered by prefix.
+// Resolves to "" (empty string) when the store is empty or no keys match.
+func (k *KV) RandomKey(options sobek.Value) *sobek.Promise {
+	promise, resolve, reject := promises.New(k.vu)
+
+	opts := ImportRandomKeyOptions(k.vu.Runtime(), options)
+
+	go func() {
+		if k.store == nil {
+			reject(NewError(DatabaseNotOpenError, "database is not open"))
+
+			return
+		}
+
+		key, err := k.store.RandomKey(opts.Prefix)
+		if err != nil {
+			reject(err)
+
+			return
+		}
+
+		resolve(key)
+	}()
+
+	return promise
+}
+
 // Delete deletes a key from the store.
 func (k *KV) Delete(key sobek.Value) *sobek.Promise {
 	promise, resolve, reject := promises.New(k.vu)
@@ -220,6 +247,24 @@ func (k *KV) List(options sobek.Value) *sobek.Promise {
 	}()
 
 	return promise
+}
+
+// RandomKeyOptions allows passing { prefix: string }.
+type RandomKeyOptions struct {
+	Prefix string `json:"prefix"`
+}
+
+// ImportRandomKeyOptions reads { prefix?: string } from JS.
+func ImportRandomKeyOptions(rt *sobek.Runtime, options sobek.Value) RandomKeyOptions {
+	opts := RandomKeyOptions{}
+	if common.IsNullish(options) {
+		return opts
+	}
+
+	obj := options.ToObject(rt)
+	opts.Prefix = obj.Get("prefix").String()
+
+	return opts
 }
 
 // ListEntry is a key-value pair returned by KV.List().

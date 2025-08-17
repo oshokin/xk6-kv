@@ -50,6 +50,66 @@ func TestMemoryStore_Get(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_RandomKey_NoTracking(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore()
+
+	// Empty store
+	k, err := store.RandomKey("")
+	if err != nil {
+		t.Fatalf("RandomKey() on empty store returned an error: %v", err)
+	}
+
+	if k != "" {
+		t.Fatalf("RandomKey() on empty store returned unexpected value, got %q, want \"\"", k)
+	}
+
+	// Seed
+	_ = store.Set("a:1", "v")
+	_ = store.Set("a:2", "v")
+	_ = store.Set("b:1", "v")
+
+	// No prefix
+	seen := map[string]struct{}{}
+	for range 50 {
+		k, err = store.RandomKey("")
+		if err != nil {
+			t.Fatalf("RandomKey() returned an error: %v", err)
+		}
+
+		if k == "" {
+			t.Fatalf("RandomKey() after seeding returned unexpected value, got %q, want non-empty key", k)
+		}
+
+		seen[k] = struct{}{}
+	}
+
+	if len(seen) < 3 {
+		t.Fatalf("RandomKey() over seeded set returned too few distinct keys, got %d, want >= 3 (seen=%v)", len(seen), seen)
+	}
+
+	// Prefix hit
+	k, err = store.RandomKey("a:")
+	if err != nil {
+		t.Fatalf("RandomKey() with prefix %q returned an error: %v", "a:", err)
+	}
+
+	if !strings.HasPrefix(k, "a:") {
+		t.Fatalf("RandomKey() with prefix %q returned unexpected key, got %q, want key with %q prefix", "a:", k, "a:")
+	}
+
+	// Prefix miss
+	k, err = store.RandomKey("z:")
+	if err != nil {
+		t.Fatalf("RandomKey() with prefix %q returned an error: %v", "z:", err)
+	}
+
+	if k != "" {
+		t.Fatalf("RandomKey() with prefix %q returned unexpected key, got %q, want \"\"", "z:", k)
+	}
+}
+
 func TestMemoryStore_Set(t *testing.T) {
 	t.Parallel()
 

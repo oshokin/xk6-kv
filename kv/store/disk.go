@@ -1,7 +1,9 @@
 package store
 
 import (
+	"bytes"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -109,6 +111,56 @@ func (s *DiskStore) Get(key string) (any, error) {
 
 	// Return the raw bytes - serialization will be handled by the SerializedStore wrapper
 	return value, nil
+}
+
+// RandomKey returns a random key, optionally filtered by prefix.
+// Returns "" (and nil) when the store is empty or no keys match.
+func (s *DiskStore) RandomKey(prefix string) (string, error) {
+	// Ensure the store is open
+	if err := s.open(); err != nil {
+		return "", fmt.Errorf("failed to open disk store: %w", err)
+	}
+
+	var result string
+
+	err := s.handle.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(s.bucket)
+		if b == nil {
+			return nil // empty store -> ""
+		}
+
+		var (
+			c     = b.Cursor()
+			count int
+		)
+
+		// Helper: reservoir-sample the current key
+		sample := func(k []byte) {
+			count++
+
+			// Replace current sample with probability 1/count (uniform over all seen matches)
+			if rand.IntN(count) == 0 { //nolint:gosec
+				result = string(k)
+			}
+		}
+
+		if prefix == "" {
+			for k, _ := c.First(); k != nil; k, _ = c.Next() {
+				sample(k)
+			}
+
+			return nil
+		}
+
+		prefixBytes := []byte(prefix)
+		for k, _ := c.Seek(prefixBytes); k != nil && bytes.HasPrefix(k, prefixBytes); k, _ = c.Next() {
+			sample(k)
+		}
+
+		return nil
+	})
+
+	return result, err
 }
 
 // Set sets a value in the disk store.
