@@ -1,6 +1,6 @@
 package kv
 
-// ErrorName represents the name of an error
+// ErrorName represents the name of an error.
 type ErrorName string
 
 const (
@@ -28,9 +28,13 @@ const (
 
 	// ValueTooLargeError is emitted when the value is too large.
 	ValueTooLargeError = "ValueTooLargeError"
+
+	// ValueNumberRequiredError is emitted when a numeric value is required but the provided
+	// argument cannot be coerced to a number.
+	ValueNumberRequiredError = "ValueNumberRequiredError"
 )
 
-// Error represents a custom error emitted by the kv module
+// Error represents a custom error emitted by the kv module.
 type Error struct {
 	// Name contains one of the strings associated with an error name.
 	Name ErrorName `json:"name"`
@@ -47,7 +51,7 @@ func NewError(name ErrorName, message string) *Error {
 	}
 }
 
-// Error implements the `error` interface
+// Error implements the error interface.
 func (e *Error) Error() string {
 	return string(e.Name) + ": " + e.Message
 }

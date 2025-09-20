@@ -31,6 +31,7 @@ func (s *JSONSerializer) Serialize(value any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to serialize value to JSON: %w", err)
 	}
+
 	return data, nil
 }
 
@@ -46,6 +47,7 @@ func (s *JSONSerializer) Deserialize(data []byte) (any, error) {
 	if err = json.Unmarshal(data, &value); err != nil {
 		return nil, fmt.Errorf("unable to deserialize JSON value: %w", err)
 	}
+
 	return value, nil
 }
 
@@ -54,7 +56,7 @@ func (s *JSONSerializer) Deserialize(data []byte) (any, error) {
 type StringSerializer struct{}
 
 // Ensure StringSerializer implements the Serializer interface.
-var _ Serializer = &StringSerializer{}
+var _ Serializer = new(StringSerializer)
 
 // NewStringSerializer creates a new StringSerializer.
 func NewStringSerializer() *StringSerializer {
@@ -68,8 +70,8 @@ func (s *StringSerializer) Serialize(value any) ([]byte, error) {
 		return []byte(str), nil
 	}
 
-	// For other values, try to convert to string
-	return []byte(fmt.Sprintf("%v", value)), nil
+	// For other values, try to convert to string.
+	return fmt.Appendf(nil, "%v", value), nil
 }
 
 // Deserialize converts bytes back to a string.

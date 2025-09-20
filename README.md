@@ -3,8 +3,17 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/oshokin/xk6-kv)](https://goreportcard.com/report/github.com/oshokin/xk6-kv)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-A k6 extension providing a persistent key-value store for sharing state across Virtual Users (VUs) during load testing.
-It supports an in-memory backend and a persistent BoltDB backend, optional key tracking for O(1) random sampling, and prefix-aware randomKey().
+> **Fork Notice**  
+> This project is a fork of [oleiade/xk6-kv](https://github.com/oleiade/xk6-kv), extended with **additional atomic primitives** and **random-key utilities**:
+>
+> - Atomic ops: `incrementBy`, `getOrSet`, `swap`, `compareAndSwap`, `deleteIfExists`, `compareAndDelete`.
+> - Random keys: `randomKey()` with **prefix-aware selection**.
+> - Optional key tracking for **O(1) random sampling** (disk & memory backends).
+>
+> All code is licensed under **GNU AGPL v3.0**.
+
+A k6 extension providing a persistent key-value store to share state across Virtual Users (VUs).\
+It supports both an **in-memory** backend and a **persistent BoltDB** backend, deterministic `list()` ordering, and high-level atomic helpers designed for safe concurrent access in load tests.
 
 ## Table of Contents
 - [Features](#features)
@@ -27,6 +36,10 @@ It supports an in-memory backend and a persistent BoltDB backend, optional key t
 - 🔌 **Easy Integration**: Simple API that works seamlessly with k6
 - 🔄 **Flexible Storage**: Choose between in-memory or disk-based persistence
 - 🪶 **Lightweight**: No external dependencies required
+- 📊 **Atomic Operations**: Support for atomic increment, compare-and-swap, and more
+- 🔍 **Key Tracking**: Optional in-memory indexing for fast random key access
+- 🏷️ **Prefix Support**: Filter operations by key prefixes
+- 📝 **Serialization Options**: JSON or string serialization
 
 ## Why Use xk6-kv?
 
@@ -71,17 +84,17 @@ import { openKv } from "k6/x/kv";
 // Open a key-value store with the default backend (disk)
 const kv = openKv();
 
-// Or specify a backend explicitly
-// const kv = openKv({ backend: "disk" });   // Disk-based persistent backend (default)
-// const kv = openKv({ backend: "memory" }); // In-memory backend
+// Or specify a backend explicitly:
+// const kv = openKv({ backend: "disk" });   // Disk-based persistent backend (default).
+// const kv = openKv({ backend: "memory" }); // In-memory backend.
 
 export async function setup() {
-    // Start with a clean state
+    // Start with a clean state.
     await kv.clear();
 }
 
 export default async function () {
-    // Set a bunch of keys
+    // Set a bunch of keys.
     await kv.set("foo", "bar");
     await kv.set("abc", 123);
     await kv.set("easy as", [1, 2, 3]);
@@ -149,20 +162,38 @@ While both backends are optimized for performance and suitable for most load tes
 - Consider this overhead when analyzing your test results
 - For extremely high throughput requirements, you might need alternative solutions
 
-### KV methods
+### KV Methods
 
-All methods are **Promise-based**.
+All methods are **Promise-based**, except for `close` which is synchronous.
+
+- `get(key: string): Promise<any>`
+  - Retrieves a value by key. Throws if key doesn't exist.
 
 - `set(key: string, value: any): Promise<any>`
   - Sets a key-value pair. 
   - Accepts any JSON-serializable value if serialization="json".
 
-- `get(key: string): Promise<any>`
-  - Retrieves a value by key. Throws if key doesn't exist.
+- `incrementBy(key: string, delta: number): Promise<number>`
+  - Atomically increments the numeric value at `key` by `delta`.
+  - If the key does not exist, it is treated as `0`.
+  - Returns the new value.
 
-- `randomKey(options?: RandomKeyOptions): Promise<string>`
-  - Returns a random key, optionally filtered by prefix. 
-  - Resolves to "" (empty string) when no key matches (including empty storage).
+- `getOrSet(key: string, value: any): Promise<{ value: any, loaded: boolean }>`
+  - Atomically gets the existing value if the key exists, or sets it to `value` if it doesn't.
+  - Returns an object: `{ value: any, loaded: boolean }`.
+    - `loaded: true` means the value was pre-existing.
+    - `loaded: false` means the value was just set.
+
+- `swap(key: string, value: any): Promise<{ previous: any|null, loaded: boolean }>`
+  - Atomically replaces the value at `key` with `value`.
+  - Returns an object: `{ previous: any|null, loaded: boolean }`.
+    - `loaded: true` means the key existed and `previous` contains its old value.
+    - `loaded: false` means the key was created and `previous` is `null`.
+
+- `compareAndSwap(key: string, oldValue: any, newValue: any): Promise<boolean>`
+  - Atomically sets the value at `key` to `newValue` only if its current value equals `oldValue`.
+  - Returns `true` if the swap was successful, `false` otherwise.
+  - This is the fundamental building block for implementing locks and other synchronization primitives.
 
 - `delete(key: string): Promise<boolean>`
   - Removes a key-value pair.
@@ -171,9 +202,15 @@ All methods are **Promise-based**.
 - `exists(key: string): Promise<boolean>`
   - Checks if a given key exists.
 
-- `list(options?: ListOptions): Promise<Array<{ key: string; value: any }>>`
-  - Returns key–value entries sorted lexicographically by key. 
-  - If limit <= 0 or omitted, there is no limit.
+- `deleteIfExists(key: string): Promise<boolean>`
+  - Deletes the key if it exists.
+  - Returns `true` if the key was deleted, `false` if it did not exist.
+  - More informative than `delete`, which always returns `true`.
+
+- `compareAndDelete(key: string, oldValue: any): Promise<boolean>`
+  - Atomically deletes the key only if its current value equals `oldValue`.
+  - Returns `true` if the key was deleted, `false` otherwise.
+  - Useful for "delete only if not processed" scenarios.
 
 - `clear(): Promise<void>`
   - Removes all entries.
@@ -182,12 +219,28 @@ All methods are **Promise-based**.
 - `size(): Promise<number>`
   - Returns current store size.
 
+- `list(options?: ListOptions): Promise<Array<{ key: string; value: any }>>`
+  - Returns key-value entries sorted lexicographically by key. 
+  - If limit <= 0 or omitted, there is no limit.
+
+- `randomKey(options?: RandomKeyOptions): Promise<string>`
+  - Returns a random key, optionally filtered by prefix. 
+  - Resolves to "" (empty string) when no key matches (including empty storage).
+
 - `rebuildKeyList(): Promise<boolean>`
-  - Rebuilds in-memory key indexes from the underlying store if supported. 
+  - Rebuilds in-memory key indexes from the underlying store if supported.
   - Resolves to true when finished (no-op + true when trackKeys is disabled).
   - The operation is **O(n)** over keys, so prefer running it in `setup()` or infrequently between stages - not every iteration.
-  - On the **memory** backend it’s typically unnecessary unless you manually corrupted/replaced the in-memory structures.
+  - On the **memory** backend it's typically unnecessary unless you manually corrupted/replaced the in-memory structures.
   - On the **disk** backend with `trackKeys: true`, the index is **automatically rebuilt at startup**. Call `rebuildKeyList()` manually only when the DB is mutated **out-of-band during the run** or if you need to **recover without reopening the store**.
+
+- `close(): void`
+  - **Synchronously** closes the underlying store and releases any associated resources (e.g., file handles for the disk backend).
+  - This method should be called in the `teardown()` function or when you are certain no further operations will be performed on the KV instance.
+  - It does not return a Promise because the caller usually needs to know the outcome immediately.
+  - On the **disk** backend it releases the BoltDB file handle and in-memory indexes. Safe to call multiple times. Recommended to call once in `teardown()`.
+  - On the **memory** backend it's a no-op (safe to call, does nothing).
+  - If multiple `KV` instances share the same store, the underlying store closes only when the last `close()` is called (reference-counted).
 
 ### Types
 
@@ -234,15 +287,40 @@ await kv.set("prefix:2", "Y");
 console.log(await kv.list());                       // all entries (sorted)
 console.log(await kv.list({ prefix: "prefix:" }));  // only "prefix:*"
 console.log(await kv.list({ limit: 1 }));           // first entry
-    
+
 console.log(await kv.randomKey());                       // random key or ""
 console.log(await kv.randomKey({ prefix: "prefix:" }));  // random "prefix:*" or ""
 
+console.log(await kv.incrementBy("counter", 5));  // 5
+console.log(await kv.incrementBy("counter", -2)); // 3
+
+const { value, loaded } = await kv.getOrSet("app_config", { theme: "dark" });
+console.log(`config: ${JSON.stringify(value)}, loaded: ${loaded}`);
+
+const { previous, loaded: swapped } = await kv.swap("status", "running");
+console.log(`previous status: ${previous}, swapped: ${swapped}`);
+
+const casSuccess = await kv.compareAndSwap("version", 1, 2);
+console.log(`CAS success: ${casSuccess}`);
+
+const deleted = await kv.deleteIfExists("temp_file");
+console.log(`temporary file deleted: ${deleted}`);
+
+const cndSuccess = await kv.compareAndDelete("job", "failed");
+console.log(`conditional delete success: ${cndSuccess}`);
+
 await kv.delete("a");
-await kv.clear();  // wipe all
+
+// Wipe all.
+await kv.clear();
+
+// Remember to close the store when done, typically in teardown().
+kv.close();
 ```
 
 ## Usage Examples
+
+You can find complete, runnable examples in the [`examples/`](./examples) directory of this repository.
 
 ### Producer / Consumer
 
@@ -293,14 +371,14 @@ export async function producer() {
   await kv.set(`token-${latestProducerID}`, "token-value");
   await kv.set(`latest-producer-id`, latestProducerID + 1);
 
-  // Let's simulate a delay between producing tokens
+  // Let's simulate a delay between producing tokens.
   sleep(1);
 }
 
 export async function consumer() {
   console.log("[consumer]<- waiting for next token");
 
-  // Let's list the existing tokens, and consume the first we find
+  // Let's list the existing tokens, and consume the first we find.
   const entries = await kv.list({ prefix: "token-" });
   if (entries.length > 0) {
     await kv.get(entries[0].key);
@@ -310,14 +388,14 @@ export async function consumer() {
     console.log("[consumer]<- no tokens available");
   }
 
-  // Let's simulate a delay between consuming tokens
+  // Let's simulate a delay between consuming tokens.
   sleep(1);
 }
 
 export async function randomConsumer() {
   console.log("[randomConsumer]<- attempting random token retrieval");
 
-  // Pick a random key (O(1) when in-memory keys are tracked)
+  // Pick a random key (O(1) when in-memory keys are tracked).
   const key = await kv.randomKey({ prefix: "token-" });
   if (!key) {
     console.log("[randomConsumer]<- no tokens available");
@@ -327,8 +405,13 @@ export async function randomConsumer() {
     await kv.delete(key);
   }
 
-  // Let's simulate a delay between consuming tokens
+  // Let's simulate a delay between consuming tokens.
   sleep(1);
+}
+
+// It's good practice to close the store in teardown.
+export async function teardown() {
+  kv.close();
 }
 ```
 
@@ -353,6 +436,11 @@ export default async function () {
     console.log(`Random user ${k}: ${JSON.stringify(user)}`);
   }
 }
+
+// It's good practice to close the store in teardown.
+export async function teardown() {
+  kv.close();
+}
 ```
 
 ### Rebuild The Key Index
@@ -369,6 +457,11 @@ export default async function () {
   const ok = await kv.rebuildKeyList(); // true when finished
   const key = await kv.randomKey();     // "" if storage empty
   if (key) console.log(`random = ${key}`);
+}
+
+// It's good practice to close the store in teardown.
+export async function teardown() {
+  kv.close();
 }
 ```
 

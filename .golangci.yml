@@ -65,6 +65,8 @@ linters-settings:
       # Forbid everything in syscall except the uppercase constants
       - '^syscall\.[^A-Z_]+$(# Using anything except constants from the syscall package is forbidden )?'
       - '^logrus\.Logger$'
+  interfacebloat:
+    max: 20
 
 linters:
   disable-all: true
@@ -94,6 +96,7 @@ linters:
     - gocognit
     - goconst
     - gocritic
+    - godot
     - gofmt
     - gofumpt
     - goimports
