@@ -133,6 +133,7 @@ func TestDiskStore_ConcurrentOpen_IncrementsRefCount(t *testing.T) {
 			defer wg.Done()
 
 			<-startBarrier
+
 			if err := store.Set(fmt.Sprintf("key-%d", callerIndex), "value"); err != nil {
 				errorCh <- err
 			}
@@ -193,6 +194,7 @@ func TestDiskStore_OpenClose_InterleavedRace(t *testing.T) {
 
 				// Small jitter to diversify interleavings.
 				time.Sleep(time.Microsecond)
+
 				if err := store.Close(); err != nil {
 					errorCh <- fmt.Errorf("close failed: %w", err)
 					return
@@ -235,6 +237,7 @@ func TestDiskStore_ReopenAfterFullyClosed_OnDemand(t *testing.T) {
 		}
 
 		require.NoError(t, store.Close(), "Close must succeed")
+
 		if store.refCount.Load() == 0 {
 			break
 		}
@@ -266,6 +269,7 @@ func TestDiskStore_GetSet_RoundtripAndTypes(t *testing.T) {
 	require.NoError(t, store.Set("string-key", "string-value"))
 	gotAny, err := store.Get("string-key")
 	require.NoError(t, err)
+
 	gotBytes, ok := gotAny.([]byte)
 	require.Truef(t, ok, "expected []byte, got %T", gotAny)
 	assert.Equal(t, []byte("string-value"), gotBytes)
@@ -275,6 +279,7 @@ func TestDiskStore_GetSet_RoundtripAndTypes(t *testing.T) {
 	require.NoError(t, store.Set("byte-key", byteValue))
 	gotAny, err = store.Get("byte-key")
 	require.NoError(t, err)
+
 	gotBytes, ok = gotAny.([]byte)
 	require.True(t, ok, "expected []byte from Get")
 	assert.Equal(t, byteValue, gotBytes)
@@ -500,6 +505,7 @@ func TestDiskStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 	close(okCh)
 
 	var successCount int
+
 	for ok := range okCh {
 		if ok {
 			successCount++
@@ -602,6 +608,7 @@ func TestDiskStore_DeleteIfExists_ConcurrentSingleWinner(t *testing.T) {
 	wg.Wait()
 
 	assert.Equal(t, 1, wins, "exactly one deletion must succeed")
+
 	exists, _ := store.Exists("k")
 	assert.False(t, exists, "key must be removed")
 }
@@ -794,6 +801,7 @@ func TestDiskStore_KeyTrackingConsistency(t *testing.T) {
 	store.keysLock.RLock()
 
 	assert.Len(t, store.keysList, 3)
+
 	for _, key := range keys {
 		_, exists := store.keysMap[key]
 		assert.Truef(t, exists, "key missing from index: %s", key)
@@ -863,9 +871,11 @@ func TestDiskStore_RandomKey_WithTracking(t *testing.T) {
 	}
 
 	found := make(map[string]bool)
+
 	for range 50 {
 		key, err := store.RandomKey("")
 		require.NoError(t, err)
+
 		found[key] = true
 	}
 
@@ -1058,4 +1068,58 @@ func TestDiskStore_Close_RefCount(t *testing.T) {
 	require.NoError(t, store.Close())
 	assert.EqualValues(t, 0, store.refCount.Load(), "after second Close, refCount must be 0")
 	assert.False(t, store.opened.Load(), "store must be closed")
+}
+
+// TestDiskStore_GetOrSet_Delete_Interleave_NoPanic exercises a hot concurrency
+// path that previously exposed a "slice bounds out of range [:-1]" panic in
+// key-tracking code (when removing from an empty slice). While the panic was
+// observed on the memory backend originally, we also keep an equivalent test
+// for the disk backend to ensure uniform safety across implementations.
+// The success criterion is simple: the test must complete without ANY panic.
+func TestDiskStore_GetOrSet_Delete_Interleave_NoPanic(t *testing.T) {
+	t.Parallel()
+
+	const (
+		testKey         = "order-new"
+		iterationsCount = 5_000
+		keysCount       = 100
+	)
+
+	var (
+		store     = newTestDiskStore(t, true)
+		testValue = []byte("processed")
+	)
+
+	// Seed a realistic number of keys so the store is not empty and
+	// the index structures (if any) are exercised further than the trivial case.
+	for i := range keysCount {
+		require.NoError(t, store.Set(fmt.Sprintf("order-%d", i), testValue))
+	}
+
+	// Interleave GetOrSet and Delete in parallel - used to trigger [: -1].
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+
+	// Writer/creator: repeatedly tries to insert-or-read the same key.
+	go func() {
+		defer wg.Done()
+
+		for range iterationsCount {
+			_, _, _ = store.GetOrSet(testKey, testValue)
+		}
+	}()
+
+	// Remover: repeatedly deletes the same key, racing with the writer above.
+	go func() {
+		defer wg.Done()
+
+		for range iterationsCount {
+			_ = store.Delete(testKey)
+		}
+	}()
+
+	// If the implementation mishandles swap-delete or slice bounds on empty lists,
+	// a panic would bubble up and fail this test.
+	wg.Wait()
 }

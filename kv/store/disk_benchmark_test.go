@@ -80,6 +80,7 @@ func BenchmarkDiskStore_Set(b *testing.B) {
 			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-set-*.db")
 
 			b.ResetTimer()
+
 			for i := range b.N {
 				keyString := fmt.Sprintf("key-%d", i)
 
@@ -98,6 +99,7 @@ func BenchmarkDiskStore_IncrementBy(b *testing.B) {
 			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-incr-*.db")
 
 			b.ResetTimer()
+
 			for range b.N {
 				_, _ = store.IncrementBy("ctr", 1)
 			}
@@ -114,6 +116,7 @@ func BenchmarkDiskStore_GetOrSet(b *testing.B) {
 			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-gos-*.db")
 
 			b.ResetTimer()
+
 			for i := range b.N {
 				valueString := "v" + strconv.Itoa(i)
 
@@ -133,6 +136,7 @@ func BenchmarkDiskStore_Swap(b *testing.B) {
 			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-swap-*.db")
 
 			b.ResetTimer()
+
 			for i := range b.N {
 				_, _, _ = store.Swap("swap-k", strconv.Itoa(i))
 			}
@@ -150,6 +154,7 @@ func BenchmarkDiskStore_CompareAndSwap(b *testing.B) {
 			require.NoError(b, store.Set("k", "0"))
 
 			b.ResetTimer()
+
 			for range b.N {
 				_, _ = store.CompareAndSwap("k", "0", "1")
 			}
@@ -184,6 +189,7 @@ func BenchmarkDiskStore_RandomKey(b *testing.B) {
 			b.ReportAllocs()
 
 			const genericKeys = 10_000
+
 			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-rand-*.db")
 
 			b.StopTimer()
@@ -210,6 +216,7 @@ func BenchmarkDiskStore_RandomKey_WithPrefix(b *testing.B) {
 			b.StopTimer()
 
 			seedDiskStore(b, store, 10_000, "key-")
+
 			for index := range 2_000 {
 				require.NoError(b, store.Set(fmt.Sprintf("pfx-%d", index), "value"))
 			}
@@ -287,6 +294,7 @@ func BenchmarkDiskStore_DeleteIfExists(b *testing.B) {
 			require.NoError(b, store.Set("k", "v"))
 
 			b.ResetTimer()
+
 			for range b.N {
 				_, _ = store.DeleteIfExists("k")
 
@@ -309,6 +317,7 @@ func BenchmarkDiskStore_CompareAndDelete(b *testing.B) {
 			require.NoError(b, store.Set("k", "v"))
 
 			b.ResetTimer()
+
 			for range b.N {
 				_, _ = store.CompareAndDelete("k", "v")
 
@@ -342,6 +351,7 @@ func BenchmarkDiskStore_List(b *testing.B) {
 				b.ReportAllocs()
 
 				b.ResetTimer()
+
 				for range b.N {
 					_, _ = store.List("", 0)
 				}
@@ -351,6 +361,7 @@ func BenchmarkDiskStore_List(b *testing.B) {
 				b.ReportAllocs()
 
 				b.ResetTimer()
+
 				for range b.N {
 					_, _ = store.List("prefix", 0)
 				}
@@ -360,6 +371,7 @@ func BenchmarkDiskStore_List(b *testing.B) {
 				b.ReportAllocs()
 
 				b.ResetTimer()
+
 				for range b.N {
 					_, _ = store.List("", 10)
 				}
@@ -369,6 +381,7 @@ func BenchmarkDiskStore_List(b *testing.B) {
 				b.ReportAllocs()
 
 				b.ResetTimer()
+
 				for range b.N {
 					_, _ = store.List("prefix", 10)
 				}

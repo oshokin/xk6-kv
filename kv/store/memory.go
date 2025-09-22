@@ -88,6 +88,7 @@ func (s *MemoryStore) Set(key string, value any) error {
 	if !existed {
 		s.addKeyLocked(key)
 	}
+
 	return nil
 }
 
@@ -101,6 +102,7 @@ func (s *MemoryStore) IncrementBy(key string, delta int64) (int64, error) {
 
 	// Parse current value or start from 0.
 	var current int64
+
 	if b, exists := s.container[key]; exists && len(b) > 0 {
 		// Parse current as base-10 int64.
 		v, err := strconv.ParseInt(string(b), 10, 64)
@@ -238,6 +240,7 @@ func (s *MemoryStore) Exists(key string) (bool, error) {
 	defer s.mu.RUnlock()
 
 	_, ok := s.container[key]
+
 	return ok, nil
 }
 
@@ -322,6 +325,7 @@ func (s *MemoryStore) List(prefix string, limit int64) ([]Entry, error) {
 
 	// Collect matching keys (full scan)
 	keys := make([]string, 0, len(s.container))
+
 	for k := range s.container {
 		if prefix != "" && !strings.HasPrefix(k, prefix) {
 			continue
@@ -470,9 +474,21 @@ func (s *MemoryStore) removeKeyLocked(k string) {
 		return
 	}
 
+	// If the slice is empty or idx is stale, drop the stale map entry
+	// and clean up the OST; do not attempt to slice [: -1].
+	if len(s.keysList) == 0 || idx < 0 || idx >= len(s.keysList) {
+		delete(s.keysMap, k)
+
+		if s.ost != nil {
+			s.ost.Delete(k)
+		}
+
+		return
+	}
+
 	last := len(s.keysList) - 1
 
-	// Move last element to idx to preserve contiguity (O(1) delete).
+	// O(1) swap-delete to keep keysList contiguous.
 	if idx != last {
 		moved := s.keysList[last]
 
@@ -480,6 +496,7 @@ func (s *MemoryStore) removeKeyLocked(k string) {
 		s.keysMap[moved] = idx
 	}
 
+	// Now drop the tail.
 	s.keysList = s.keysList[:last]
 	delete(s.keysMap, k)
 
@@ -513,6 +530,7 @@ func (s *MemoryStore) randomKeyTracked(prefix string) string {
 	}
 
 	position := l + rand.IntN(r-l) //nolint:gosec
+
 	k, ok := s.ost.Kth(position)
 	if !ok {
 		// Defensive: should not happen if l/r came from RangeBounds.
@@ -530,6 +548,7 @@ func (s *MemoryStore) randomKeyTracked(prefix string) string {
 func (s *MemoryStore) randomKeyScan(prefix string) string {
 	// First pass: count matches.
 	matchCount := 0
+
 	for k := range s.container {
 		if prefix != "" && !strings.HasPrefix(k, prefix) {
 			continue
@@ -544,6 +563,7 @@ func (s *MemoryStore) randomKeyScan(prefix string) string {
 
 	// Second pass: pick the target-th match.
 	target := rand.IntN(matchCount) //nolint:gosec
+
 	for k := range s.container {
 		if prefix != "" && !strings.HasPrefix(k, prefix) {
 			continue

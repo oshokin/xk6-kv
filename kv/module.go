@@ -105,6 +105,7 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 	if mi.rm.store == nil {
 		// Create the base store based on the backend option.
 		var baseStore store.Store
+
 		switch options.Backend {
 		case BackendMemory:
 			baseStore = store.NewMemoryStore(options.TrackKeys)
@@ -114,6 +115,7 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 
 		// Create the serializer based on the serialization option.
 		var serializer store.Serializer
+
 		switch options.Serialization {
 		case SerializationJSON:
 			serializer = store.NewJSONSerializer()

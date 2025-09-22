@@ -25,6 +25,7 @@ func BenchmarkOSTree_Insert(b *testing.B) {
 			for _, key := range benchmarkKeys {
 				totalKeyBytes += len(key)
 			}
+
 			b.SetBytes(int64(totalKeyBytes))
 			b.ReportAllocs()
 			b.ResetTimer()

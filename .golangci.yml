@@ -137,4 +137,5 @@ linters:
     - usestdlibvars
     - wastedassign
     - whitespace
+    - wsl
   fast: false

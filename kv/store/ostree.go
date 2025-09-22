@@ -165,6 +165,7 @@ func kth(n *ostNode, k int) (string, bool) {
 	}
 
 	leftSize := nodeSize(n.left)
+
 	switch {
 	case k < leftSize: // Target is in left subtree
 		return kth(n.left, k)

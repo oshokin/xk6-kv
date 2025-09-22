@@ -213,6 +213,7 @@ func (s *SerializedStore) deserializeValue(raw any) (any, error) {
 // by List, preserving keys and converting values as needed.
 func (s *SerializedStore) deserializeEntries(rawEntries []Entry) ([]Entry, error) {
 	entries := make([]Entry, len(rawEntries))
+
 	for i, e := range rawEntries {
 		val, err := s.deserializeValue(e.Value)
 		if err != nil {

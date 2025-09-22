@@ -36,6 +36,7 @@ func TestOSTree_InsertRankSelect(t *testing.T) {
 
 	// Verify Kth enumerates in-order and gather results to assert the entire sequence.
 	collectedKeysInOrder := make([]string, 0, len(sortedUniqueKeys))
+
 	for index := range sortedUniqueKeys {
 		keyAtIndex, ok := tree.Kth(index)
 
@@ -87,6 +88,7 @@ func TestOSTree_RangeBounds(t *testing.T) {
 
 		// Build the expected subset (all sorted keys with the prefix).
 		expectedKeysWithPrefix := make([]string, 0, len(keysInserted))
+
 		for _, key := range keysInserted {
 			if !strings.HasPrefix(key, prefixUnderTest) {
 				continue
@@ -167,6 +169,7 @@ func getUniqueValues[T comparable](inputSlice []T) []T {
 		}
 
 		seenSet[value] = struct{}{}
+
 		unique = append(unique, value)
 	}
 
@@ -183,6 +186,7 @@ func removeAll[T comparable](source []T, toDelete ...T) []T {
 	}
 
 	result := make([]T, 0, len(source))
+
 	for _, value := range source {
 		if _, shouldRemove := deleteSet[value]; shouldRemove {
 			continue

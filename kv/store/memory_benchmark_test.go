@@ -54,6 +54,7 @@ func BenchmarkMemoryStore_Set(b *testing.B) {
 			store := NewMemoryStore(trackKeys)
 
 			b.ResetTimer()
+
 			for i := range b.N {
 				keyString := fmt.Sprintf("key-%d", i)
 				_ = store.Set(keyString, "value")
@@ -68,9 +69,11 @@ func BenchmarkMemoryStore_IncrementBy(b *testing.B) {
 	for _, trackKeys := range []bool{true, false} {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
+
 			store := NewMemoryStore(trackKeys)
 
 			b.ResetTimer()
+
 			for range b.N {
 				_, _ = store.IncrementBy("ctr", 1)
 			}
@@ -84,9 +87,11 @@ func BenchmarkMemoryStore_GetOrSet(b *testing.B) {
 	for _, trackKeys := range []bool{true, false} {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
+
 			store := NewMemoryStore(trackKeys)
 
 			b.ResetTimer()
+
 			for i := range b.N {
 				valueString := "v" + strconv.Itoa(i)
 
@@ -102,9 +107,11 @@ func BenchmarkMemoryStore_Swap(b *testing.B) {
 	for _, trackKeys := range []bool{true, false} {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
+
 			store := NewMemoryStore(trackKeys)
 
 			b.ResetTimer()
+
 			for i := range b.N {
 				_, _, _ = store.Swap("k", strconv.Itoa(i))
 			}
@@ -123,6 +130,7 @@ func BenchmarkMemoryStore_CompareAndSwap(b *testing.B) {
 			require.NoError(b, store.Set("k", "0"))
 
 			b.ResetTimer()
+
 			for range b.N {
 				_, _ = store.CompareAndSwap("k", "0", "1")
 			}
@@ -181,6 +189,7 @@ func BenchmarkMemoryStore_RandomKey_WithPrefix(b *testing.B) {
 			b.StopTimer()
 
 			seedMemoryStore(b, store, 10_000, "key-")
+
 			for index := range 2_000 {
 				require.NoError(b, store.Set(fmt.Sprintf("pfx-%d", index), "value"))
 			}
@@ -214,6 +223,7 @@ func BenchmarkMemoryStore_Delete(b *testing.B) {
 				// Re-seed the deleted key for the next iteration (excluded from timing).
 				if i < b.N-1 {
 					b.StopTimer()
+
 					valueString := fmt.Sprintf("value-%d", i%totalSize)
 					require.NoError(b, store.Set(keyString, valueString))
 
@@ -259,6 +269,7 @@ func BenchmarkMemoryStore_DeleteIfExists(b *testing.B) {
 			require.NoError(b, store.Set("k", "v"))
 
 			b.ResetTimer()
+
 			for range b.N {
 				_, _ = store.DeleteIfExists("k")
 
@@ -284,6 +295,7 @@ func BenchmarkMemoryStore_CompareAndDelete(b *testing.B) {
 			require.NoError(b, store.Set("k", "v"))
 
 			b.ResetTimer()
+
 			for range b.N {
 				_, _ = store.CompareAndDelete("k", "v")
 
@@ -325,6 +337,7 @@ func BenchmarkMemoryStore_List(b *testing.B) {
 				b.ReportAllocs()
 
 				b.ResetTimer()
+
 				for range b.N {
 					_, _ = store.List("prefix", 0)
 				}
@@ -334,6 +347,7 @@ func BenchmarkMemoryStore_List(b *testing.B) {
 				b.ReportAllocs()
 
 				b.ResetTimer()
+
 				for range b.N {
 					_, _ = store.List("", 10)
 				}
@@ -343,6 +357,7 @@ func BenchmarkMemoryStore_List(b *testing.B) {
 				b.ReportAllocs()
 
 				b.ResetTimer()
+
 				for range b.N {
 					_, _ = store.List("prefix", 10)
 				}

@@ -193,6 +193,7 @@ func (s *DiskStore) Set(key string, value any) error {
 	}
 
 	var existed bool
+
 	if s.trackKeys {
 		// Lightweight existence check to decide whether to update indexes later.
 		s.keysLock.RLock()
@@ -249,8 +250,10 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 
 		// Parse current value or start from 0.
 		var currentInt int64
+
 		if current != nil {
 			var err error
+
 			currentInt, err = strconv.ParseInt(string(current), 10, 64)
 			if err != nil {
 				return fmt.Errorf("value at %q is not a valid integer: %w", key, err)
@@ -262,6 +265,7 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 		// Calculate new value.
 		currentInt += delta
 		newVal = currentInt
+
 		return bucket.Put([]byte(key), []byte(strconv.FormatInt(currentInt, 10)))
 	})
 	if err != nil {
@@ -306,6 +310,7 @@ func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, er
 		// Check if key exists.
 		if got := bucket.Get([]byte(key)); got != nil {
 			exists = true
+
 			result = append([]byte(nil), got...)
 
 			return nil
@@ -359,6 +364,7 @@ func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err 
 		// Get previous value (copy for safety).
 		if current := bucket.Get([]byte(key)); current != nil {
 			existed = true
+
 			prev = append([]byte(nil), current...)
 		}
 
@@ -403,6 +409,7 @@ func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool
 	}
 
 	var swapped bool
+
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
@@ -481,6 +488,7 @@ func (s *DiskStore) Exists(key string) (bool, error) {
 	}
 
 	var exists bool
+
 	err := s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
@@ -488,6 +496,7 @@ func (s *DiskStore) Exists(key string) (bool, error) {
 		}
 
 		exists = bucket.Get([]byte(key)) != nil
+
 		return nil
 	})
 	if err != nil {
@@ -616,6 +625,7 @@ func (s *DiskStore) Clear() error {
 		if err != nil {
 			return fmt.Errorf("failed to create bucket %s: %w", s.bucket, err)
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -628,6 +638,7 @@ func (s *DiskStore) Clear() error {
 
 		s.keysList = []string{}
 		s.keysMap = make(map[string]int)
+
 		if s.ost != nil {
 			s.ost = NewOSTree()
 		}

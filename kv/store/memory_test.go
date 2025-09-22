@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +41,7 @@ func TestMemoryStore_GetSet_RoundtripAndTypes(t *testing.T) {
 	require.NoError(t, store.Set("string-key", "string-value"))
 	gotAny, err := store.Get("string-key")
 	require.NoError(t, err)
+
 	gotBytes, ok := gotAny.([]byte)
 	require.Truef(t, ok, "expected []byte, got %T", gotAny)
 	assert.Equal(t, []byte("string-value"), gotBytes)
@@ -49,6 +51,7 @@ func TestMemoryStore_GetSet_RoundtripAndTypes(t *testing.T) {
 	require.NoError(t, store.Set("byte-key", byteValue))
 	gotAny, err = store.Get("byte-key")
 	require.NoError(t, err)
+
 	gotBytes, ok = gotAny.([]byte)
 	require.True(t, ok, "expected []byte from Get")
 	assert.Equal(t, byteValue, gotBytes)
@@ -213,6 +216,7 @@ func TestMemoryStore_GetOrSet_Concurrent(t *testing.T) {
 
 	for result := range resultsCh {
 		require.NoError(t, result.err)
+
 		if !result.loaded {
 			firstWriterCount++
 			firstValue = string(result.actualBytes)
@@ -299,6 +303,7 @@ func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 	close(okCh)
 
 	var successCount int
+
 	for ok := range okCh {
 		if ok {
 			successCount++
@@ -593,6 +598,7 @@ func TestMemoryStore_KeyTrackingConsistency(t *testing.T) {
 	store.mu.RLock()
 
 	assert.Len(t, store.keysList, 3)
+
 	for _, key := range keys {
 		_, exists := store.keysMap[key]
 		assert.Truef(t, exists, "key missing from index: %s", key)
@@ -634,6 +640,7 @@ func TestMemoryStore_RandomKey_Distribution_WithTracking(t *testing.T) {
 	}
 
 	found := make(map[string]bool)
+
 	for range 1000 {
 		k, err := store.RandomKey("")
 		require.NoError(t, err)
@@ -760,4 +767,52 @@ func mustClearMemoryStore(t *testing.T, store *MemoryStore) {
 	t.Helper()
 
 	require.NoError(t, store.Clear(), "Clear() must succeed")
+}
+
+func TestMemory_GetOrSet_Delete_Interleave_NoPanic(t *testing.T) {
+	t.Parallel()
+
+	const (
+		testKey         = "order-new"
+		iterationsCount = 5_000
+		keysCount       = 100
+	)
+
+	var (
+		store     = NewMemoryStore(true)
+		testValue = []byte("processed")
+	)
+
+	// Seed a realistic number of keys so the store is not empty and
+	// the index structures (if any) are exercised further than the trivial case.
+	for i := range keysCount {
+		require.NoError(t, store.Set(fmt.Sprintf("order-%d", i), testValue))
+	}
+
+	// Interleave GetOrSet and Delete in parallel - used to trigger [: -1].
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+
+	// Writer/creator: repeatedly tries to insert-or-read the same key.
+	go func() {
+		defer wg.Done()
+
+		for range iterationsCount {
+			_, _, _ = store.GetOrSet(testKey, testValue)
+		}
+	}()
+
+	// Remover: repeatedly deletes the same key, racing with the writer above.
+	go func() {
+		defer wg.Done()
+
+		for range iterationsCount {
+			_ = store.Delete(testKey)
+		}
+	}()
+
+	// If the implementation mishandles swap-delete or slice bounds on empty lists,
+	// a panic would bubble up and fail this test.
+	wg.Wait()
 }
