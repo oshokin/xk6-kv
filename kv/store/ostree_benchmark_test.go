@@ -188,7 +188,7 @@ func BenchmarkOSTree_RangeBounds(b *testing.B) {
 
 // makeBenchmarkTestKeys returns a deterministic slice of keys with clustered prefixes
 // to exercise prefix-sensitive operations (RangeBounds) and varying ranks.
-// Pattern: a:, ab:, user:, z: — evenly distributed across the input size.
+// Pattern: a:, ab:, user:, z: - evenly distributed across the input size.
 func makeBenchmarkTestKeys(totalKeyCount int) []string {
 	benchmarkKeys := make([]string, totalKeyCount)
 

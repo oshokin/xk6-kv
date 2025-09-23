@@ -23,7 +23,7 @@ import (
 //
 //   - All blocking store work occurs in a goroutine (off the VU event loop).
 //   - For converting Go results to JavaScript values, we use k.vu.Runtime().ToValue(...)
-//     in the same goroutine, matching the original upstream plugin’s pattern that
+//     in the same goroutine, matching the original upstream plugin's pattern that
 //     is known to work with this version of Sobek/k6.
 //
 // This avoids corrupting Sobek's internal VM state and prevents panics like
@@ -55,7 +55,7 @@ func NewKV(vu modules.VU, s store.Store) *KV {
 }
 
 // Small result helpers we convert to JS on the event loop (via ToValue).
-// These structs map cleanly to JS objects through Sobek’s ToValue encoder.
+// These structs map cleanly to JS objects through Sobek's ToValue encoder.
 type getOrSetResult struct {
 	Value  any  `json:"value"`
 	Loaded bool `json:"loaded"`
@@ -492,9 +492,9 @@ func (k *KV) runAsyncWithStore(
 	return promise
 }
 
-// exportToInt64 converts a Sobek value (we are on the caller’s thread here) into int64
+// exportToInt64 converts a Sobek value (we are on the caller's thread here) into int64
 // WITHOUT using rt.ExportTo in worker goroutines. This accepts a few numeric shapes commonly
-// produced by JS → Go marshaling.
+// produced by JS -> Go marshaling.
 func exportToInt64(v sobek.Value) (int64, error) {
 	switch x := v.Export().(type) {
 	case int64:

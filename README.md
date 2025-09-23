@@ -28,6 +28,7 @@ It supports both an **in-memory** backend and a **persistent BoltDB** backend, d
   - [Producer / Consumer](#producer--consumer)
   - [Random Key With Prefix](#random-key-with-prefix)
   - [Rebuild The Key Index](#rebuild-the-key-index)
+- [Using the Taskfile](#using-the-taskfile)
 - [Contributing](#contributing)
 
 ## Features
@@ -463,6 +464,147 @@ export default async function () {
 export async function teardown() {
   kv.close();
 }
+```
+
+## Using the Taskfile
+
+This repo ships with a [Taskfile](https://taskfile.dev) that automates formatting, linting, building a custom **k6** with this extension, and running end-to-end scenarios against both backends.
+
+### Install Task (once)
+
+**Linux/macOS**
+
+```bash
+# Homebrew (macOS / Linuxbrew)
+brew install go-task/tap/go-task
+
+# Or curl (installs to /usr/local/bin by default)
+sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+```
+
+**Windows (PowerShell)**
+
+```powershell
+# Scoop
+scoop install task
+
+# Or download releases from https://github.com/go-task/task/releases
+```
+
+> You also need a working Go toolchain (1.23+ recommended) in your PATH.
+
+### Discover available tasks
+
+```bash
+task
+```
+
+You should see targets like `install:*`, `fmt`, `lint`, `build:k6`, and `test:e2e:*`.
+
+### Local tool bootstrap (installs into `./bin/`)
+
+All tools install into the repo-local `./bin/` (ignored by git), so your global environment stays clean.
+
+```bash
+# Install everything (gofumpt, golangci-lint, xk6)
+task install:tools
+
+# Or install just one:
+task install:gofumpt
+task install:golangci
+task install:xk6
+```
+
+### Format and lint
+
+```bash
+# Format the codebase with gofumpt
+task fmt
+
+# Lint and auto-fix what can be auto-fixed
+task lint:fix
+
+# Lint without fixing
+task lint
+```
+
+### Build k6 with this extension
+
+Builds a **k6** binary into `./bin/k6` using your fork of **xk6-kv**.
+
+```bash
+# Build with the default ref (KV_FORK_REF=latest)
+task build:k6
+
+# Build with a specific tag/branch/commit of your fork
+task build:k6 KV_FORK_REF=v1.3.3
+task build:k6 KV_FORK_REF=main
+task build:k6 KV_FORK_REF=commit-sha
+```
+
+### Run the end-to-end scenario
+
+By default, tasks run the script at `e2e/get-or-set.js`. You can point to a different JS with `E2E_JS`.
+
+**Memory backend**
+
+```bash
+# No key tracking (prefix randomKey uses a two-pass scan)
+task test:e2e:memory:no-track
+
+# With key tracking (O(1) randomKey for no-prefix, O(log n) for prefix)
+task test:e2e:memory:track
+```
+
+**Disk backend**
+
+```bash
+# No key tracking
+task test:e2e:disk:no-track
+
+# With key tracking
+task test:e2e:disk:track
+```
+
+#### Overriding scenario parameters
+
+All e2e tasks accept the following overrides (defaults in parentheses):
+
+* `E2E_JS` (default: `e2e/get-or-set.js`) - which scenario file to run
+* `VUS` (50) - virtual users
+* `ITERATIONS` (1000) - total iterations
+* `TOTAL_FAKE_ORDERS` (1000) - dataset size used by the scenario
+* `RETRY_WAIT_MS` (50) - backoff between retries inside the scenario
+* `MAX_RETRY` (5) - max retry attempts
+
+Examples:
+
+```bash
+# Point to a different scenario file
+task test:e2e:memory:track E2E_JS="e2e/some-other-test.js"
+
+# Heavier run
+task test:e2e:disk:track VUS=100 ITERATIONS=5000
+
+# Tweak scenario knobs
+task test:e2e:memory:no-track TOTAL_FAKE_ORDERS=2000 RETRY_WAIT_MS=100 MAX_RETRY=7
+```
+
+> The tasks set `KV_BACKEND` and `KV_TRACK_KEYS` for you. Your e2e script should read them via `__ENV` (as in the example scenario).
+
+### Unit tests (fast, local)
+
+```bash
+task test
+task test:race
+```
+
+### Clean local artifacts
+
+Removes `./bin/` (tooling & k6 binary) and the `.k6.kv` scratch file if present.
+
+```bash
+task clean
 ```
 
 ## Contributing
