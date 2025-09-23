@@ -19,10 +19,19 @@ import (
 //   - Executes the blocking store operation in a separate goroutine.
 //   - Resolves/rejects a Sobek Promise back on the VU event loop.
 //
+// Threading model:
+//
+//   - All blocking store work occurs in a goroutine (off the VU event loop).
+//   - For converting Go results to JavaScript values, we use k.vu.Runtime().ToValue(...)
+//     in the same goroutine, matching the original upstream plugin’s pattern that
+//     is known to work with this version of Sobek/k6.
+//
+// This avoids corrupting Sobek's internal VM state and prevents panics like
+// "slice bounds out of range [:-1]" in vm.popTryFrame under high concurrency.
+//
 // Why this pattern?
 // k6 VUs can invoke these methods concurrently. Spinning the blocking calls in a goroutine
 // keeps the VU event loop responsive while the backing store enforces atomicity/thread-safety.
-//
 
 // KV is the key-value facade exposed to k6 scripts.
 type KV struct {
@@ -45,6 +54,18 @@ func NewKV(vu modules.VU, s store.Store) *KV {
 	}
 }
 
+// Small result helpers we convert to JS on the event loop (via ToValue).
+// These structs map cleanly to JS objects through Sobek’s ToValue encoder.
+type getOrSetResult struct {
+	Value  any  `json:"value"`
+	Loaded bool `json:"loaded"`
+}
+
+type swapResult struct {
+	Previous any  `json:"previous"`
+	Loaded   bool `json:"loaded"`
+}
+
 // Get returns a Promise that resolves to the value stored under the provided key.
 //
 // Rejection cases:
@@ -54,14 +75,15 @@ func (k *KV) Get(key sobek.Value) *sobek.Promise {
 	keyString := key.String()
 
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			storedValue, err := backingStore.Get(keyString)
-			if err != nil {
-				return nil, err
-			}
+		func(store store.Store) (any, error) {
+			return store.Get(keyString)
+		},
 
-			return rt.ToValue(storedValue), nil
-		})
+		// Convert the Go value to a JavaScript value for the VU runtime.
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // Set returns a Promise that resolves to the *same* JavaScript value that was provided.
@@ -80,14 +102,15 @@ func (k *KV) Set(key sobek.Value, value sobek.Value) *sobek.Promise {
 	exportedValue := value.Export()
 
 	return k.runAsyncWithStore(
-		func(_ *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			if err := backingStore.Set(keyString, exportedValue); err != nil {
-				return nil, err
-			}
+		func(store store.Store) (any, error) {
+			return value, store.Set(keyString, exportedValue)
+		},
 
-			// Resolve with the original JS value for ergonomic symmetry.
-			return value, nil
-		})
+		// Resolve with the exact same JS value the user passed in (identity/symmetry).
+		func(_ *sobek.Runtime, _ any) sobek.Value {
+			return value
+		},
+	)
 }
 
 // IncrementBy returns a Promise that resolves to the new integer value (int64) after atomically
@@ -99,21 +122,25 @@ func (k *KV) Set(key sobek.Value, value sobek.Value) *sobek.Promise {
 func (k *KV) IncrementBy(key sobek.Value, delta sobek.Value) *sobek.Promise {
 	keyString := key.String()
 
+	// We must not rely on rt.ExportTo(...) here because we are not on the VU event loop.
+	// We instead use sobek.Value.Export(), then coerce to int64 synchronously before we spawn the goroutine.
+	deltaInt, err := exportToInt64(delta)
+	if err != nil {
+		// No promises.Reject(...) in this environment; create a promise and reject it immediately.
+		p, _, reject := promises.New(k.vu)
+		reject(NewError(ValueNumberRequiredError, fmt.Sprintf("delta must be a number: %v", err)))
+
+		return p
+	}
+
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			var deltaInt int64
-
-			if err := rt.ExportTo(delta, &deltaInt); err != nil {
-				return nil, NewError(ValueNumberRequiredError, fmt.Sprintf("delta must be a number: %v", err))
-			}
-
-			newValue, err := backingStore.IncrementBy(keyString, deltaInt)
-			if err != nil {
-				return nil, err
-			}
-
-			return rt.ToValue(newValue), nil
-		})
+		func(store store.Store) (any, error) {
+			return store.IncrementBy(keyString, deltaInt)
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // GetOrSet returns a Promise that resolves to an object: { value: any, loaded: boolean }.
@@ -126,20 +153,21 @@ func (k *KV) GetOrSet(key sobek.Value, value sobek.Value) *sobek.Promise {
 	exportedValue := value.Export()
 
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			actualValue, wasLoaded, err := backingStore.GetOrSet(keyString, exportedValue)
+		func(store store.Store) (any, error) {
+			actualValue, wasLoaded, err := store.GetOrSet(keyString, exportedValue)
 			if err != nil {
 				return nil, err
 			}
 
-			return makeJSObject(rt, func(obj *sobek.Object) error {
-				if err := obj.Set("value", rt.ToValue(actualValue)); err != nil {
-					return err
-				}
-
-				return obj.Set("loaded", wasLoaded)
-			})
-		})
+			return getOrSetResult{
+				Value:  actualValue,
+				Loaded: wasLoaded,
+			}, nil
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // Swap returns a Promise that resolves to: { previous: any|null, loaded: boolean }.
@@ -152,27 +180,21 @@ func (k *KV) Swap(key sobek.Value, value sobek.Value) *sobek.Promise {
 	exportedValue := value.Export()
 
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			previousValue, wasLoaded, err := backingStore.Swap(keyString, exportedValue)
+		func(store store.Store) (any, error) {
+			previousValue, loaded, err := store.Swap(keyString, exportedValue)
 			if err != nil {
 				return nil, err
 			}
 
-			return makeJSObject(rt, func(obj *sobek.Object) error {
-				// Use explicit null to avoid "undefined" surprises in JS.
-				if wasLoaded {
-					if err := obj.Set("previous", rt.ToValue(previousValue)); err != nil {
-						return err
-					}
-				} else {
-					if err := obj.Set("previous", sobek.Null()); err != nil {
-						return err
-					}
-				}
-
-				return obj.Set("loaded", wasLoaded)
-			})
-		})
+			return swapResult{
+				Previous: previousValue,
+				Loaded:   loaded,
+			}, nil
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // CompareAndSwap (CAS) returns a Promise that resolves to true iff the value at "key"
@@ -186,14 +208,13 @@ func (k *KV) CompareAndSwap(key, oldValue, newValue sobek.Value) *sobek.Promise 
 	)
 
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			swapped, err := backingStore.CompareAndSwap(keyString, exportedOld, exportedNew)
-			if err != nil {
-				return nil, err
-			}
-
-			return rt.ToValue(swapped), nil
-		})
+		func(store store.Store) (any, error) {
+			return store.CompareAndSwap(keyString, exportedOld, exportedNew)
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // Delete returns a Promise that resolves to true after deleting 'key'.
@@ -204,13 +225,13 @@ func (k *KV) Delete(key sobek.Value) *sobek.Promise {
 	keyString := key.String()
 
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			if err := backingStore.Delete(keyString); err != nil {
-				return nil, err
-			}
-
-			return rt.ToValue(true), nil
-		})
+		func(store store.Store) (any, error) {
+			return true, store.Delete(keyString)
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // Exists returns a Promise that resolves to true if the key exists, false otherwise.
@@ -218,14 +239,13 @@ func (k *KV) Exists(key sobek.Value) *sobek.Promise {
 	keyString := key.String()
 
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			exists, err := backingStore.Exists(keyString)
-			if err != nil {
-				return nil, err
-			}
-
-			return rt.ToValue(exists), nil
-		})
+		func(store store.Store) (any, error) {
+			return store.Exists(keyString)
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // DeleteIfExists returns a Promise that resolves to true only if the key was present
@@ -234,60 +254,55 @@ func (k *KV) DeleteIfExists(key sobek.Value) *sobek.Promise {
 	keyString := key.String()
 
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			deleted, err := backingStore.DeleteIfExists(keyString)
-			if err != nil {
-				return nil, err
-			}
-
-			return rt.ToValue(deleted), nil
-		})
+		func(store store.Store) (any, error) {
+			return store.DeleteIfExists(keyString)
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // CompareAndDelete returns a Promise that resolves to true if the current value at "key"
 // equals "oldValue" and the key was deleted atomically; otherwise false.
 func (k *KV) CompareAndDelete(key, old sobek.Value) *sobek.Promise {
-	var (
-		keyString   = key.String()
-		exportedOld = old.Export()
-	)
+	keyString := key.String()
+	exportedOld := old.Export()
 
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			deleted, err := backingStore.CompareAndDelete(keyString, exportedOld)
-			if err != nil {
-				return nil, err
-			}
-
-			return rt.ToValue(deleted), nil
-		})
+		func(store store.Store) (any, error) {
+			return store.CompareAndDelete(keyString, exportedOld)
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // Clear returns a Promise that resolves to true after removing all keys.
 // Depending on the backend, this may be an expensive O(n) operation.
 func (k *KV) Clear() *sobek.Promise {
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			if err := backingStore.Clear(); err != nil {
-				return nil, err
-			}
-
-			return rt.ToValue(true), nil
-		})
+		func(store store.Store) (any, error) {
+			return true, store.Clear()
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // Size returns a Promise that resolves to the number of keys currently stored.
 // On some backends this can be O(n).
 func (k *KV) Size() *sobek.Promise {
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			size, err := backingStore.Size()
-			if err != nil {
-				return nil, err
-			}
-
-			return rt.ToValue(size), nil
-		})
+		func(store store.Store) (any, error) {
+			return store.Size()
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // Close closes the underlying store. It is synchronous because the caller usually
@@ -303,15 +318,18 @@ func (k *KV) Close() error {
 // List returns a Promise that resolves to an array of { key, value } objects,
 // ordered lexicographically by key. Options support prefix and limit.
 func (k *KV) List(options sobek.Value) *sobek.Promise {
+	// Import list options from JavaScript (safe on the VU thread now).
 	listOptions := ImportListOptions(k.vu.Runtime(), options)
 
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			entries, err := backingStore.List(listOptions.Prefix, listOptions.Limit)
+		func(store store.Store) (any, error) {
+			entries, err := store.List(listOptions.Prefix, listOptions.Limit)
 			if err != nil {
 				return nil, err
 			}
 
+			// Convert entries to the JS-facing struct.
+			// ToValue will map it to an array of objects.
 			jsEntries := make([]ListEntry, len(entries))
 			for i, entry := range entries {
 				jsEntries[i] = ListEntry{
@@ -320,8 +338,12 @@ func (k *KV) List(options sobek.Value) *sobek.Promise {
 				}
 			}
 
-			return rt.ToValue(jsEntries), nil
-		})
+			return jsEntries, nil
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // RandomKey returns a Promise that resolves to a random key as a string.
@@ -330,14 +352,13 @@ func (k *KV) RandomKey(options sobek.Value) *sobek.Promise {
 	randomKeyOptions := ImportRandomKeyOptions(k.vu.Runtime(), options)
 
 	return k.runAsyncWithStore(
-		func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-			keyString, err := backingStore.RandomKey(randomKeyOptions.Prefix)
-			if err != nil {
-				return nil, err
-			}
-
-			return rt.ToValue(keyString), nil
-		})
+		func(store store.Store) (any, error) {
+			return store.RandomKey(randomKeyOptions.Prefix)
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // RebuildKeyList returns a Promise that resolves to true after rebuilding any in-memory
@@ -346,19 +367,21 @@ func (k *KV) RandomKey(options sobek.Value) *sobek.Promise {
 // This is primarily useful for disk-based backends when key-tracking is enabled
 // and a rebuild is needed after a crash or manual intervention.
 func (k *KV) RebuildKeyList() *sobek.Promise {
-	return k.runAsyncWithStore(func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error) {
-		if err := backingStore.RebuildKeyList(); err != nil {
-			return nil, err
-		}
-
-		return rt.ToValue(true), nil
-	})
+	return k.runAsyncWithStore(
+		func(store store.Store) (any, error) {
+			return true, store.RebuildKeyList()
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
 }
 
 // ListEntry is the JavaScript-facing representation of a key-value pair returned by List().
 type ListEntry struct {
 	// Key is the entry key (List results are lexicographically ordered by this).
 	Key string `json:"key"`
+
 	// Value is the stored value (type depends on the store's serializer).
 	Value any `json:"value"`
 }
@@ -435,15 +458,14 @@ func (k *KV) databaseNotOpenError() error {
 
 // runAsyncWithStore is a small template that:
 //
-//  1. creates a Promise bound to the current VU,
-//  2. checks that the store is available,
-//  3. executes the given operation in a goroutine,
-//  4. resolves/rejects the Promise with the JS-ready value.
-//
-// The provided function must return a Sobek value that is safe to pass to JS
-// (typically produced with rt.ToValue(...) or a fully-constructed JS object).
+//  1. Creates a Promise bound to the current VU,
+//  2. Checks that the store is available,
+//  3. Executes the given operation in a goroutine,
+//  4. Converts the Go result to a Sobek value using k.vu.Runtime().ToValue(...),
+//  5. Resolves/rejects the Promise.
 func (k *KV) runAsyncWithStore(
-	operation func(rt *sobek.Runtime, backingStore store.Store) (sobek.Value, error),
+	operation func(store store.Store) (any, error),
+	toJS func(rt *sobek.Runtime, result any) sobek.Value,
 ) *sobek.Promise {
 	promise, resolve, reject := promises.New(k.vu)
 
@@ -453,14 +475,16 @@ func (k *KV) runAsyncWithStore(
 			return
 		}
 
-		jsRuntime := k.vu.Runtime()
-
-		// Convert the Go value to a JavaScript value for the VU runtime.
-		jsValue, err := operation(jsRuntime, k.store)
+		// Run the blocking store operation in this goroutine.
+		goResult, err := operation(k.store)
 		if err != nil {
 			reject(err)
 			return
 		}
+
+		// Convert to JS using the VU's Sobek runtime and resolve the promise.
+		jsRuntime := k.vu.Runtime()
+		jsValue := toJS(jsRuntime, goResult)
 
 		resolve(jsValue)
 	}()
@@ -468,13 +492,22 @@ func (k *KV) runAsyncWithStore(
 	return promise
 }
 
-// makeJSObject is a tiny helper to create an object in the Sobek runtime and
-// allow a setter function to populate it field-by-field.
-func makeJSObject(rt *sobek.Runtime, setter func(obj *sobek.Object) error) (sobek.Value, error) {
-	obj := rt.NewObject()
-	if err := setter(obj); err != nil {
-		return nil, err
+// exportToInt64 converts a Sobek value (we are on the caller’s thread here) into int64
+// WITHOUT using rt.ExportTo in worker goroutines. This accepts a few numeric shapes commonly
+// produced by JS → Go marshaling.
+func exportToInt64(v sobek.Value) (int64, error) {
+	switch x := v.Export().(type) {
+	case int64:
+		return x, nil
+	case int32:
+		return int64(x), nil
+	case int:
+		return int64(x), nil
+	case float64:
+		return int64(x), nil
+	case float32:
+		return int64(x), nil
+	default:
+		return 0, fmt.Errorf("unsupported numeric type: %T", x)
 	}
-
-	return obj, nil
 }
