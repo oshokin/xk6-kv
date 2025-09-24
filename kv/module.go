@@ -110,7 +110,7 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 		case BackendMemory:
 			baseStore = store.NewMemoryStore(options.TrackKeys)
 		case BackendDisk:
-			baseStore = store.NewDiskStore(options.TrackKeys)
+			baseStore = store.NewDiskStore(options.TrackKeys, options.Path)
 		}
 
 		// Create the serializer based on the serialization option.
@@ -143,6 +143,11 @@ type Options struct {
 	// Valid values: "memory" (ephemeral), "disk" (persistent).
 	Backend string `json:"backend"`
 
+	// Path points to the BoltDB file when using the disk backend.
+	// When empty or invalid the default path is used.
+	// Ignored by the memory backend.
+	Path string `json:"path"`
+
 	// Serialization selects how values are encoded/decoded when stored.
 	// Valid values: "json" (structured), "string" (raw string to []byte).
 	Serialization string `json:"serialization"`
@@ -159,7 +164,6 @@ func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
 	opts := Options{
 		Backend:       DefaultBackend,
 		Serialization: DefaultSerialization,
-		TrackKeys:     false,
 	}
 
 	if common.IsNullish(options) {

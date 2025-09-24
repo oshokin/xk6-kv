@@ -14,19 +14,18 @@ import (
 func newBenchmarkDiskStore(b *testing.B, trackKeys bool, namePattern string) *DiskStore {
 	b.Helper()
 
-	//nolint:forbidigo // this is just a test
+	//nolint:forbidigo // this is just a test.
 	tempFile, err := os.CreateTemp(b.TempDir(), namePattern)
 	require.NoErrorf(b, err, "failed to create temporary file for disk store")
 
 	_ = tempFile.Close()
 
-	store := NewDiskStore(trackKeys)
-	store.path = tempFile.Name()
+	store := NewDiskStore(trackKeys, tempFile.Name())
 
 	b.Cleanup(func() {
 		_ = store.Close()
 
-		//nolint:forbidigo // this is just a test
+		//nolint:forbidigo // this is just a test.
 		_ = os.Remove(tempFile.Name())
 	})
 

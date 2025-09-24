@@ -6,6 +6,7 @@ package store
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,13 +18,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTestDiskStore creates a temporary on-disk store, binds it to a temp file,
-// and registers cleanup. It returns the initialized store and the temp file path.
-func newTestDiskStore(t *testing.T, trackKeys bool) *DiskStore {
+// newTestDiskStore creates a temporary on-disk store bound to a provided path (or a temp file when empty)
+// and registers cleanup. It returns the initialized store.
+func newTestDiskStore(t *testing.T, trackKeys bool, path string) *DiskStore {
 	t.Helper()
 
-	store := NewDiskStore(trackKeys)
-	store.path = filepath.Join(t.TempDir(), DefaultDiskStorePath)
+	diskPath := path
+	if diskPath == "" {
+		diskPath = filepath.Join(t.TempDir(), DefaultDiskStorePath)
+	}
+
+	store := NewDiskStore(trackKeys, diskPath)
 
 	t.Cleanup(func() {
 		_ = store.Close()
@@ -37,7 +42,7 @@ func newTestDiskStore(t *testing.T, trackKeys bool) *DiskStore {
 func TestNewDiskStore(t *testing.T) {
 	t.Parallel()
 
-	store := NewDiskStore(true)
+	store := NewDiskStore(true, "")
 
 	require.NotNil(t, store, "NewDiskStore() must not return nil")
 
@@ -46,6 +51,65 @@ func TestNewDiskStore(t *testing.T) {
 
 	assert.False(t, store.opened.Load(), "store must not be marked opened initially")
 	assert.EqualValues(t, 0, store.refCount.Load(), "initial refCount must be zero")
+}
+
+// TestNewDiskStore_PathHandling ensures callers can override the disk path and that invalid inputs fall back to defaults.
+func TestNewDiskStore_PathHandling(t *testing.T) {
+	t.Parallel()
+
+	t.Run("custom path", func(t *testing.T) {
+		t.Parallel()
+
+		customPath := filepath.Join(t.TempDir(), "custom-db")
+		store := newTestDiskStore(t, true, customPath)
+		require.NotNil(t, store, "NewDiskStore() must not return nil")
+		assert.Equal(t, customPath, store.path, "custom path must be honoured")
+	})
+
+	t.Run("empty path", func(t *testing.T) {
+		t.Parallel()
+
+		store := NewDiskStore(true, "")
+		require.NotNil(t, store, "NewDiskStore() must not return nil")
+		assert.Equal(t, DefaultDiskStorePath, store.path, "empty path must fall back to default")
+	})
+
+	t.Run("directory path", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		store := newTestDiskStore(t, true, dir)
+		require.NotNil(t, store, "NewDiskStore() must not return nil")
+
+		t.Cleanup(func() {
+			_ = store.Close()
+
+			//nolint:forbidigo // tests may tidy up files created during fallback.
+			_ = os.Remove(DefaultDiskStorePath)
+		})
+
+		require.NoError(t, store.open())
+		assert.Equal(t, DefaultDiskStorePath, store.path, "directory path must fall back to default")
+	})
+
+	t.Run("missing parent directory", func(t *testing.T) {
+		t.Parallel()
+
+		tempRoot := t.TempDir()
+		missingDir := filepath.Join(tempRoot, "missing", "store.db")
+		store := newTestDiskStore(t, true, missingDir)
+		require.NotNil(t, store, "NewDiskStore() must not return nil")
+
+		t.Cleanup(func() {
+			_ = store.Close()
+
+			//nolint:forbidigo // tests may tidy up files created during fallback.
+			_ = os.Remove(DefaultDiskStorePath)
+		})
+
+		require.NoError(t, store.open())
+		assert.Equal(t, DefaultDiskStorePath, store.path, "missing parent must fall back to default")
+	})
 }
 
 // TestDiskStore_Open_IdempotentAndConcurrent verifies that calling the internal open() concurrently
@@ -57,7 +121,7 @@ func TestDiskStore_Open_IdempotentAndConcurrent(t *testing.T) {
 	const concurrencyLevel = 64
 
 	var (
-		store   = newTestDiskStore(t, true)
+		store   = newTestDiskStore(t, true, "")
 		errorCh = make(chan error, concurrencyLevel)
 		wg      sync.WaitGroup
 	)
@@ -120,7 +184,7 @@ func TestDiskStore_ConcurrentOpen_IncrementsRefCount(t *testing.T) {
 	const concurrencyLevel = 10
 
 	var (
-		store        = newTestDiskStore(t, true)
+		store        = newTestDiskStore(t, true, "")
 		startBarrier = make(chan struct{})
 		errorCh      = make(chan error, concurrencyLevel)
 		wg           sync.WaitGroup
@@ -172,7 +236,7 @@ func TestDiskStore_OpenClose_InterleavedRace(t *testing.T) {
 	)
 
 	var (
-		store        = newTestDiskStore(t, true)
+		store        = newTestDiskStore(t, true, "")
 		startBarrier = make(chan struct{})
 		errorCh      = make(chan error, concurrencyLevel*iterationsPerGoroutine*2)
 		wg           sync.WaitGroup
@@ -226,7 +290,7 @@ func TestDiskStore_OpenClose_InterleavedRace(t *testing.T) {
 func TestDiskStore_ReopenAfterFullyClosed_OnDemand(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	require.NoError(t, store.Set("key1", "value1"), "first Set must open DB")
 
@@ -259,7 +323,7 @@ func TestDiskStore_ReopenAfterFullyClosed_OnDemand(t *testing.T) {
 func TestDiskStore_GetSet_RoundtripAndTypes(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	// Missing key error.
 	_, err := store.Get("does-not-exist")
@@ -294,7 +358,7 @@ func TestDiskStore_IncrementBy_Basic(t *testing.T) {
 	t.Parallel()
 
 	var (
-		store       = newTestDiskStore(t, true)
+		store       = newTestDiskStore(t, true, "")
 		newVal, err = store.IncrementBy("ctr", 5)
 	)
 
@@ -321,7 +385,7 @@ func TestDiskStore_IncrementBy_Concurrent(t *testing.T) {
 	)
 
 	var (
-		store = newTestDiskStore(t, true)
+		store = newTestDiskStore(t, true, "")
 		wg    sync.WaitGroup
 	)
 
@@ -352,7 +416,7 @@ func TestDiskStore_IncrementBy_Concurrent(t *testing.T) {
 func TestDiskStore_GetOrSet_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	val, loaded, err := store.GetOrSet("k", "v1")
 	require.NoError(t, err)
@@ -379,7 +443,7 @@ func TestDiskStore_GetOrSet_Concurrent(t *testing.T) {
 	}
 
 	var (
-		store     = newTestDiskStore(t, true)
+		store     = newTestDiskStore(t, true, "")
 		resultsCh = make(chan goroutineResult, concurrencyLevel)
 		wg        sync.WaitGroup
 	)
@@ -433,7 +497,7 @@ func TestDiskStore_GetOrSet_Concurrent(t *testing.T) {
 func TestDiskStore_Swap_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	prev, loaded, err := store.Swap("k", "v1")
 	require.NoError(t, err)
@@ -454,7 +518,7 @@ func TestDiskStore_Swap_Basic(t *testing.T) {
 func TestDiskStore_CompareAndSwap_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 	require.NoError(t, store.Set("k", "old"))
 
 	ok, err := store.CompareAndSwap("k", "BAD", "new")
@@ -481,7 +545,7 @@ func TestDiskStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 	const concurrencyLevel = 200
 
 	var (
-		store = newTestDiskStore(t, true)
+		store = newTestDiskStore(t, true, "")
 		okCh  = make(chan bool, concurrencyLevel)
 		wg    sync.WaitGroup
 	)
@@ -523,7 +587,7 @@ func TestDiskStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 func TestDiskStore_Delete(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 	require.NoError(t, store.Set("test-key", "test-value"))
 
 	require.NoError(t, store.Delete("test-key"))
@@ -539,7 +603,7 @@ func TestDiskStore_Delete(t *testing.T) {
 func TestDiskStore_Exists(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	exists, err := store.Exists("non-existent")
 	require.NoError(t, err)
@@ -557,7 +621,7 @@ func TestDiskStore_Exists(t *testing.T) {
 func TestDiskStore_DeleteIfExists_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	ok, err := store.DeleteIfExists("k")
 	require.NoError(t, err)
@@ -580,7 +644,7 @@ func TestDiskStore_DeleteIfExists_ConcurrentSingleWinner(t *testing.T) {
 	const concurrencyLevel = 128
 
 	var (
-		store = newTestDiskStore(t, true)
+		store = newTestDiskStore(t, true, "")
 		wins  int
 		mu    sync.Mutex
 		wg    sync.WaitGroup
@@ -617,7 +681,7 @@ func TestDiskStore_DeleteIfExists_ConcurrentSingleWinner(t *testing.T) {
 func TestDiskStore_CompareAndDelete_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 	require.NoError(t, store.Set("k", "v1"))
 
 	ok, err := store.CompareAndDelete("k", "BAD")
@@ -642,7 +706,7 @@ func TestDiskStore_CompareAndDelete_ConcurrentSingleWinner(t *testing.T) {
 	const concurrencyLevel = 120
 
 	var (
-		store        = newTestDiskStore(t, true)
+		store        = newTestDiskStore(t, true, "")
 		successCount int
 		mu           sync.Mutex
 		wg           sync.WaitGroup
@@ -679,7 +743,7 @@ func TestDiskStore_CompareAndDelete_ConcurrentSingleWinner(t *testing.T) {
 func TestDiskStore_AtomicOps_DoNotChangeBytesUnexpectedly(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 	originalBytes := []byte("payload")
 
 	_, _, err := store.GetOrSet("k", originalBytes)
@@ -701,7 +765,7 @@ func TestDiskStore_AtomicOps_DoNotChangeBytesUnexpectedly(t *testing.T) {
 func TestDiskStore_Clear(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	require.NoError(t, store.Set("key1", "value1"))
 	require.NoError(t, store.Set("key2", "value2"))
@@ -717,7 +781,7 @@ func TestDiskStore_Clear(t *testing.T) {
 func TestDiskStore_Size(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	size, err := store.Size()
 	require.NoError(t, err)
@@ -735,7 +799,7 @@ func TestDiskStore_Size(t *testing.T) {
 func TestDiskStore_List(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	entries, err := store.List("", 0)
 	require.NoError(t, err)
@@ -790,7 +854,7 @@ func TestDiskStore_KeyTrackingConsistency(t *testing.T) {
 	t.Parallel()
 
 	var (
-		store = newTestDiskStore(t, true)
+		store = newTestDiskStore(t, true, "")
 		keys  = []string{"key1", "key2", "key3"}
 	)
 
@@ -830,7 +894,7 @@ func TestDiskStore_KeyTrackingConsistency(t *testing.T) {
 func TestDiskStore_RebuildKeyList(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	require.NoError(t, store.Set("key1", "value1"))
 	require.NoError(t, store.Set("key2", "value2"))
@@ -859,7 +923,7 @@ func TestDiskStore_RebuildKeyList(t *testing.T) {
 func TestDiskStore_RandomKey_WithTracking(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	key, err := store.RandomKey("")
 	require.NoError(t, err)
@@ -890,7 +954,7 @@ func TestDiskStore_RandomKey_WithTracking(t *testing.T) {
 func TestDiskStore_RandomKey_WithoutTracking_Smoke(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, false)
+	store := newTestDiskStore(t, false, "")
 
 	key, err := store.RandomKey("")
 	require.NoError(t, err)
@@ -911,7 +975,7 @@ func TestDiskStore_RandomKey_ConcurrentOperations(t *testing.T) {
 	t.Parallel()
 
 	var (
-		store = newTestDiskStore(t, true)
+		store = newTestDiskStore(t, true, "")
 		wg    sync.WaitGroup
 	)
 
@@ -942,7 +1006,7 @@ func TestDiskStore_RandomKey_ConcurrentOperations(t *testing.T) {
 func TestDiskStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	key, err := store.RandomKey("a:")
 	require.NoError(t, err)
@@ -976,7 +1040,7 @@ func TestDiskStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
 func TestDiskStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, false)
+	store := newTestDiskStore(t, false, "")
 
 	key, err := store.RandomKey("a:")
 	require.NoError(t, err)
@@ -1000,7 +1064,7 @@ func TestDiskStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
 func TestDiskStore_Close(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 	require.NoError(t, store.Set("key", "value"))
 
 	require.NoError(t, store.Close())
@@ -1014,7 +1078,7 @@ func TestDiskStore_Close_ManyConcurrentClosersFromSingleOpen(t *testing.T) {
 
 	const closers = 32
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 
 	require.NoError(t, store.open())
 	require.True(t, store.opened.Load(), "store must be opened after open()")
@@ -1053,7 +1117,7 @@ func TestDiskStore_Close_ManyConcurrentClosersFromSingleOpen(t *testing.T) {
 func TestDiskStore_Close_RefCount(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true)
+	store := newTestDiskStore(t, true, "")
 	require.NoError(t, store.Set("key", "value"))
 	assert.EqualValues(t, 1, store.refCount.Load(), "first op must set refCount=1")
 
@@ -1086,7 +1150,7 @@ func TestDiskStore_GetOrSet_Delete_Interleave_NoPanic(t *testing.T) {
 	)
 
 	var (
-		store     = newTestDiskStore(t, true)
+		store     = newTestDiskStore(t, true, "")
 		testValue = []byte("processed")
 	)
 

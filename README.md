@@ -9,6 +9,7 @@
 > - Atomic ops: `incrementBy`, `getOrSet`, `swap`, `compareAndSwap`, `deleteIfExists`, `compareAndDelete`.
 > - Random keys: `randomKey()` with **prefix-aware selection**.
 > - Optional key tracking for **O(1) random sampling** (disk & memory backends).
+> - Disk backend path overrides so you can persist data alongside custom artifacts.
 >
 > All code is licensed under **GNU AGPL v3.0**.
 
@@ -16,6 +17,7 @@ A k6 extension providing a persistent key-value store to share state across Virt
 It supports both an **in-memory** backend and a **persistent BoltDB** backend, deterministic `list()` ordering, and high-level atomic helpers designed for safe concurrent access in load tests.
 
 ## Table of Contents
+
 - [Features](#features)
 - [Why Use xk6-kv](#why-use-xk6-kv)
 - [Installation](#installation)
@@ -50,29 +52,33 @@ It supports both an **in-memory** backend and a **persistent BoltDB** backend, d
   - **Memory**: Fast, ephemeral storage that's shared across VUs
   - **Disk**: Persistent storage using BoltDB for data that needs to survive between test runs
 - **Lightweight Alternative**: While other solutions like Redis exist and are compatible with k6 for state sharing, **xk6-kv** offers a more lightweight, integrated approach:
-    - No external services required
-    - Simple setup and configuration
+  - No external services required
+  - Simple setup and configuration
 
 > **Note**: For extremely high-performance requirements, consider using the k6 Redis module instead.
 
 ## Installation
 
 1. First, ensure you have [xk6](https://github.com/grafana/xk6) installed:
+
 ```bash
 go install go.k6.io/xk6/cmd/xk6@latest
 ```
 
 2. Build a k6 binary with the xk6-kv extension:
+
 ```bash
 xk6 build --with github.com/oshokin/xk6-kv
 ```
 
 3. Import the kv module in your script, at the top of your test script:
+
 ```javascript
 import { openKv } from "k6/x/kv";
 ```
 
 4. The built binary will be in your current directory. You can move it to your PATH or use it directly:
+
 ```bash
 ./k6 run script.js
 ```
@@ -133,6 +139,7 @@ export default async function () {
 ## API Reference
 
 ### `openKv`
+
 Opens a key-value store with the specified backend. **Must be called in the init context**.
 
 ```typescript
@@ -142,23 +149,29 @@ type Backend = "memory" | "disk"
 
 interface OpenKvOptions {
   backend?: Backend               // default: "disk"
+  path?: string                   // default: "" (falls back to ./.k6.kv)
   serialization?: "json"|"string" // default: "json"
   trackKeys?: boolean             // default: false
 }
 ```
 
-* `memory`: shared in-process KV for all VUs in a test run (fastest).
-* `disk`: persistent BoltDB file (survives between runs).
-* `serialization`:
-  * `"json"`: values are JSON-encoded/decoded automatically.
-  * `"string"`: values are stored as strings/bytes.
-* `trackKeys`:
-  * `true`: maintain an in-memory index of keys; enables **O(1)** randomKey (no prefix) and **O(log n)** prefix randomKey.
-  * `false`: no index; randomKey uses a simple two-pass scan.
+- `memory`: shared in-process KV for all VUs in a test run (fastest).
+- `disk`: persistent BoltDB file (survives between runs).
+- `serialization`:
+  - `"json"`: values are JSON-encoded/decoded automatically.
+  - `"string"`: values are stored as strings/bytes.
+- `trackKeys`:
+  - `true`: maintain an in-memory index of keys; enables **O(1)** randomKey (no prefix) and **O(log n)** prefix randomKey.
+  - `false`: no index; randomKey uses a simple two-pass scan.
+- `path`:
+  - Overrides the location of the BoltDB file backing the disk store.
+  - Ignored when `backend` is `"memory"`.
+  - Empty strings, directory-like paths, or paths whose parent directories do not exist all fall back to `./.k6.kv`.
 
 #### Performance Notes
 
 While both backends are optimized for performance and suitable for most load testing scenarios, be aware that:
+
 - There is some overhead due to synchronization between VUs
 - Consider this overhead when analyzing your test results
 - For extremely high throughput requirements, you might need alternative solutions
@@ -171,7 +184,7 @@ All methods are **Promise-based**, except for `close` which is synchronous.
   - Retrieves a value by key. Throws if key doesn't exist.
 
 - `set(key: string, value: any): Promise<any>`
-  - Sets a key-value pair. 
+  - Sets a key-value pair.
   - Accepts any JSON-serializable value if serialization="json".
 
 - `incrementBy(key: string, delta: number): Promise<number>`
@@ -221,11 +234,11 @@ All methods are **Promise-based**, except for `close` which is synchronous.
   - Returns current store size.
 
 - `list(options?: ListOptions): Promise<Array<{ key: string; value: any }>>`
-  - Returns key-value entries sorted lexicographically by key. 
+  - Returns key-value entries sorted lexicographically by key.
   - If limit <= 0 or omitted, there is no limit.
 
 - `randomKey(options?: RandomKeyOptions): Promise<string>`
-  - Returns a random key, optionally filtered by prefix. 
+  - Returns a random key, optionally filtered by prefix.
   - Resolves to "" (empty string) when no key matches (including empty storage).
 
 - `rebuildKeyList(): Promise<boolean>`
@@ -260,16 +273,16 @@ interface ListOptions {
 
 When **trackKeys: true**:
 
-* `randomKey()` with **no prefix** -> **O(1)** (uniform index sampling).
-* `randomKey({prefix})` -> **O(log n)** (order-statistics index by lexicographic order).
-* `list()` still performs a full scan in memory backend (sorted output), and uses BoltDB cursor on disk.
+- `randomKey()` with **no prefix** -> **O(1)** (uniform index sampling).
+- `randomKey({prefix})` -> **O(log n)** (order-statistics index by lexicographic order).
+- `list()` still performs a full scan in memory backend (sorted output), and uses BoltDB cursor on disk.
 
 When **trackKeys: false**:
 
-* `randomKey()` (with or without `prefix`) -> **two-pass scan**:
+- `randomKey()` (with or without `prefix`) -> **two-pass scan**:
   1. Count matches;
   2. Select the r-th match.
-* Minimal memory overhead; fine for small-to-medium sets or when randomKey is rarely used.
+- Minimal memory overhead; fine for small-to-medium sets or when randomKey is rarely used.
 
 **Empty / no-match behavior:**
 `randomKey()` **never throws**; it resolves to the empty string `""` if the store (or the prefix slice) is empty.
@@ -570,12 +583,12 @@ task test:e2e:disk:track
 
 All e2e tasks accept the following overrides (defaults in parentheses):
 
-* `E2E_JS` (default: `e2e/get-or-set.js`) - which scenario file to run
-* `VUS` (50) - virtual users
-* `ITERATIONS` (1000) - total iterations
-* `TOTAL_FAKE_ORDERS` (1000) - dataset size used by the scenario
-* `RETRY_WAIT_MS` (50) - backoff between retries inside the scenario
-* `MAX_RETRY` (5) - max retry attempts
+- `E2E_JS` (default: `e2e/get-or-set.js`) - which scenario file to run
+- `VUS` (default: 50) - virtual users
+- `ITERATIONS` (default: 1000) - total iterations
+- `TOTAL_FAKE_ORDERS` (default: 1000) - dataset size used by the scenario
+- `RETRY_WAIT_MS` (default: 50) - backoff between retries inside the scenario
+- `MAX_RETRY` (default: 5) - max retry attempts
 
 Examples:
 

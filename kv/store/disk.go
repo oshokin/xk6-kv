@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand/v2"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -46,16 +48,23 @@ const (
 	DefaultKvBucket = "k6"
 )
 
-// NewDiskStore constructs a DiskStore using DefaultDiskStorePath and DefaultKvBucket.
+// NewDiskStore constructs a DiskStore using the provided filesystem path and DefaultKvBucket.
+// When path is empty, DefaultDiskStorePath is used to preserve backwards compatibility.
 // If trackKeys is true, an in-memory index is initialized to accelerate RandomKey().
-func NewDiskStore(trackKeys bool) *DiskStore {
+func NewDiskStore(trackKeys bool, path string) *DiskStore {
 	var idx *OSTree
 	if trackKeys {
 		idx = NewOSTree()
 	}
 
+	if path == "" {
+		path = DefaultDiskStorePath
+	}
+
+	diskPath := resolveDiskPath(path)
+
 	return &DiskStore{
-		path:      DefaultDiskStorePath,
+		path:      diskPath,
 		handle:    new(bolt.DB),
 		opened:    atomic.Bool{},
 		refCount:  atomic.Int64{},
@@ -66,6 +75,24 @@ func NewDiskStore(trackKeys bool) *DiskStore {
 		keysLock:  sync.RWMutex{},
 		ost:       idx,
 	}
+}
+
+// resolveDiskPath normalizes user-provided paths and applies fast-fail defaults.
+// Empty strings or directory-like inputs revert to the default DB file path.
+func resolveDiskPath(candidate string) string {
+	trimmed := strings.TrimSpace(candidate)
+	if trimmed == "" {
+		return DefaultDiskStorePath
+	}
+
+	cleaned := filepath.Clean(trimmed)
+
+	// Treat directory-like inputs as requests to use the default database file.
+	if strings.HasSuffix(trimmed, "/") || strings.HasSuffix(trimmed, "\\") {
+		return DefaultDiskStorePath
+	}
+
+	return cleaned
 }
 
 // open ensures the DB is open and increments the reference counter once.
@@ -92,10 +119,19 @@ func (s *DiskStore) open() error {
 		return nil
 	}
 
-	// Open the BoltDB file.
+	// Open the BoltDB file. If the configured path fails, fall back to the default file.
 	handler, err := bolt.Open(s.path, 0o600, nil)
 	if err != nil {
-		return err
+		if s.path != DefaultDiskStorePath {
+			handler, err = bolt.Open(DefaultDiskStorePath, 0o600, nil)
+			if err != nil {
+				return err
+			}
+
+			s.path = DefaultDiskStorePath
+		} else {
+			return err
+		}
 	}
 
 	// Ensure the application bucket exists.
@@ -120,7 +156,11 @@ func (s *DiskStore) open() error {
 
 	// If tracking is enabled, hydrate keys slice/map and the OSTree.
 	if s.trackKeys {
-		if err := s.rebuildKeyListUnlocked(); err != nil {
+		s.keysLock.Lock()
+		err := s.rebuildKeyListLocked()
+		s.keysLock.Unlock()
+
+		if err != nil {
 			// If we fail to build the key list, close DB and return error.
 			_ = s.handle.Close()
 			s.opened.Store(false)
@@ -759,7 +799,7 @@ func (s *DiskStore) RebuildKeyList() error {
 	s.keysLock.Lock()
 	defer s.keysLock.Unlock()
 
-	if err := s.rebuildKeyListUnlocked(); err != nil {
+	if err := s.rebuildKeyListLocked(); err != nil {
 		return fmt.Errorf("unable to rebuild keys from disk: %w", err)
 	}
 
@@ -936,13 +976,9 @@ func (s *DiskStore) getKeyByIndex(prefix string, index int64) (string, error) {
 	return key, nil
 }
 
-// rebuildKeyListUnlocked scans Bolt and rebuilds keysList/keysMap and the OSTree.
-// Caller must hold keysLock when calling from steady-state; during initialization
-// we call it before anything else runs, so no extra locking is needed there.
-func (s *DiskStore) rebuildKeyListUnlocked() error {
-	// We don't lock keysLock here because this is called during initialization
-	// when no other operations are in progress.
-	// Alternatively, we could lock it to be safe.
+// rebuildKeyListLocked scans Bolt and rebuilds keysList/keysMap and the OSTree.
+// Caller must hold keysLock.
+func (s *DiskStore) rebuildKeyListLocked() error {
 	newKeys := []string{}
 	newMap := make(map[string]int)
 

@@ -122,19 +122,19 @@ linters:
     - prealloc
     - predeclared
     - promlinter
-    - revive
     - reassign
+    - revive
     - rowserrcheck
     - sqlclosecheck
     - staticcheck
     - stylecheck
-    - usetesting
     - tparallel
     - typecheck
     - unconvert
     - unparam
     - unused
     - usestdlibvars
+    - usetesting
     - wastedassign
     - whitespace
     - wsl
