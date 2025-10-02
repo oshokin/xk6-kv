@@ -14,7 +14,7 @@ type ostNode struct {
 	right    *ostNode
 }
 
-// nodeSize gracefully handles nil nodes to avoid nil checks in recursive functions
+// nodeSize gracefully handles nil nodes to avoid nil checks in recursive functions.
 func nodeSize(n *ostNode) int {
 	if n == nil {
 		return 0
@@ -23,8 +23,8 @@ func nodeSize(n *ostNode) int {
 	return n.size
 }
 
-// pull recalculates subtree size after structural changes
-// Must be called after any rotation or child modification
+// pull recalculates subtree size after structural changes.
+// Must be called after any rotation or child modification.
 func pull(n *ostNode) {
 	if n == nil {
 		return
@@ -33,29 +33,35 @@ func pull(n *ostNode) {
 	n.size = 1 + nodeSize(n.left) + nodeSize(n.right)
 }
 
-// rotateRight maintains BST order while fixing heap property
-// Returns new root of rotated subtree
+// rotateRight maintains BST order while fixing heap property.
+// Returns new root of rotated subtree.
 func rotateRight(n *ostNode) *ostNode {
 	l := n.left
 
 	n.left = l.right
 	l.right = n
 
-	pull(n) // Original parent must be updated first
-	pull(l) // Then new parent
+	// Original parent must be updated first.
+	pull(n)
+
+	// Then new parent.
+	pull(l)
 
 	return l
 }
 
-// rotateLeft is symmetric to rotateRight
+// rotateLeft is symmetric to rotateRight.
 func rotateLeft(n *ostNode) *ostNode {
 	r := n.right
 
 	n.right = r.left
 	r.left = n
 
-	pull(n) // Update original parent (now child)
-	pull(r) // Update new root
+	// Update original parent (now child).
+	pull(n)
+
+	// Update new root.
+	pull(r)
 
 	return r
 }
@@ -68,33 +74,34 @@ func insert(n *ostNode, key string, prio int) *ostNode {
 	}
 
 	if key == n.key {
-		// no duplicates - treat as idempotent operation
+		// no duplicates - treat as idempotent operation.
 		return n
 	}
 
 	if key < n.key {
 		n.left = insert(n.left, key, prio)
 
-		// Fix heap property violation after recursive insertion
+		// Fix heap property violation after recursive insertion.
 		if n.left.priority > n.priority {
 			n = rotateRight(n)
 		}
 	} else {
 		n.right = insert(n.right, key, prio)
 
-		// Right-child has higher priority: needs left rotation
+		// Right-child has higher priority: needs left rotation.
 		if n.right.priority > n.priority {
 			n = rotateLeft(n)
 		}
 	}
 
-	pull(n) // Update size after potential rotations
+	// Update size after potential rotations.
+	pull(n)
 
 	return n
 }
 
 // deleteKey recursively locates target then uses rotations to
-// demote it to leaf position for safe removal
+// demote it to leaf position for safe removal.
 func deleteKey(n *ostNode, key string) *ostNode {
 	if n == nil {
 		return nil
@@ -106,7 +113,7 @@ func deleteKey(n *ostNode, key string) *ostNode {
 	case key > n.key:
 		n.right = deleteKey(n.right, key)
 	default:
-		// Target found: handle 0/1 child cases directly
+		// Target found: handle 0/1 child cases directly.
 		if n.left == nil {
 			return n.right
 		}
@@ -116,47 +123,49 @@ func deleteKey(n *ostNode, key string) *ostNode {
 		}
 
 		// Two children: rotate higher priority child up until
-		// target becomes leaf (preserving treap properties)
+		// target becomes leaf (preserving treap properties).
 		if n.left.priority > n.right.priority {
 			n = rotateRight(n)
-			// Target moved right, delete from right subtree
+			// Target moved right, delete from right subtree.
 			n.right = deleteKey(n.right, key)
 		} else {
 			n = rotateLeft(n)
-			// Target moved left, delete from left subtree
+			// Target moved left, delete from left subtree.
 			n.left = deleteKey(n.left, key)
 		}
 	}
 
-	pull(n) // Size might have changed in subtree
+	// Size might have changed in subtree.
+	pull(n)
 
 	return n
 }
 
 // rankLess counts keys < k by leveraging BST ordering
-// and stored subtree sizes for efficiency
+// and stored subtree sizes for efficiency.
 func rankLess(n *ostNode, k string) int {
 	if n == nil {
 		return 0
 	}
 
-	// When k is in left subtree: no need to count right subtree
+	// When k is in left subtree: no need to count right subtree.
 	if k <= n.key {
 		return rankLess(n.left, k)
 	}
 
-	// When k is in right subtree: count left subtree + current node
+	// When k is in right subtree: count left subtree + current node.
 	return 1 + nodeSize(n.left) + rankLess(n.right, k)
 }
 
-// kth uses subtree sizes for O(log n) traversal
-// Returns zero-value + false for out-of-range indices
+// kth uses subtree sizes for O(log n) traversal.
+// Returns zero-value + false for out-of-range indices.
 func kth(n *ostNode, k int) (string, bool) {
 	if n == nil || k < 0 || k >= nodeSize(n) {
 		return "", false
 	}
 
 	leftSize := nodeSize(n.left)
+
 	switch {
 	case k < leftSize: // Target is in left subtree
 		return kth(n.left, k)
@@ -186,8 +195,8 @@ func (t *OSTree) Len() int {
 // If the key already exists, this is a no-op.
 func (t *OSTree) Insert(key string) {
 	// Using global rand to maintain uniform distribution
-	// of priorities for balanced tree structure
-	p := rand.Int() //nolint:gosec
+	// of priorities for balanced tree structure.
+	p := rand.Int() //nolint:gosec // math/rand/v2 is safe.
 
 	t.root = insert(t.root, key, p)
 }
@@ -209,43 +218,49 @@ func (t *OSTree) Kth(k int) (string, bool) {
 }
 
 // nextPrefix computes the lexicographic successor of a prefix
-// by incrementing the last byte with carry propagation
+// by incrementing the last byte with carry propagation.
 func nextPrefix(prefix string) string {
+	// Empty prefix has no natural successor.
 	if prefix == "" {
-		return "" // Empty prefix has no natural successor
+		return ""
 	}
 
 	b := []byte(prefix)
 	for i := len(b) - 1; i >= 0; i-- {
 		if b[i] == 0xFF {
-			continue // Cannot increment, propagate left
+			// Cannot increment, propagate left.
+			continue
 		}
 
-		b[i]++ // Increment first non-max byte
+		// Increment first non-max byte.
+		b[i]++
 
-		// Truncate after incremented byte (lexicographic minimum)
+		// Truncate after incremented byte (lexicographic minimum).
 		return string(b[:i+1])
 	}
 
-	return "" // All bytes 0xFF -> no upper bound
+	// All bytes 0xFF -> no upper bound.
+	return ""
 }
 
 // RangeBounds returns [start, end) indices for keys with prefix
-// using rank operations for O(log n) performance
+// using rank operations for O(log n) performance.
 func (t *OSTree) RangeBounds(prefix string) (int, int) {
+	// Empty prefix covers entire tree.
 	if prefix == "" {
-		return 0, t.Len() // Empty prefix covers entire tree
+		return 0, t.Len()
 	}
 
-	l := t.Rank(prefix) // First key >= prefix
+	// First key >= prefix.
+	l := t.Rank(prefix)
 
 	up := nextPrefix(prefix)
 	if up == "" {
-		// No upper bound: range extends to end of tree
+		// No upper bound: range extends to end of tree.
 		return l, t.Len()
 	}
 
-	// First key >= nextPrefix is the exclusive end
+	// First key >= nextPrefix is the exclusive end.
 	r := t.Rank(up)
 
 	return l, r

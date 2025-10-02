@@ -1,27 +1,34 @@
 # If you prefer the allow list template instead of the deny list, see community template:
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 #
-# Binaries for programs and plugins
+# Binaries for programs and plugins.
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
 
-# Test binary, built with `go test -c`
+# Test binary, built with `go test -c`.
 *.test
 
-# Output of the go coverage tool, specifically when used with LiteIDE
+# Output of the go coverage tool, specifically when used with LiteIDE.
 *.out
 
-# Dependency directories (remove the comment below to include it)
+# Dependency directories (remove the comment below to include it).
 # vendor/
 
-# Go workspace file
+# Go workspace file.
 go.work
 
-# Ignore xk6 built binary
-./k6
+# Ignore xk6 built binary.
+/k6
+/k6.exe
 
-# Ignore k6-kv database files
-./k6-kv
+# The default on-disk database file used by the disk backend in this repo.
+.k6.kv
+
+# Local tool/cache/bin directory.
+/bin/
+
+# Local temp/scratch area.
+/temp/

@@ -1,9 +1,9 @@
-// Package kv provides a key-value store extension for k6.
 package kv
 
 import (
-	"github.com/oshokin/xk6-kv/kv"
 	"go.k6.io/k6/js/modules"
+
+	"github.com/oshokin/xk6-kv/kv"
 )
 
 func init() {

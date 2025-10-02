@@ -1,0 +1,318 @@
+# Configuration file for golangci-lint v2.
+# This configuration maintains the same standards as the k6 core project.
+
+# The version of the golangci-lint configuration file format.
+version: "2"
+
+# Run configuration defines execution settings for golangci-lint.
+run:
+  # Timeout for analysis run.
+  # Default is 1m.
+  timeout: 5m
+
+# Linters configuration section.
+linters:
+  # Do not load any default linters; we explicitly enable the ones we need.
+  # Options: all, none.
+  default: none
+
+  # List of enabled linters.
+  # You can find all available linters at https://golangci-lint.run/docs/linters/.
+  enable:
+    - asasalint # Checks for pass []any as any in variadic func(...any).
+    - asciicheck # Checks that all code identifiers does not have non-ASCII symbols.
+    - bidichk # Checks for dangerous unicode character sequences.
+    - bodyclose # Checks whether HTTP response body is closed successfully.
+    - canonicalheader # Checks that net/http.Header uses canonical header keys.
+    - contextcheck # Checks whether the function uses a non-inherited context.
+    - copyloopvar # Detects places where loop variables are copied.
+    - cyclop # Checks function and package cyclomatic complexity.
+    - depguard # Guard against unwanted dependencies.
+    - dogsled # Checks assignments with too many blank identifiers (e.g. x, _, _, _, := f()).
+    - dupl # Tool for code clone detection.
+    - durationcheck # Checks for two durations multiplied together.
+    - errcheck # Checks for unchecked errors in Go code.
+    - errchkjson # Checks types passed to the json encoding functions.
+    - errname # Checks that sentinel errors are prefixed with the Err and error types are suffixed with the Error.
+    - errorlint # Finds code that will cause problems with the error wrapping scheme.
+    - exhaustive # Checks exhaustiveness of enum switch statements.
+    - fatcontext # Detects nested contexts in loops.
+    - forbidigo # Forbids identifiers matched by regular expressions.
+    - forcetypeassert # Finds forced type assertions.
+    - funlen # Tool for detection of long functions.
+    - gocheckcompilerdirectives # Validates go compiler directive comments (//go:).
+    - gochecknoglobals # Checks that no global variables exist.
+    - gocognit # Computes and checks the cognitive complexity of functions.
+    - goconst # Finds repeated strings that could be replaced by a constant.
+    - gocritic # Provides diagnostics that check for bugs, performance and style issues.
+    - godot # Checks if comments end in a period.
+    - gomoddirectives # Manages the use of 'replace', 'retract', and 'excludes' directives in go.mod.
+    - goprintffuncname # Checks that printf-like functions are named with f at the end.
+    - gosec # Inspects source code for security problems.
+    - govet # Reports suspicious constructs, such as Printf calls with incorrect arguments.
+    - importas # Enforces consistent import aliases.
+    - ineffassign # Detects when assignments to existing variables are not used.
+    - interfacebloat # Checks the number of methods inside an interface.
+    - loggercheck # Checks key-value pairs for common logger libraries.
+    - maintidx # Measures maintainability index.
+    - makezero # Finds slice declarations with non-zero initial length.
+    - mirror # Reports wrong mirror patterns of bytes/strings usage.
+    - misspell # Finds commonly misspelled English words.
+    - nakedret # Finds naked returns in functions greater than a specified function length.
+    - nestif # Reports deeply nested if statements.
+    - nilerr # Finds the code that returns nil even if it checks that the error is not nil.
+    - nilnesserr # Reports constructs checking err != nil but returning different nil.
+    - nilnil # Checks that there is no simultaneous return of nil error and an invalid value.
+    - noctx # Finds sending http request without context.Context.
+    - nolintlint # Reports ill-formed or insufficient nolint directives.
+    - nosprintfhostport # Checks for misuse of Sprintf to construct a host with port in a URL.
+    - paralleltest # Detects missing usage of t.Parallel() method in tests.
+    - perfsprint # Checks that fmt.Sprintf can be replaced with faster alternatives.
+    - prealloc # Finds slice declarations that could potentially be pre-allocated.
+    - predeclared # Finds code that shadows one of Go's predeclared identifiers.
+    - promlinter # Checks Prometheus metrics naming via promlint.
+    - reassign # Checks that package variables are not reassigned.
+    - recvcheck # Checks for receiver type consistency.
+    - revive # Fast, configurable, extensible, flexible, and beautiful linter for Go.
+    - rowserrcheck # Checks whether Err of rows is checked successfully.
+    - sloglint # Ensure consistent code style when using log/slog.
+    - sqlclosecheck # Checks that sql.Rows and sql.Stmt are closed.
+    - staticcheck # SA* checks, includes gosimple and stylecheck (merged in v2).
+    - testifylint # Checks usage of github.com/stretchr/testify.
+    - thelper # Detects test helpers which don't start with t.Helper().
+    - tparallel # Detects inappropriate usage of t.Parallel() method in tests.
+    - unconvert # Removes unnecessary type conversions.
+    - unparam # Reports unused function parameters.
+    - unused # Checks for unused constants, variables, functions and types.
+    - usestdlibvars # Detects the possibility to use variables/constants from the standard library.
+    - usetesting # Checks for wrong usage of t.Setenv and os.Setenv in tests.
+    - wastedassign # Finds wasted assignment statements.
+    - whitespace # Detects leading and trailing whitespace.
+    - wsl_v5 # Whitespace linter that enforces a consistent style.
+
+  # Settings for specific linters.
+  # Each linter can have its own configuration options.
+  settings:
+    # Settings for cyclop linter (cyclomatic complexity).
+    cyclop:
+      # The maximal cyclomatic complexity to report.
+      # Default is 10.
+      max-complexity: 25
+
+    # Settings for dupl linter (code duplication detection).
+    dupl:
+      # Tokens count to trigger issue.
+      # Default is 150.
+      threshold: 150
+
+    # Settings for exhaustive linter (exhaustiveness check for enum switch statements).
+    exhaustive:
+      # Presence of "default" case in switch statements satisfies exhaustiveness.
+      # Default is false.
+      default-signifies-exhaustive: true
+
+    # Settings for forbidigo linter (forbid specific identifiers).
+    forbidigo:
+      # List of regular expressions to match forbidden identifiers.
+      # Each pattern can optionally have a message explaining why it's forbidden.
+      forbid:
+        # Forbid direct print statements - use proper logging instead.
+        - pattern: ^(fmt\\.Print(|f|ln)|print|println)$
+        # Forbid everything in os, except os.Signal and os.SyscallError.
+        - pattern: ^os\.(.*)$(# Using anything except Signal and SyscallError from the os package is forbidden )?
+        # Forbid everything in syscall except the uppercase constants.
+        - pattern: ^syscall\.[^A-Z_]+$(# Using anything except constants from the syscall package is forbidden )?
+        # Forbid direct use of logrus.Logger.
+        - pattern: ^logrus\.Logger$
+
+    # Settings for funlen linter (function length check).
+    funlen:
+      # Checks the number of lines in a function.
+      # If lower than 0, disable the check.
+      # Default is 60.
+      lines: 80
+      # Checks the number of statements in a function.
+      # If lower than 0, disable the check.
+      # Default is 40.
+      statements: 60
+
+    # Settings for goconst linter (repeated strings that should be constants).
+    goconst:
+      # Minimal length of string constant.
+      # Default is 3.
+      min-len: 10
+      # Minimum occurrences of constant string count to trigger issue.
+      # Default is 3.
+      min-occurrences: 4
+
+    # Settings for interfacebloat linter (interface method count check).
+    interfacebloat:
+      # The maximum number of methods allowed for an interface.
+      # Default is 10.
+      max: 20
+
+    # Settings for nolintlint linter (reports ill-formed or insufficient nolint directives).
+    nolintlint:
+      # Require an explanation for nolint directives.
+      # Default is false.
+      require-explanation: true
+      # Require nolint directives to mention the specific linter being suppressed.
+      # Default is false.
+      require-specific: true
+
+    # Settings for reassign linter (checks that package variables are not reassigned).
+    reassign:
+      # Patterns for variables to check for reassignment.
+      # Default only checks variables matching `^(Err.*|err.*|EOF)$`.
+      patterns:
+        - ".*"
+
+    # Settings for depguard linter (checks for unwanted dependencies).
+    depguard:
+      # Define rules for dependency restrictions.
+      # Each rule can deny or allow specific packages with custom messages.
+      rules:
+        main:
+          deny:
+            - pkg: "github.com/pkg/errors"
+              desc: "Use standard errors package with fmt.Errorf and %w"
+            - pkg: "io/ioutil"
+              desc: "Deprecated since Go 1.16, use io or os packages"
+
+    # Settings for testifylint linter (checks usage of github.com/stretchr/testify).
+    testifylint:
+      # Enable all available testify checks.
+      # When false, need to explicitly enable desired checks.
+      enable-all: true
+
+    # Settings for gocritic linter (provides diagnostics that check for bugs, performance and style issues).
+    gocritic:
+      # List of enabled checks by name.
+      # Run `golangci-lint linters` to see all available checks.
+      enabled-checks:
+        - ruleguard
+      # Settings for individual checks.
+      settings:
+        # Settings for ruleguard check.
+        ruleguard:
+          # Path to a gorules file for the ruleguard check.
+          # Empty string disables custom rules.
+          rules: ""
+
+  # Exclusions configuration for linters.
+  exclusions:
+    # How to treat generated files (none, disable, exclude, lax).
+    # lax mode: some linters are disabled on generated files.
+    generated: lax
+
+    # List of exclusion rules for specific issues.
+    # Each rule can match by linters, path, text, or source.
+    rules:
+      # Standard error check exclusions.
+      - linters: [errcheck]
+        text: "Error return value of .((os\\.)?std(out|err)\\..*|.*Close|.*Flush|os\\.Remove(All)?|.*print(f|ln)?|os\\.(Un)?Setenv). is not checked"
+
+      # Test file exclusions - tests can be complex and have different patterns.
+      - path: _test\.go
+        linters:
+          - bodyclose
+          - canonicalheader
+          - cyclop
+          - dupl
+          - err113
+          - errcheck
+          - forcetypeassert
+          - funlen
+          - gocognit
+          - goconst
+          - gosec
+          - maintidx
+          - noctx
+
+      # Benchmark file exclusions - benchmarks need to be thorough and can be complex.
+      - path: _benchmark_test\.go
+        linters:
+          - cyclop
+          - dupl
+          - errcheck
+          - funlen
+          - gocognit
+          - maintidx
+
+      # Allow os.SyscallError, os.Signal, and os.Interrupt.
+      - linters:
+          - forbidigo
+        text: use of `os\.(SyscallError|Signal|Interrupt)` forbidden
+
+      # Ignore godot linter in compiler directives.
+      - linters: [godot]
+        source: "^//go:"
+
+    # List of path patterns to exclude from all linting.
+    # Paths are matched using regexp.
+    paths:
+      - examples$ # JS examples shouldn't be linted.
+      - bin$ # Ignore downloaded binaries.
+
+# Issues configuration controls how issues are reported.
+issues:
+  # Maximum issues count per one linter.
+  # Set to 0 to disable limit.
+  # Default is 50.
+  max-issues-per-linter: 0
+
+  # Maximum count of issues with the same text.
+  # Set to 0 to disable limit.
+  # Default is 3.
+  max-same-issues: 0
+
+# Formatters configuration section (golangci-lint v2).
+# In v2, formatters are separate from linters.
+# Formatters modify code style and formatting automatically.
+formatters:
+  # List of enabled formatters.
+  # Available formatters: gci, gofmt, gofumpt, goimports, golines.
+  enable:
+    - gci # Advanced import organization (works with goimports).
+    - gofumpt # Stricter version of gofmt (includes all gofmt rules).
+    - goimports # Automatically adds missing and removes unused imports.
+    - golines # Automatically shortens long lines by reformatting code.
+
+  # Settings for specific formatters.
+  settings:
+    # Settings for gci formatter (imports organizer).
+    gci:
+      # Define the section order for imports.
+      # Imports will be grouped and sorted according to these sections.
+      sections:
+        - standard # Standard Go library packages.
+        - default # All other imports (third-party).
+        - prefix(github.com/oshokin) # Packages from your organization.
+        - blank # Blank imports (import _ "package").
+        - dot # Dot imports (import . "package").
+
+    # Settings for goimports formatter (import management).
+    goimports:
+      # Put imports beginning with prefix after third-party packages.
+      # It's a comma-separated list of prefixes.
+      local-prefixes:
+        - github.com/oshokin/xk6-kv
+
+    # Settings for golines formatter (long lines shortener).
+    golines:
+      # Maximum length of a line before it's reformatted.
+      # Lines longer than this will be split across multiple lines.
+      # Default is 100.
+      max-len: 120
+
+  # Exclusions configuration for formatters.
+  exclusions:
+    # How to treat generated files (none, disable, exclude, lax).
+    # lax mode: some formatters are disabled on generated files.
+    generated: lax
+
+    # List of path patterns to exclude from all formatting.
+    # Paths are matched using regexp.
+    paths:
+      - examples$ # JS examples shouldn't be formatted.
+      - bin$ # Ignore downloaded binaries.

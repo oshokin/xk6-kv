@@ -1,210 +1,549 @@
 package store
 
 import (
+	"bytes"
+	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
+// TestNewMemoryStore verifies that NewMemoryStore returns a non-nil store whose internal
+// container map is allocated and empty.
 func TestNewMemoryStore(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(true)
-	if store == nil {
-		t.Fatal("NewMemoryStore() returned nil")
-	}
-	if store.container == nil {
-		t.Fatal("NewMemoryStore() returned a store with nil container")
-	}
-	if len(store.container) != 0 {
-		t.Fatalf("NewMemoryStore() returned a store with non-empty container, got %d items", len(store.container))
-	}
+
+	require.NotNil(t, store, "NewMemoryStore() must not return nil")
+	require.NotNil(t, store.container, "container map must be allocated")
+	assert.Empty(t, store.container, "new store must be empty")
 }
 
-func TestMemoryStore_Get(t *testing.T) {
+// TestMemoryStore_GetSet_RoundtripAndTypes validates:
+//  1. Get on a missing key returns an error;
+//  2. string and []byte Set -> Get round-trip to the same bytes;
+//  3. unsupported types cause an error on Set.
+func TestMemoryStore_GetSet_RoundtripAndTypes(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(true)
 
-	// Test getting a non-existent key
-	_, err := store.Get("non-existent")
-	if err == nil {
-		t.Fatal("Get() on non-existent key should return an error")
-	}
+	// Missing key must error.
+	_, err := store.Get("does-not-exist")
+	require.Error(t, err, "Get must return an error for missing key")
 
-	// Test getting an existing key
-	expectedValue := []byte("test-value")
-	store.container["test-key"] = expectedValue
+	// String round-trip.
+	require.NoError(t, store.Set("string-key", "string-value"))
+	gotAny, err := store.Get("string-key")
+	require.NoError(t, err)
 
-	value, err := store.Get("test-key")
-	if err != nil {
-		t.Fatalf("Get() on existing key returned an error: %v", err)
-	}
+	gotBytes, ok := gotAny.([]byte)
+	require.Truef(t, ok, "expected []byte, got %T", gotAny)
+	assert.Equal(t, []byte("string-value"), gotBytes)
 
-	valueBytes, ok := value.([]byte)
-	if !ok {
-		t.Fatalf("Get() returned a value of unexpected type, got %T, want []byte", value)
-	}
-
-	if string(valueBytes) != string(expectedValue) {
-		t.Fatalf("Get() returned unexpected value, got %s, want %s", string(valueBytes), string(expectedValue))
-	}
-}
-
-func TestMemoryStore_Set(t *testing.T) {
-	t.Parallel()
-
-	store := NewMemoryStore(true)
-
-	// Test setting a string value
-	err := store.Set("string-key", "string-value")
-	if err != nil {
-		t.Fatalf("Set() with string value returned an error: %v", err)
-	}
-
-	value, exists := store.container["string-key"]
-	if !exists {
-		t.Fatal("Set() with string value did not store the key")
-	}
-	if string(value) != "string-value" {
-		t.Fatalf("Set() with string value stored unexpected value, got %s, want %s", string(value), "string-value")
-	}
-
-	// Test setting a byte slice value
+	// []byte round-trip.
 	byteValue := []byte("byte-value")
-	err = store.Set("byte-key", byteValue)
-	if err != nil {
-		t.Fatalf("Set() with byte slice value returned an error: %v", err)
-	}
+	require.NoError(t, store.Set("byte-key", byteValue))
+	gotAny, err = store.Get("byte-key")
+	require.NoError(t, err)
 
-	value, exists = store.container["byte-key"]
-	if !exists {
-		t.Fatal("Set() with byte slice value did not store the key")
-	}
-	if string(value) != string(byteValue) {
-		t.Fatalf("Set() with byte slice value stored unexpected value, got %s, want %s", string(value), string(byteValue))
-	}
+	gotBytes, ok = gotAny.([]byte)
+	require.True(t, ok, "expected []byte from Get")
+	assert.Equal(t, byteValue, gotBytes)
 
-	// Test setting an unsupported value type
-	err = store.Set("invalid-key", 123)
-	if err == nil {
-		t.Fatal("Set() with unsupported value type should return an error")
-	}
+	// Unsupported type must error.
+	require.Error(t, store.Set("invalid-key", 123), "Set of unsupported type must error")
 }
 
+// TestMemoryStore_Concurrency performs concurrent Set/Get loops to smoke-test synchronization.
+// If we complete without deadlock or data race (under -race), the test passes.
+func TestMemoryStore_Concurrency(t *testing.T) {
+	t.Parallel()
+
+	var (
+		store = NewMemoryStore(true)
+		wg    sync.WaitGroup
+	)
+
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		for range 100 {
+			_ = store.Set("key", "value")
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		for range 100 {
+			_, _ = store.Get("key")
+		}
+	}()
+
+	wg.Wait()
+}
+
+// TestMemoryStore_IncrementBy_Basic checks IncrementBy on absent key (start at 0), positive/negative
+// increments, and that non-integer payloads cause an error.
+func TestMemoryStore_IncrementBy_Basic(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(true)
+
+	newVal, err := store.IncrementBy("ctr", 5)
+	require.NoError(t, err)
+	assert.EqualValues(t, 5, newVal)
+
+	newVal, err = store.IncrementBy("ctr", -2)
+	require.NoError(t, err)
+	assert.EqualValues(t, 3, newVal)
+
+	require.NoError(t, store.Set("bad", "not-an-int"))
+	_, err = store.IncrementBy("bad", 1)
+	require.Error(t, err, "non-integer value must cause IncrementBy error")
+}
+
+// TestMemoryStore_IncrementBy_Concurrent verifies concurrent increments produce the exact sum.
+func TestMemoryStore_IncrementBy_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	const (
+		concurrencyLevel       = 1000
+		delta            int64 = 1
+	)
+
+	var (
+		store = NewMemoryStore(true)
+		wg    sync.WaitGroup
+	)
+
+	wg.Add(concurrencyLevel)
+
+	for range concurrencyLevel {
+		go func() {
+			defer wg.Done()
+
+			_, err := store.IncrementBy("ctr", delta)
+			assert.NoError(t, err)
+		}()
+	}
+
+	wg.Wait()
+
+	resultAny, err := store.Get("ctr")
+	require.NoError(t, err)
+
+	resultBytes := resultAny.([]byte)
+	actual, parseErr := strconv.ParseInt(string(resultBytes), 10, 64)
+	require.NoError(t, parseErr)
+	assert.EqualValues(t, concurrencyLevel, actual, "counter mismatch")
+}
+
+// TestMemoryStore_GetOrSet_Basic validates first-writer wins semantics and the "loaded" flag.
+func TestMemoryStore_GetOrSet_Basic(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(true)
+
+	val, loaded, err := store.GetOrSet("k", "v1")
+	require.NoError(t, err)
+	require.False(t, loaded, "first insert must be loaded=false")
+	assert.Equal(t, []byte("v1"), val.([]byte))
+
+	val, loaded, err = store.GetOrSet("k", "v2")
+	require.NoError(t, err)
+	require.True(t, loaded, "existing key must return loaded=true")
+	assert.Equal(t, []byte("v1"), val.([]byte), "existing value must be returned")
+}
+
+// TestMemoryStore_GetOrSet_Concurrent ensures only one goroutine creates the value and
+// all others observe the identical stored bytes.
+func TestMemoryStore_GetOrSet_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	const concurrencyLevel = 256
+
+	type goroutineResult struct {
+		actualBytes []byte
+		loaded      bool
+		err         error
+	}
+
+	var (
+		store     = NewMemoryStore(true)
+		resultsCh = make(chan goroutineResult, concurrencyLevel)
+		wg        sync.WaitGroup
+	)
+
+	wg.Add(concurrencyLevel)
+
+	for i := range concurrencyLevel {
+		value := "v" + strconv.Itoa(i)
+
+		go func(v string) {
+			defer wg.Done()
+
+			actual, loaded, err := store.GetOrSet("one", v)
+
+			var actualBytes []byte
+			if actual != nil {
+				actualBytes = actual.([]byte)
+			}
+
+			resultsCh <- goroutineResult{
+				actualBytes: actualBytes,
+				loaded:      loaded,
+				err:         err,
+			}
+		}(value)
+	}
+
+	wg.Wait()
+	close(resultsCh)
+
+	var (
+		firstWriterCount int
+		firstValue       string
+	)
+
+	for result := range resultsCh {
+		require.NoError(t, result.err)
+
+		if !result.loaded {
+			firstWriterCount++
+			firstValue = string(result.actualBytes)
+		} else {
+			assert.Equal(t, firstValue, string(result.actualBytes), "all readers must see the same stored value")
+		}
+	}
+
+	assert.Equal(t, 1, firstWriterCount, "exactly one goroutine must create the value")
+}
+
+// TestMemoryStore_Swap_Basic checks insertion (loaded=false, prev=nil) and replacement (loaded=true with prev bytes).
+func TestMemoryStore_Swap_Basic(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(true)
+
+	prev, loaded, err := store.Swap("k", "v1")
+	require.NoError(t, err)
+	assert.False(t, loaded, "first Swap must report loaded=false")
+	assert.Nil(t, prev, "first Swap must return prev=nil")
+
+	prev, loaded, err = store.Swap("k", "v2")
+	require.NoError(t, err)
+	assert.True(t, loaded, "second Swap must report loaded=true")
+	assert.Equal(t, []byte("v1"), prev.([]byte))
+
+	got, err := store.Get("k")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("v2"), got.([]byte), "value must be replaced")
+}
+
+// TestMemoryStore_CompareAndSwap_Basic verifies CAS fails on wrong old value and succeeds on correct one.
+func TestMemoryStore_CompareAndSwap_Basic(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(true)
+	require.NoError(t, store.Set("k", "old"))
+
+	ok, err := store.CompareAndSwap("k", "BAD", "new")
+	require.NoError(t, err)
+	assert.False(t, ok, "CAS must fail with wrong old")
+
+	got, err := store.Get("k")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("old"), got.([]byte), "value must remain unchanged on failed CAS")
+
+	ok, err = store.CompareAndSwap("k", "old", "new")
+	require.NoError(t, err)
+	assert.True(t, ok, "CAS must succeed on correct old")
+
+	got, err = store.Get("k")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("new"), got.([]byte), "value must be updated")
+}
+
+// TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner ensures exactly one CAS succeeds under contention.
+func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
+	t.Parallel()
+
+	const concurrencyLevel = 200
+
+	var (
+		store = NewMemoryStore(true)
+		okCh  = make(chan bool, concurrencyLevel)
+		wg    sync.WaitGroup
+	)
+
+	require.NoError(t, store.Set("k", "v0"))
+
+	wg.Add(concurrencyLevel)
+
+	for range concurrencyLevel {
+		go func() {
+			defer wg.Done()
+
+			ok, err := store.CompareAndSwap("k", "v0", "v1")
+			assert.NoError(t, err)
+
+			okCh <- ok
+		}()
+	}
+
+	wg.Wait()
+	close(okCh)
+
+	var successCount int
+
+	for ok := range okCh {
+		if ok {
+			successCount++
+		}
+	}
+
+	assert.Equal(t, 1, successCount, "exactly one CAS must succeed")
+
+	got, err := store.Get("k")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("v1"), got.([]byte))
+}
+
+// TestMemoryStore_Delete ensures Delete removes present keys and is a no-op (no error) for missing keys.
 func TestMemoryStore_Delete(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(true)
+	require.NoError(t, store.Set("test-key", "test-value"))
 
-	// Setup
-	store.container["test-key"] = []byte("test-value")
-
-	// Test deleting an existing key
-	err := store.Delete("test-key")
-	if err != nil {
-		t.Fatalf("Delete() returned an error: %v", err)
-	}
-
+	require.NoError(t, store.Delete("test-key"))
 	_, exists := store.container["test-key"]
-	if exists {
-		t.Fatal("Delete() did not remove the key from the container")
-	}
+	assert.False(t, exists, "key must be removed from container")
 
-	// Test deleting a non-existent key (should not error)
-	err = store.Delete("non-existent")
-	if err != nil {
-		t.Fatalf("Delete() on non-existent key returned an error: %v", err)
-	}
+	require.NoError(t, store.Delete("non-existent"), "Delete on missing key must not error")
 }
 
+// TestMemoryStore_Exists checks Exists returns false for missing keys and true for present keys.
 func TestMemoryStore_Exists(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(true)
 
-	// Test with non-existent key
 	exists, err := store.Exists("non-existent")
-	if err != nil {
-		t.Fatalf("Exists() returned an error: %v", err)
-	}
-	if exists {
-		t.Fatal("Exists() returned true for a non-existent key")
-	}
+	require.NoError(t, err)
+	assert.False(t, exists)
 
-	// Test with existing key
-	store.container["test-key"] = []byte("test-value")
+	require.NoError(t, store.Set("test-key", "test-value"))
 
 	exists, err = store.Exists("test-key")
-	if err != nil {
-		t.Fatalf("Exists() returned an error: %v", err)
-	}
-	if !exists {
-		t.Fatal("Exists() returned false for an existing key")
-	}
+	require.NoError(t, err)
+	assert.True(t, exists)
 }
 
+// TestMemoryStore_DeleteIfExists_Basic verifies it returns (false) for absent key, (true) when it deletes,
+// and that the key is gone afterwards.
+func TestMemoryStore_DeleteIfExists_Basic(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(true)
+
+	ok, err := store.DeleteIfExists("k")
+	require.NoError(t, err)
+	assert.False(t, ok, "absent key must return false")
+
+	require.NoError(t, store.Set("k", "v"))
+
+	ok, err = store.DeleteIfExists("k")
+	require.NoError(t, err)
+	assert.True(t, ok, "present key must return true")
+
+	exists, _ := store.Exists("k")
+	assert.False(t, exists, "key must not exist after deletion")
+}
+
+// TestMemoryStore_DeleteIfExists_ConcurrentSingleWinner ensures exactly one deleter wins under contention.
+func TestMemoryStore_DeleteIfExists_ConcurrentSingleWinner(t *testing.T) {
+	t.Parallel()
+
+	const concurrencyLevel = 128
+
+	var (
+		store = NewMemoryStore(true)
+		wins  int
+		mu    sync.Mutex
+		wg    sync.WaitGroup
+	)
+
+	require.NoError(t, store.Set("k", "v"))
+
+	wg.Add(concurrencyLevel)
+
+	for range concurrencyLevel {
+		go func() {
+			defer wg.Done()
+
+			ok, err := store.DeleteIfExists("k")
+			assert.NoError(t, err)
+
+			if ok {
+				mu.Lock()
+
+				wins++
+
+				mu.Unlock()
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	assert.Equal(t, 1, wins, "exactly one deletion must succeed")
+
+	exists, _ := store.Exists("k")
+	assert.False(t, exists, "key must be removed")
+}
+
+// TestMemoryStore_CompareAndDelete_Basic checks that CompareAndDelete only removes the key when the expected value matches.
+func TestMemoryStore_CompareAndDelete_Basic(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(true)
+	require.NoError(t, store.Set("k", "v1"))
+
+	ok, err := store.CompareAndDelete("k", "BAD")
+	require.NoError(t, err)
+	assert.False(t, ok, "wrong value must not delete")
+
+	exists, _ := store.Exists("k")
+	assert.True(t, exists, "key should still exist")
+
+	ok, err = store.CompareAndDelete("k", "v1")
+	require.NoError(t, err)
+	assert.True(t, ok, "correct value must delete")
+
+	exists, _ = store.Exists("k")
+	assert.False(t, exists, "key must be removed")
+}
+
+// TestMemoryStore_CompareAndDelete_ConcurrentSingleWinner ensures exactly one CompareAndDelete wins under contention.
+func TestMemoryStore_CompareAndDelete_ConcurrentSingleWinner(t *testing.T) {
+	t.Parallel()
+
+	const concurrencyLevel = 120
+
+	var (
+		store        = NewMemoryStore(true)
+		successCount int
+		mu           sync.Mutex
+		wg           sync.WaitGroup
+	)
+
+	require.NoError(t, store.Set("k", "secret"))
+
+	wg.Add(concurrencyLevel)
+
+	for i := 0; i < concurrencyLevel; i++ {
+		go func() {
+			defer wg.Done()
+
+			ok, err := store.CompareAndDelete("k", "secret")
+			assert.NoError(t, err)
+
+			if ok {
+				mu.Lock()
+
+				successCount++
+
+				mu.Unlock()
+			}
+		}()
+	}
+
+	wg.Wait()
+	assert.Equal(t, 1, successCount, "exactly one CompareAndDelete must succeed")
+
+	exists, _ := store.Exists("k")
+	assert.False(t, exists, "key must be deleted")
+}
+
+// TestMemoryStore_AtomicOps_DoNotChangeBytesUnexpectedly ensures the store does not alias external byte slices.
+// After storing a []byte, mutating the original slice must not affect the stored value.
+func TestMemoryStore_AtomicOps_DoNotChangeBytesUnexpectedly(t *testing.T) {
+	t.Parallel()
+
+	var (
+		store         = NewMemoryStore(true)
+		originalBytes = []byte("payload")
+	)
+
+	_, _, err := store.GetOrSet("k", originalBytes)
+	require.NoError(t, err)
+
+	// Mutate the original slice; the stored copy must remain unchanged.
+	originalBytes[0] = 'X'
+
+	got, err := store.Get("k")
+	require.NoError(t, err)
+
+	assert.False(t,
+		bytes.Equal(got.([]byte), originalBytes) && strings.HasPrefix(string(got.([]byte)), "X"),
+		"store must not alias external byte slices",
+	)
+}
+
+// TestMemoryStore_Clear confirms Clear removes all entries.
 func TestMemoryStore_Clear(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(true)
 
-	// Setup
-	store.container["key1"] = []byte("value1")
-	store.container["key2"] = []byte("value2")
+	require.NoError(t, store.Set("key1", "value1"))
+	require.NoError(t, store.Set("key2", "value2"))
 
-	// Test clearing the store
-	err := store.Clear()
-	if err != nil {
-		t.Fatalf("Clear() returned an error: %v", err)
-	}
-
-	if len(store.container) != 0 {
-		t.Fatalf("Clear() did not empty the container, got %d items", len(store.container))
-	}
+	require.NoError(t, store.Clear())
+	assert.Empty(t, store.container, "store must be empty after Clear")
 }
 
+// TestMemoryStore_Size verifies Size reports 0 for empty stores and the exact number after inserts.
 func TestMemoryStore_Size(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(true)
 
-	// Test empty store
 	size, err := store.Size()
-	if err != nil {
-		t.Fatalf("Size() returned an error: %v", err)
-	}
-	if size != 0 {
-		t.Fatalf("Size() returned unexpected size for empty store, got %d, want 0", size)
-	}
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, size, "empty store must report size=0")
 
-	// Test non-empty store
-	store.container["key1"] = []byte("value1")
-	store.container["key2"] = []byte("value2")
+	require.NoError(t, store.Set("key1", "value1"))
+	require.NoError(t, store.Set("key2", "value2"))
 
 	size, err = store.Size()
-	if err != nil {
-		t.Fatalf("Size() returned an error: %v", err)
-	}
-	if size != 2 {
-		t.Fatalf("Size() returned unexpected size, got %d, want 2", size)
-	}
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, size, "size must equal number of entries")
 }
 
+// TestMemoryStore_List checks listing with/without prefix and with limits, verifying both contents
+// and the sort order by key.
 func TestMemoryStore_List(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(true)
 
-	// Test empty store
+	// Empty store.
 	entries, err := store.List("", 0)
-	if err != nil {
-		t.Fatalf("List() returned an error: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("List() returned unexpected entries for empty store, got %d, want 0", len(entries))
-	}
+	require.NoError(t, err)
+	assert.Empty(t, entries, "empty store must list zero entries")
 
-	// Add some data to the store
+	// Seed data.
 	testData := map[string]string{
 		"key1":      "value1",
 		"key2":      "value2",
@@ -213,438 +552,272 @@ func TestMemoryStore_List(t *testing.T) {
 		"different": "value5",
 	}
 
-	for k, v := range testData {
-		err := store.Set(k, v)
-		if err != nil {
-			t.Fatalf("Failed to set up test: %v", err)
-		}
+	for key, value := range testData {
+		require.NoError(t, store.Set(key, value))
 	}
 
-	// Test listing all entries (no prefix, no limit)
+	// All entries: length and sorted order.
 	entries, err = store.List("", 0)
-	if err != nil {
-		t.Fatalf("List() returned an error: %v", err)
-	}
-	if len(entries) != len(testData) {
-		t.Fatalf("List() returned unexpected number of entries, got %d, want %d", len(entries), len(testData))
-	}
+	require.NoError(t, err)
+	require.Len(t, entries, len(testData))
 
-	// Verify entries are sorted by key
 	for i := 1; i < len(entries); i++ {
-		if entries[i-1].Key > entries[i].Key {
-			t.Fatalf("List() returned entries in wrong order, %s should come before %s", entries[i].Key, entries[i-1].Key)
-		}
+		assert.LessOrEqualf(t, entries[i-1].Key, entries[i].Key, "entries must be sorted by key")
 	}
 
-	// Test listing with prefix
+	// Prefix filter.
 	entries, err = store.List("prefix", 0)
-	if err != nil {
-		t.Fatalf("List() with prefix returned an error: %v", err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("List() with prefix returned unexpected number of entries, got %d, want 2", len(entries))
-	}
+	require.NoError(t, err)
+	assert.Len(t, entries, 2)
 
-	// Verify only entries with the prefix are returned
 	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Key, "prefix") {
-			t.Fatalf("List() with prefix returned an entry without the prefix: %s", entry.Key)
-		}
+		assert.Truef(t, strings.HasPrefix(entry.Key, "prefix"), "unexpected key without prefix: %s", entry.Key)
 	}
 
-	// Test listing with limit
+	// Limit only.
 	entries, err = store.List("", 2)
-	if err != nil {
-		t.Fatalf("List() with limit returned an error: %v", err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("List() with limit returned unexpected number of entries, got %d, want 2", len(entries))
-	}
+	require.NoError(t, err)
+	assert.Len(t, entries, 2)
 
-	// Test listing with prefix and limit
+	// Prefix + limit.
 	entries, err = store.List("prefix", 1)
-	if err != nil {
-		t.Fatalf("List() with prefix and limit returned an error: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("List() with prefix and limit returned unexpected number of entries, got %d, want 1", len(entries))
-	}
-	if !strings.HasPrefix(entries[0].Key, "prefix") {
-		t.Fatalf("List() with prefix and limit returned an entry without the prefix: %s", entries[0].Key)
-	}
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.True(t, strings.HasPrefix(entries[0].Key, "prefix"))
 }
 
-func TestMemoryStore_Close(t *testing.T) {
+// TestDiskStore_KeyTrackingConsistency validates the internal key index (map/list) remains consistent
+// after Set/Delete/Clear when trackKeys is enabled.
+func TestMemoryStore_KeyTrackingConsistency(t *testing.T) {
+	t.Parallel()
+
+	var (
+		store = NewMemoryStore(true)
+		keys  = []string{"key1", "key2", "key3"}
+	)
+
+	for _, key := range keys {
+		require.NoError(t, store.Set(key, "value"))
+	}
+
+	store.mu.RLock()
+
+	assert.Len(t, store.keysList, 3)
+
+	for _, key := range keys {
+		_, exists := store.keysMap[key]
+		assert.Truef(t, exists, "key missing from index: %s", key)
+	}
+
+	store.mu.RUnlock()
+
+	require.NoError(t, store.Delete("key2"))
+
+	store.mu.RLock()
+
+	assert.Len(t, store.keysList, 2)
+	_, exists := store.keysMap["key2"]
+	assert.False(t, exists, "deleted key must not remain in index")
+
+	store.mu.RUnlock()
+
+	require.NoError(t, store.Clear())
+
+	store.mu.RLock()
+	assert.Empty(t, store.keysList, "index must be empty after Clear")
+	store.mu.RUnlock()
+}
+
+// TestMemoryStore_RandomKey_Distribution_WithTracking validates that with tracking enabled,
+// RandomKey on an empty store returns "", and over repeated draws it eventually returns all present keys.
+func TestMemoryStore_RandomKey_Distribution_WithTracking(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(true)
 
-	// Close should be a no-op for MemoryStore
-	err := store.Close()
-	if err != nil {
-		t.Fatalf("Close() returned an error: %v", err)
-	}
-}
-
-func TestMemoryStore_Concurrency(t *testing.T) {
-	t.Parallel()
-
-	store := NewMemoryStore(true)
-	done := make(chan bool)
-
-	// Test concurrent reads and writes
-	go func() {
-		for range 100 {
-			store.Set("key", "value") //nolint:errcheck,gosec
-		}
-		done <- true
-	}()
-
-	go func() {
-		for range 100 {
-			store.Get("key") //nolint:errcheck,gosec
-		}
-		done <- true
-	}()
-
-	// Wait for both goroutines to finish
-	<-done
-	<-done
-
-	// If we got here without deadlocking, the test passes
-}
-
-// TestMemoryStore_TableDemonstrates demonstrates the table-driven testing approach
-func TestMemoryStore_TableDriven(t *testing.T) {
-	t.Parallel()
-
-	// Define test cases
-	testCases := []struct {
-		name      string
-		setup     func(*MemoryStore)
-		operation func(*MemoryStore) (any, error)
-		validate  func(*testing.T, any, error)
-	}{
-		{
-			name: "Clear store",
-			setup: func(s *MemoryStore) {
-				s.container["key1"] = []byte("value1")
-				s.container["key2"] = []byte("value2")
-			},
-			operation: func(s *MemoryStore) (any, error) {
-				err := s.Clear()
-				if err != nil {
-					return nil, err
-				}
-
-				return s.Size()
-			},
-			validate: func(t *testing.T, result any, err error) {
-				if err != nil {
-					t.Fatalf("Unexpected error: %v", err)
-				}
-
-				size, ok := result.(int64)
-				if !ok {
-					t.Fatalf("Expected int64, got %T", result)
-				}
-
-				if size != 0 {
-					t.Fatalf("Expected size 0, got %d", size)
-				}
-			},
-		},
-		{
-			name: "List entries with prefix",
-			setup: func(s *MemoryStore) {
-				s.container["prefix1"] = []byte("value1")
-				s.container["prefix2"] = []byte("value2")
-				s.container["other"] = []byte("value3")
-			},
-			operation: func(s *MemoryStore) (any, error) {
-				return s.List("prefix", 0)
-			},
-			validate: func(t *testing.T, result any, err error) {
-				if err != nil {
-					t.Fatalf("Unexpected error: %v", err)
-				}
-
-				entries, ok := result.([]Entry)
-				if !ok {
-					t.Fatalf("Expected []Entry, got %T", result)
-				}
-
-				if len(entries) != 2 {
-					t.Fatalf("Expected 2 entries, got %d", len(entries))
-				}
-
-				// Verify all entries have the prefix
-				for _, entry := range entries {
-					if !strings.HasPrefix(entry.Key, "prefix") {
-						t.Fatalf("Entry key %s does not have prefix 'prefix'", entry.Key)
-					}
-				}
-
-				// Verify entries are sorted
-				if entries[0].Key > entries[1].Key {
-					t.Fatalf("Entries are not sorted, got %s before %s", entries[0].Key, entries[1].Key)
-				}
-			},
-		},
-		{
-			name: "List entries with limit",
-			setup: func(s *MemoryStore) {
-				s.container["key1"] = []byte("value1")
-				s.container["key2"] = []byte("value2")
-				s.container["key3"] = []byte("value3")
-			},
-			operation: func(s *MemoryStore) (any, error) {
-				return s.List("", 2)
-			},
-			validate: func(t *testing.T, result any, err error) {
-				if err != nil {
-					t.Fatalf("Unexpected error: %v", err)
-				}
-
-				entries, ok := result.([]Entry)
-				if !ok {
-					t.Fatalf("Expected []Entry, got %T", result)
-				}
-
-				if len(entries) != 2 {
-					t.Fatalf("Expected 2 entries, got %d", len(entries))
-				}
-			},
-		},
-	}
-
-	// Run test cases
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			store := NewMemoryStore(true)
-			tc.setup(store)
-			result, err := tc.operation(store)
-			tc.validate(t, result, err)
-		})
-	}
-}
-
-func TestMemoryStore_RandomKey(t *testing.T) {
-	t.Parallel()
-
-	store := NewMemoryStore(true)
-
-	// Test empty store
 	key, err := store.RandomKey("")
-	if err != nil {
-		t.Fatalf("Unexpected error for empty store: %v", err)
-	}
+	require.NoError(t, err)
+	assert.Empty(t, key, "empty store must return empty key")
 
-	if key != "" {
-		t.Fatalf("Expected empty key for empty store, got %q", key)
-	}
-
-	// Populate keys
 	keys := []string{"alpha", "beta", "gamma"}
 	for _, k := range keys {
-		_ = store.Set(k, "some-value")
+		require.NoError(t, store.Set(k, "some-value"))
 	}
 
-	// Test multiple random calls
 	found := make(map[string]bool)
+
 	for range 1000 {
 		k, err := store.RandomKey("")
-		if err != nil {
-			t.Fatalf("Unexpected error: %v", err)
-		}
-
-		if k == "" {
-			t.Fatalf("Unexpected empty key from RandomKey on non-empty store")
-		}
+		require.NoError(t, err)
+		require.NotEmpty(t, k, "non-empty store must return some key")
 
 		found[k] = true
 	}
 
-	// Ensure all keys were returned at least once
 	for _, k := range keys {
-		if !found[k] {
-			t.Errorf("Key %q was never returned by RandomKey", k)
-		}
+		assert.Truef(t, found[k], "key not observed in random selections: %s", k)
 	}
 }
 
+// TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled covers prefix filtering when tracking is enabled,
+// including empty store, no-prefix, matching prefix, no-match prefix, and correctness after deletions and clear.
 func TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
 	t.Parallel()
 
-	// TrackKeys: true (uses OST for prefixes)
-	s := NewMemoryStore(true)
+	store := NewMemoryStore(true)
 
-	// Empty store -> "" (no error)
-	key, err := s.RandomKey("a:")
-	if err != nil {
-		t.Fatalf("unexpected error on empty store: %v", err)
-	}
+	key, err := store.RandomKey("a:")
+	require.NoError(t, err)
+	assert.Empty(t, key, "empty store must return empty key for any prefix")
 
-	if key != "" {
-		t.Fatalf("expected empty key on empty store, got %q", key)
-	}
+	mustSetInMemoryStore(t, store, "a:1", "v1")
+	mustSetInMemoryStore(t, store, "a:2", "v2")
+	mustSetInMemoryStore(t, store, "b:1", "v3")
 
-	// Seed
-	mustMemSet(t, s, "a:1", "v1")
-	mustMemSet(t, s, "a:2", "v2")
-	mustMemSet(t, s, "b:1", "v3")
+	key, err = store.RandomKey("")
+	require.NoError(t, err)
+	assert.NotEmpty(t, key, "no-prefix should return some key")
+	assert.True(t, key == "a:1" || key == "a:2" || key == "b:1", "must be one of seeded keys")
 
-	// No prefix -> any of the three
-	key, err = s.RandomKey("")
-	if err != nil {
-		t.Fatalf("unexpected error (no prefix): %v", err)
-	}
+	key, err = store.RandomKey("a:")
+	require.NoError(t, err)
+	require.NotEmpty(t, key)
+	assert.True(t, strings.HasPrefix(key, "a:"), "must return a key with prefix a:")
 
-	if key == "" {
-		t.Fatalf("expected non-empty key")
-	}
+	key, err = store.RandomKey("z:")
+	require.NoError(t, err)
+	assert.Empty(t, key, "no-match prefix must return empty key")
 
-	if !(key == "a:1" || key == "a:2" || key == "b:1") {
-		t.Fatalf("unexpected key %q", key)
-	}
+	mustDeleteFromMemoryStore(t, store, "a:1")
+	key, err = store.RandomKey("a:")
+	require.NoError(t, err)
+	assert.Equal(t, "a:2", key, "after delete, the only remaining prefixed key must be returned")
 
-	// Prefix "a:" -> only a:*
-	key, err = s.RandomKey("a:")
-	if err != nil {
-		t.Fatalf("unexpected error for prefix a:: %v", err)
-	}
-
-	if key == "" || !strings.HasPrefix(key, "a:") {
-		t.Fatalf("expected key with prefix a:, got %q", key)
-	}
-
-	// No-match prefix -> ""
-	key, err = s.RandomKey("z:")
-	if err != nil {
-		t.Fatalf("unexpected error (no-match prefix): %v", err)
-	}
-
-	if key != "" {
-		t.Fatalf("expected empty key for no-match prefix, got %q", key)
-	}
-
-	// Delete one of the a:* and check still valid
-	mustMemDelete(t, s, "a:1")
-	key, err = s.RandomKey("a:")
-	if err != nil {
-		t.Fatalf("unexpected error after delete: %v", err)
-	}
-
-	if key != "a:2" {
-		t.Fatalf("expected a:2 after deleting a:1, got %q", key)
-	}
-
-	// Clear -> ""
-	mustMemClear(t, s)
-
-	key, err = s.RandomKey("a:")
-	if err != nil {
-		t.Fatalf("unexpected error after clear: %v", err)
-	}
-
-	if key != "" {
-		t.Fatalf("expected empty key after clear, got %q", key)
-	}
+	mustClearMemoryStore(t, store)
+	key, err = store.RandomKey("a:")
+	require.NoError(t, err)
+	assert.Empty(t, key, "after clear, prefix must return empty key")
 }
 
+// TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled covers prefix filtering with tracking disabled.
 func TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
 	t.Parallel()
 
-	// TrackKeys: false (two-pass scan path)
-	s := NewMemoryStore(false)
+	store := NewMemoryStore(false)
 
-	// Empty -> ""
-	key, err := s.RandomKey("a:")
-	if err != nil {
-		t.Fatalf("unexpected error on empty store: %v", err)
-	}
+	key, err := store.RandomKey("a:")
+	require.NoError(t, err)
+	assert.Empty(t, key, "empty store must return empty key")
 
-	if key != "" {
-		t.Fatalf("expected empty key on empty store, got %q", key)
-	}
+	mustSetInMemoryStore(t, store, "a:1", "v1")
+	mustSetInMemoryStore(t, store, "a:2", "v2")
+	mustSetInMemoryStore(t, store, "b:1", "v3")
 
-	// Seed
-	mustMemSet(t, s, "a:1", "v1")
-	mustMemSet(t, s, "a:2", "v2")
-	mustMemSet(t, s, "b:1", "v3")
+	key, err = store.RandomKey("a:")
+	require.NoError(t, err)
+	require.NotEmpty(t, key)
+	assert.True(t, strings.HasPrefix(key, "a:"), "must return key with prefix a:")
 
-	// Prefix "a:" -> must start with a:
-	key, err = s.RandomKey("a:")
-	if err != nil {
-		t.Fatalf("unexpected error for prefix a:: %v", err)
-	}
-
-	if key == "" || !strings.HasPrefix(key, "a:") {
-		t.Fatalf("expected key with prefix a:, got %q", key)
-	}
-
-	// Prefix with no match
-	key, err = s.RandomKey("z:")
-	if err != nil {
-		t.Fatalf("unexpected error for no-match prefix: %v", err)
-	}
-
-	if key != "" {
-		t.Fatalf("expected empty key for no-match prefix, got %q", key)
-	}
+	key, err = store.RandomKey("z:")
+	require.NoError(t, err)
+	assert.Empty(t, key, "no-match prefix must return empty key")
 }
 
+// TestMemoryStore_RebuildKeyList_RandomKeyPrefix ensures RebuildKeyList reconstructs the internal index
+// such that RandomKey with a prefix works again after simulated index loss.
 func TestMemoryStore_RebuildKeyList_RandomKeyPrefix(t *testing.T) {
 	t.Parallel()
 
-	s := NewMemoryStore(true)
+	store := NewMemoryStore(true)
 
-	mustMemSet(t, s, "p:1", "v1")
-	mustMemSet(t, s, "p:2", "v2")
-	mustMemSet(t, s, "q:1", "v3")
+	mustSetInMemoryStore(t, store, "p:1", "v1")
+	mustSetInMemoryStore(t, store, "p:2", "v2")
+	mustSetInMemoryStore(t, store, "q:1", "v3")
 
-	// Simulate index loss and rebuild
-	_ = s.Clear()
-	mustMemSet(t, s, "p:1", "v1")
-	mustMemSet(t, s, "p:2", "v2")
-	mustMemSet(t, s, "q:1", "v3")
+	// Simulate index loss: clear, then repopulate fresh, then rebuild index.
+	require.NoError(t, store.Clear())
+	mustSetInMemoryStore(t, store, "p:1", "v1")
+	mustSetInMemoryStore(t, store, "p:2", "v2")
+	mustSetInMemoryStore(t, store, "q:1", "v3")
 
-	if err := s.RebuildKeyList(); err != nil {
-		t.Fatalf("RebuildKeyList failed: %v", err)
-	}
+	require.NoError(t, store.RebuildKeyList(), "RebuildKeyList must succeed")
 
-	k, err := s.RandomKey("p:")
-	if err != nil {
-		t.Fatalf("RandomKey after rebuild err: %v", err)
-	}
-
-	if k == "" || !strings.HasPrefix(k, "p:") {
-		t.Fatalf("expected key with prefix p:, got %q", k)
-	}
+	key, err := store.RandomKey("p:")
+	require.NoError(t, err)
+	require.NotEmpty(t, key)
+	assert.True(t, strings.HasPrefix(key, "p:"), "must return key with prefix p:")
 }
 
-func mustMemSet(t *testing.T, s *MemoryStore, k string, v any) {
-	t.Helper()
+// TestMemoryStore_Close ensures Close is a no-op that returns no error (in-memory store).
+func TestMemoryStore_Close(t *testing.T) {
+	t.Parallel()
 
-	if err := s.Set(k, v); err != nil {
-		t.Fatalf("set(%q) failed: %v", k, err)
-	}
+	store := NewMemoryStore(true)
+	require.NoError(t, store.Close())
 }
 
-func mustMemDelete(t *testing.T, s *MemoryStore, k string) {
+func mustSetInMemoryStore(t *testing.T, store *MemoryStore, key string, value any) {
 	t.Helper()
 
-	if err := s.Delete(k); err != nil {
-		t.Fatalf("delete(%q) failed: %v", k, err)
-	}
+	require.NoErrorf(t, store.Set(key, value), "Set(%q) must succeed", key)
 }
 
-func mustMemClear(t *testing.T, s *MemoryStore) {
+func mustDeleteFromMemoryStore(t *testing.T, store *MemoryStore, key string) {
 	t.Helper()
 
-	if err := s.Clear(); err != nil {
-		t.Fatalf("clear() failed: %v", err)
+	require.NoErrorf(t, store.Delete(key), "Delete(%q) must succeed", key)
+}
+
+func mustClearMemoryStore(t *testing.T, store *MemoryStore) {
+	t.Helper()
+
+	require.NoError(t, store.Clear(), "Clear() must succeed")
+}
+
+func TestMemory_GetOrSet_Delete_Interleave_NoPanic(t *testing.T) {
+	t.Parallel()
+
+	const (
+		testKey         = "order-new"
+		iterationsCount = 5_000
+		keysCount       = 100
+	)
+
+	var (
+		store     = NewMemoryStore(true)
+		testValue = []byte("processed")
+	)
+
+	// Seed a realistic number of keys so the store is not empty and
+	// the index structures (if any) are exercised further than the trivial case.
+	for i := range keysCount {
+		require.NoError(t, store.Set(fmt.Sprintf("order-%d", i), testValue))
 	}
+
+	// Interleave GetOrSet and Delete in parallel - used to trigger [: -1].
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+
+	// Writer/creator: repeatedly tries to insert-or-read the same key.
+	go func() {
+		defer wg.Done()
+
+		for range iterationsCount {
+			_, _, _ = store.GetOrSet(testKey, testValue)
+		}
+	}()
+
+	// Remover: repeatedly deletes the same key, racing with the writer above.
+	go func() {
+		defer wg.Done()
+
+		for range iterationsCount {
+			_ = store.Delete(testKey)
+		}
+	}()
+
+	// If the implementation mishandles swap-delete or slice bounds on empty lists,
+	// a panic would bubble up and fail this test.
+	wg.Wait()
 }

@@ -7,7 +7,7 @@
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	"features": {
 		"ghcr.io/devcontainers/features/go:1": {
-			"version": "1.24"
+			"version": "1.25"
 		},
 		"ghcr.io/grafana/devcontainer-features/k6:1": {},
 		"ghcr.io/grafana/devcontainer-features/xk6:1": {}
