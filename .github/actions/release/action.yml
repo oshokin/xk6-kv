@@ -146,7 +146,7 @@ runs:
         LAST_TAG="${{ steps.bump.outputs.last_tag }}"
         NEXT_TAG="${{ steps.bump.outputs.next_tag }}"
 
-        if [[ "$LAST_TAG" == "0.1.0" ]]; then
+        if [[ "$LAST_TAG" == "1.0.0" ]]; then
           # First release - include all commits.
           COMMITS=$(git log --pretty=format:"- %s (%h)" --reverse)
         else

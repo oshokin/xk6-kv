@@ -10,7 +10,7 @@ set -euo pipefail
 #   - else any starting with "feat:"            -> MINOR bump
 #   - else any starting with "fix:"             -> PATCH bump
 #   - else any other commits                    -> PATCH bump (default)
-# If no tag exists, current version is 0.1.0 (initial release).
+# If no tag exists, current version is 1.0.0 (initial release).
 # When bumping MINOR, reset PATCH to 0; when bumping MAJOR, reset MINOR/PATCH to 0.
 #
 # Standard outputs (stdout by default):
@@ -36,7 +36,7 @@ if last_tag=$(git describe --tags --abbrev=0 2>/dev/null); then
 else
   # No tags found, this will be the first release.
   found_tag=false
-  last_tag="0.1.0"
+  last_tag="1.0.0"
 fi
 
 # Function to normalize version strings by removing 'v' prefix if present.

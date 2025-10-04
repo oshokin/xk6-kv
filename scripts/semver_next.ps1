@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 #   - else any starting with "feat:"            -> MINOR bump
 #   - else any starting with "fix:"             -> PATCH bump
 #   - else any other commits                    -> PATCH bump (default)
-# If no tag exists, current version is 0.1.0 (initial release).
+# If no tag exists, current version is 1.0.0 (initial release).
 # When bumping MINOR, reset PATCH to 0; when bumping MAJOR, reset MINOR/PATCH to 0.
 #
 # Standard outputs (stdout by default):
@@ -39,7 +39,7 @@ try {
 } catch {
     # No tags found, this will be the first release.
     $foundTag = $false
-    $lastTag = "0.1.0"
+    $lastTag = "1.0.0"
 }
 
 # Function to normalize version strings by removing 'v' prefix if present.
