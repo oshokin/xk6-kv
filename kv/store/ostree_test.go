@@ -2,175 +2,197 @@ package store
 
 import (
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
+// TestOSTree_InsertRankSelect verifies that:
+// 1. Inserting a bag of (possibly duplicate) keys results in Len() equal to count of unique keys.
+// 2. Kth(i) enumerates keys in strict sorted order (unique).
+// 3. Rank(key) equals the index of that key in the sorted-unique sequence.
+// 4. After deletions, Len(), Kth(), and order remain consistent.
 func TestOSTree_InsertRankSelect(t *testing.T) {
 	t.Parallel()
 
-	var (
-		keys = []string{"a", "ab", "abc", "b", "ba", "z", "aa", "aaa"}
-		got  = make([]string, 0, len(keys))
-		tr   = NewOSTree()
+	originalKeys := []string{"a", "ab", "abc", "b", "ba", "z", "aa", "aaa"}
+
+	tree := NewOSTree()
+	for _, key := range originalKeys {
+		tree.Insert(key)
+	}
+
+	sortedUniqueKeys := getUniqueValues(originalKeys)
+	sort.Strings(sortedUniqueKeys)
+
+	require.Equal(t,
+		len(sortedUniqueKeys),
+		tree.Len(),
+		"Len() must equal unique key count",
 	)
 
-	for _, k := range keys {
-		tr.Insert(k)
+	// Verify Kth enumerates in-order and gather results to assert the entire sequence.
+	collectedKeysInOrder := make([]string, 0, len(sortedUniqueKeys))
+
+	for index := range sortedUniqueKeys {
+		keyAtIndex, ok := tree.Kth(index)
+
+		require.Truef(t, ok, "Kth(%d) must exist", index)
+		assert.Equalf(t, sortedUniqueKeys[index], keyAtIndex, "Kth(%d) mismatch", index)
+
+		collectedKeysInOrder = append(collectedKeysInOrder, keyAtIndex)
 	}
 
-	if tr.Len() != len(unique(keys)) {
-		t.Fatalf("Len() mismatch: got %d", tr.Len())
+	assert.Equal(t, sortedUniqueKeys, collectedKeysInOrder, "full in-order traversal mismatch")
+
+	// Verify Rank aligns with positions in the sorted sequence.
+	for index, key := range sortedUniqueKeys {
+		assert.Equalf(t, index, tree.Rank(key), "Rank(%q) mismatch", key)
 	}
 
-	// Kth should return sorted order (unique)
-	sorted := unique(keys)
-	sort.Strings(sorted)
+	// Delete two keys and re-check invariants.
+	tree.Delete("ab")
+	tree.Delete("z")
 
-	for i := range sorted {
-		k, ok := tr.Kth(i)
-		if !ok || k != sorted[i] {
-			t.Fatalf("Kth(%d) = %q, ok=%v; want %q", i, k, ok, sorted[i])
-		}
+	expectedKeysAfterDeletion := removeAll(sortedUniqueKeys, "ab", "z")
+	require.Equal(t, len(expectedKeysAfterDeletion), tree.Len(), "Len() after delete mismatch")
 
-		got = append(got, k)
-	}
+	for index := range expectedKeysAfterDeletion {
+		keyAtIndex, ok := tree.Kth(index)
 
-	// Explicitly assert the full sequence, so 'got' is actually used
-	if !reflect.DeepEqual(got, sorted) {
-		t.Fatalf("in-order traversal mismatch: got %v; want %v", got, sorted)
-	}
-
-	// Rank should align with sorted positions
-	for i, k := range sorted {
-		if r := tr.Rank(k); r != i {
-			t.Fatalf("Rank(%q)=%d; want %d", k, r, i)
-		}
-	}
-
-	// Deletions keep order-statistics valid
-	tr.Delete("ab")
-	tr.Delete("z")
-
-	exp := removeAll(sorted, "ab", "z")
-	if tr.Len() != len(exp) {
-		t.Fatalf("Len after delete = %d; want %d", tr.Len(), len(exp))
-	}
-
-	for i := range exp {
-		k, ok := tr.Kth(i)
-		if !ok || k != exp[i] {
-			t.Fatalf("After delete: Kth(%d)=%q; want %q", i, k, exp[i])
-		}
+		require.Truef(t, ok, "Kth(%d) must exist after deletions", index)
+		assert.Equalf(t, expectedKeysAfterDeletion[index], keyAtIndex, "Kth(%d) mismatch after deletions", index)
 	}
 }
 
+// TestOSTree_RangeBounds validates that RangeBounds(prefix) returns a half-open interval [l, r)
+// such that the slice of Kth(l..r-1) are exactly the keys that start with "prefix".
+// It checks several prefixes including empty, partial, full, and a non-existent prefix.
 func TestOSTree_RangeBounds(t *testing.T) {
 	t.Parallel()
 
-	var (
-		tr   = NewOSTree()
-		keys = []string{"a", "aa", "ab", "aba", "ac", "b", "ba"}
-	)
+	tree := NewOSTree()
+	keysInserted := []string{"a", "aa", "ab", "aba", "ac", "b", "ba"}
 
-	for _, k := range keys {
-		tr.Insert(k)
+	for _, key := range keysInserted {
+		tree.Insert(key)
 	}
 
-	sort.Strings(keys)
+	sort.Strings(keysInserted)
 
-	assertRange := func(prefix string) {
-		var (
-			l, r = tr.RangeBounds(prefix)
-			want []string
-		)
+	assertRangeForPrefix := func(prefixUnderTest string) {
+		leftBoundIndex, rightBoundIndex := tree.RangeBounds(prefixUnderTest)
 
-		for _, k := range keys {
-			if !strings.HasPrefix(k, prefix) {
+		// Build the expected subset (all sorted keys with the prefix).
+		expectedKeysWithPrefix := make([]string, 0, len(keysInserted))
+
+		for _, key := range keysInserted {
+			if !strings.HasPrefix(key, prefixUnderTest) {
 				continue
 			}
 
-			want = append(want, k)
+			expectedKeysWithPrefix = append(expectedKeysWithPrefix, key)
 		}
 
-		if r-l != len(want) {
-			t.Fatalf("Range %q -> [%d,%d) size=%d; want %d", prefix, l, r, r-l, len(want))
-		}
+		require.Equalf(t, len(expectedKeysWithPrefix), rightBoundIndex-leftBoundIndex,
+			"Range size mismatch for prefix %q (interval [%d,%d))",
+			prefixUnderTest, leftBoundIndex, rightBoundIndex,
+		)
 
-		for i := 0; i < len(want); i++ {
-			k, ok := tr.Kth(l + i)
-			if !ok || k != want[i] {
-				t.Fatalf("Range %q Kth(%d)=%q; want %q", prefix, l+i, k, want[i])
-			}
+		// Verify Kth over [l, r) equals the expected list in order.
+		for offset := range len(expectedKeysWithPrefix) {
+			keyAtIndex, ok := tree.Kth(leftBoundIndex + offset)
+
+			require.Truef(t, ok, "Kth(%d) must exist for prefix %q", leftBoundIndex+offset, prefixUnderTest)
+			assert.Equalf(t, expectedKeysWithPrefix[offset], keyAtIndex,
+				"Range %q Kth(%d) mismatch", prefixUnderTest, leftBoundIndex+offset)
 		}
 	}
 
-	assertRange("")
-	assertRange("a")
-	assertRange("ab")
-	assertRange("aba")
-	assertRange("ac")
-	assertRange("b")
-	assertRange("zz")
+	assertRangeForPrefix("")
+	assertRangeForPrefix("a")
+	assertRangeForPrefix("ab")
+	assertRangeForPrefix("aba")
+	assertRangeForPrefix("ac")
+	assertRangeForPrefix("b")
+
+	// Non-existent prefix -> empty interval.
+	assertRangeForPrefix("zz")
 }
 
+// TestNextPrefix checks nextPrefix() behavior around ASCII and 0xFF boundaries:
+//   - "" -> "" (no next prefix for empty)
+//   - "a" -> "b"; "a\xff" -> "b"
+//   - "\xff" -> "" (overflow wraps to empty)
+//   - "ab" -> "ac"; "ab\xff\xff" -> "ac"
 func TestNextPrefix(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		in   string
-		want string
-	}{
-		{"", ""},
-		{"a", "b"},
-		{"a\xff", "b"},
-		{"\xff", ""},
-		{"ab", "ac"},
-		{"ab\xff\xff", "ac"},
+	type testCase struct {
+		inputString        string
+		expectedNextPrefix string
 	}
 
-	for _, tc := range tests {
-		t.Run(fmt.Sprintf("%q", tc.in), func(t *testing.T) {
+	testCases := []testCase{
+		{inputString: "", expectedNextPrefix: ""},
+		{inputString: "a", expectedNextPrefix: "b"},
+		{inputString: "a\xff", expectedNextPrefix: "b"},
+		{inputString: "\xff", expectedNextPrefix: ""},
+		{inputString: "ab", expectedNextPrefix: "ac"},
+		{inputString: "ab\xff\xff", expectedNextPrefix: "ac"},
+	}
+
+	for _, oneCase := range testCases {
+		tc := oneCase
+
+		t.Run(fmt.Sprintf("next(%q)->%q", tc.inputString, tc.expectedNextPrefix), func(t *testing.T) {
 			t.Parallel()
 
-			if got := nextPrefix(tc.in); got != tc.want {
-				t.Fatalf("nextPrefix(%q)=%q; want %q", tc.in, got, tc.want)
-			}
+			actual := nextPrefix(tc.inputString)
+			assert.Equalf(t, tc.expectedNextPrefix, actual, "nextPrefix(%q) mismatch", tc.inputString)
 		})
 	}
 }
 
-func unique[T comparable](in []T) []T {
-	m := map[T]struct{}{}
+// getUniqueValues returns a new slice that contains only the first occurrence
+// of each distinct value from inputSlice, preserving the original encounter order.
+func getUniqueValues[T comparable](inputSlice []T) []T {
+	seenSet := make(map[T]struct{}, len(inputSlice))
+	unique := make([]T, 0, len(inputSlice))
 
-	result := make([]T, 0, len(in))
-	for _, s := range in {
-		if _, ok := m[s]; ok {
+	for _, value := range inputSlice {
+		if _, exists := seenSet[value]; exists {
 			continue
 		}
 
-		m[s] = struct{}{}
-		result = append(result, s)
+		seenSet[value] = struct{}{}
+
+		unique = append(unique, value)
 	}
 
-	return result
+	return unique
 }
 
-func removeAll[T comparable](src []T, dels ...T) []T {
-	rm := map[T]struct{}{}
-	for _, d := range dels {
-		rm[d] = struct{}{}
+// removeAll returns a new slice that contains every element from sourceSlice
+// except those present in elementsToDelete.
+// The relative order of the retained elements is preserved.
+func removeAll[T comparable](source []T, toDelete ...T) []T {
+	deleteSet := make(map[T]struct{}, len(toDelete))
+	for _, value := range toDelete {
+		deleteSet[value] = struct{}{}
 	}
 
-	result := make([]T, 0, len(src))
-	for _, s := range src {
-		if _, exists := rm[s]; exists {
+	result := make([]T, 0, len(source))
+
+	for _, value := range source {
+		if _, shouldRemove := deleteSet[value]; shouldRemove {
 			continue
 		}
 
-		result = append(result, s)
+		result = append(result, value)
 	}
 
 	return result

@@ -1,0 +1,36 @@
+# GitHub Actions workflow for automated semantic versioning and releases.
+# This workflow analyzes commit messages to determine version bumps and creates releases
+# with pre-built k6 binaries containing the xk6-kv extension.
+
+name: Release
+
+# Trigger when Extension Check workflow completes successfully on main branch.
+on:
+  workflow_run:
+    workflows: ["Extension Check"]
+    types: [completed]
+    branches: [main]
+  # Allow manual release triggering when needed.
+  workflow_dispatch:
+
+# Grant write permissions to create releases and push tags.
+permissions:
+  contents: write # Required to create releases and push Git tags.
+
+jobs:
+  # Single release job for both automatic (main push) and manual triggers.
+  release:
+    runs-on: ubuntu-latest
+    # Only run if the Extension Check workflow succeeded.
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      # Checkout the repository to access the local composite action.
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      # Use the reusable release composite action.
+      - name: Execute release
+        uses: ./.github/actions/release
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}

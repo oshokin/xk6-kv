@@ -1,10 +1,3 @@
-// Package kv provides a key-value database that can be used to store and retrieve data.
-//
-// The key-value database is backed by BoltDB, and is shared between all VUs. It is persisted
-// to disk, so data stored in the database will be available across test runs.
-//
-// The database is opened when the first KV instance is created, and closed when the last KV
-// instance is closed.
 package kv
 
 import (
@@ -18,36 +11,51 @@ import (
 )
 
 type (
-	// RootModule is the global module instance that will create Client
-	// instances for each VU.
+	// RootModule is a module singleton created once per test process.
+	// It owns the shared Store used by all VUs.
 	RootModule struct {
-		// db *db
+		// store is shared store instance, created on first openKv().
 		store store.Store
 	}
 
-	// ModuleInstance represents an instance of the JS module.
+	// ModuleInstance is created per VU.
+	// It holds the per-VU JS bindings and a pointer
+	// to the RootModule to access the shared store.
 	ModuleInstance struct {
 		vu modules.VU
 		rm *RootModule
-
+		// kv provides a key-value database that can be used to store and retrieve data.
+		// The database is opened when the first KV instance is created, and closed when the last KV
+		// instance is closed.
 		kv *KV
 	}
 )
 
-// Ensure the interfaces are implemented correctly
-var (
-	_ modules.Instance = &ModuleInstance{}
-	_ modules.Module   = &RootModule{}
+const (
+	// BackendDisk is the persistent store backed by the filesystem.
+	BackendDisk = "disk"
+	// BackendMemory is an in-memory, process-local store (fast, ephemeral).
+	BackendMemory = "memory"
+
+	// SerializationJSON encodes/decodes values using JSON.
+	SerializationJSON = "json"
+	// SerializationString encodes string values directly as bytes (and vice versa).
+	SerializationString = "string"
+
+	// DefaultBackend is used when the user does not specify a backend.
+	DefaultBackend = BackendDisk
+	// DefaultSerialization is used when the user does not specify a serialization format.
+	DefaultSerialization = SerializationJSON
 )
 
-// New returns a pointer to a new RootModule instance
-func New() *RootModule {
-	// // Create a memory store with JSON serialization by default
-	// memoryStore := store.NewMemoryStore()
-	// jsonSerializer := store.NewJSONSerializer()
-	// serializedStore := store.NewSerializedStore(memoryStore, jsonSerializer)
+// Compile-time interface assertions (defensive).
+var (
+	_ modules.Instance = new(ModuleInstance)
+	_ modules.Module   = new(RootModule)
+)
 
-	// return &RootModule{store: serializedStore}
+// New returns a pointer to a new RootModule instance.
+func New() *RootModule {
 	return &RootModule{
 		// As default, the store is nil, we expect the user to call openKv()
 		// which should set the store shared between all VUs.
@@ -55,8 +63,8 @@ func New() *RootModule {
 	}
 }
 
-// NewModuleInstance implements the modules.Module interface and returns
-// a new instance for each VU.
+// NewModuleInstance implements modules.Module.
+// It creates a per-VU instance wired to the RootModule (which owns the shared store).
 func (rm *RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
 	return &ModuleInstance{
 		vu: vu,
@@ -64,21 +72,29 @@ func (rm *RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
 	}
 }
 
-// Exports implements the modules.Instance interface and returns
-// the exports of the JS module.
+// Exports implements modules.Instance and exposes
+// the JavaScript API surface for this module.
+// Currently, only openKv() is exported.
 func (mi *ModuleInstance) Exports() modules.Exports {
-	return modules.Exports{Named: map[string]interface{}{
-		"openKv": mi.OpenKv,
-	}}
+	return modules.Exports{
+		Named: map[string]interface{}{
+			"openKv": mi.OpenKv,
+		},
+	}
 }
 
-// NewKV implements the modules.Instance interface and returns
-// a new KV instance.
+// NewKV returns the per-VU KV object as a Sobek object.
+// Typically created via OpenKv(); exposed for completeness/testing.
 func (mi *ModuleInstance) NewKV(_ sobek.ConstructorCall) *sobek.Object {
 	return mi.vu.Runtime().ToValue(mi.kv).ToObject(mi.vu.Runtime())
 }
 
-// OpenKv opens the KV store and returns a KV instance.
+// OpenKv parses user options, initializes the shared store (once),
+// and returns the per-VU KV object bound to that shared store.
+//
+// Concurrency & visibility guarantees:
+//   - The first successful call to OpenKv "wins" and decides the backend + serialization.
+//   - Later calls reuse the established store and ignore differing options.
 func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 	options, err := NewOptionsFrom(mi.vu, opts)
 	if err != nil {
@@ -87,27 +103,30 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 	}
 
 	if mi.rm.store == nil {
-		// Create the base store based on the backend option
+		// Create the base store based on the backend option.
 		var baseStore store.Store
+
 		switch options.Backend {
-		case "memory":
+		case BackendMemory:
 			baseStore = store.NewMemoryStore(options.TrackKeys)
-		case "disk":
-			baseStore = store.NewDiskStore(options.TrackKeys)
+		case BackendDisk:
+			baseStore = store.NewDiskStore(options.TrackKeys, options.Path)
 		}
 
-		// Create the serializer based on the serialization option
+		// Create the serializer based on the serialization option.
 		var serializer store.Serializer
+
 		switch options.Serialization {
-		case "json":
+		case SerializationJSON:
 			serializer = store.NewJSONSerializer()
-		case "string":
+		case SerializationString:
 			serializer = store.NewStringSerializer()
 		default:
-			serializer = store.NewJSONSerializer() // Default to JSON
+			// Defensive default: JSON is a safe, structured default.
+			serializer = store.NewJSONSerializer()
 		}
 
-		// Create a serialized store with the chosen store and serializer
+		// Create a serialized store with the chosen store and serializer.
 		serializedStore := store.NewSerializedStore(baseStore, serializer)
 		mi.rm.store = serializedStore
 	}
@@ -118,29 +137,33 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 	return mi.vu.Runtime().ToValue(mi.kv).ToObject(mi.vu.Runtime())
 }
 
-// Options represents the options for a KV instance.
+// Options controls how the shared store is created on the first call to openKv().
 type Options struct {
-	// Backend is the backend to use for the KV instance.
-	//
-	// Valid values are "memory" and "disk".
+	// Backend selects the storage engine backing the KV store.
+	// Valid values: "memory" (ephemeral), "disk" (persistent).
 	Backend string `json:"backend"`
 
-	// Serialization is the serialization format to use.
-	//
-	// Valid values are "json" and "string".
+	// Path points to the BoltDB file when using the disk backend.
+	// When empty or invalid the default path is used.
+	// Ignored by the memory backend.
+	Path string `json:"path"`
+
+	// Serialization selects how values are encoded/decoded when stored.
+	// Valid values: "json" (structured), "string" (raw string to []byte).
 	Serialization string `json:"serialization"`
 
-	// TrackKeys enables or disables in-memory key tracking for faster lookups.
+	// TrackKeys enables in-memory key indexing for faster List/RandomKey/prefix ops.
+	// This consumes additional memory proportional to the number of keys.
 	TrackKeys bool `json:"trackKeys"`
 }
 
-// NewOptionsFrom creates a new KVOptions instance from a sobek.Value.
+// NewOptionsFrom converts a Sobek (JS) value into an Options instance, applying defaults
+// and validating user input. It's intentionally strict to fail fast on invalid configs.
 func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
-	// Default
+	// Defaults keep backward compatibility and sensible behavior out of the box.
 	opts := Options{
 		Backend:       DefaultBackend,
 		Serialization: DefaultSerialization,
-		TrackKeys:     false,
 	}
 
 	if common.IsNullish(options) {
@@ -148,27 +171,24 @@ func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
 	}
 
 	if err := vu.Runtime().ExportTo(options, &opts); err != nil {
-		return opts, fmt.Errorf("unable to parse options; reason: %w", err)
+		return opts, fmt.Errorf("unable to parse kv options: %w", err)
 	}
 
-	if opts.Backend != "memory" && opts.Backend != "disk" {
-		return opts, fmt.Errorf("invalid backend: %s, valid values are: %s, %s", opts.Backend, DefaultBackend, "disk")
-	}
-
-	if opts.Serialization != "json" && opts.Serialization != "string" {
+	// Validate backend.
+	if opts.Backend != BackendMemory && opts.Backend != BackendDisk {
 		return opts, fmt.Errorf(
-			"invalid serialization: %s, valid values are: %s, %s",
-			opts.Serialization, DefaultSerialization, "string",
+			"invalid backend: %q; valid values are: %q, %q",
+			opts.Backend, BackendMemory, BackendDisk,
+		)
+	}
+
+	// Validate serialization.
+	if opts.Serialization != SerializationJSON && opts.Serialization != SerializationString {
+		return opts, fmt.Errorf(
+			"invalid serialization: %q; valid values are: %q, %q",
+			opts.Serialization, SerializationJSON, SerializationString,
 		)
 	}
 
 	return opts, nil
 }
-
-const (
-	// DefaultBackend is the default backend to use for the KV store
-	DefaultBackend = "disk"
-
-	// DefaultSerialization is the default serialization format
-	DefaultSerialization = "json"
-)

@@ -1,0 +1,220 @@
+# Composite action for building and releasing k6 binaries with xk6-kv extension.
+# This action performs semantic versioning, builds cross-platform binaries, and creates GitHub releases.
+
+name: "Release k6 with xk6-kv"
+description: "Builds k6 binaries with xk6-kv extension and creates a GitHub release"
+
+inputs:
+  github_token:
+    description: "GitHub token for creating releases"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    # Define constants for the entire release process.
+    - name: Setup environment variables
+      shell: bash
+      run: |
+        # Tool versions.
+        echo "GO_VERSION=1.25.x" >> $GITHUB_ENV
+        echo "XK6_VERSION=latest" >> $GITHUB_ENV
+        
+        # Git configuration for automated commits.
+        echo "GIT_BOT_NAME=github-actions[bot]" >> $GITHUB_ENV
+        echo "GIT_BOT_EMAIL=41898282+github-actions[bot]@users.noreply.github.com" >> $GITHUB_ENV
+        
+        # Project configuration.
+        echo "PROJECT_NAME=xk6-kv" >> $GITHUB_ENV
+        echo "MODULE_REPO=github.com/oshokin/xk6-kv" >> $GITHUB_ENV
+
+    # Check out repository with full Git history for version analysis.
+    - name: Checkout
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0 # Fetch all tags and history for semantic versioning.
+
+    # Set up Go environment for building k6 binaries.
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    # Analyze commit messages since last tag to determine version bump.
+    # Uses the semver_next.sh script to implement semantic versioning logic.
+    # Fetch latest tags first to ensure accurate version calculation.
+    - name: Compute next version
+      id: bump
+      shell: bash
+      run: |
+        # Ensure we have the absolute latest tags for accurate version calculation.
+        git fetch --tags origin
+        bash scripts/semver_next.sh --emit-gh-output
+
+    # Skip release if no commits found (should rarely happen).
+    # Note: All commits now trigger at least a patch release.
+    - name: Skip if no commits
+      if: steps.bump.outputs.has_release != '1'
+      shell: bash
+      run: |
+        echo "No commits found since last tag — skipping release."
+
+    # Configure Git user for automated tag creation.
+    # Uses GitHub Actions bot identity for audit trail.
+    - name: Configure git
+      if: steps.bump.outputs.has_release == '1'
+      shell: bash
+      run: |
+        git config user.name "${{ env.GIT_BOT_NAME }}"
+        git config user.email "${{ env.GIT_BOT_EMAIL }}"
+
+    # Create and push the new version tag to trigger release builds.
+    # Tag creation must happen before building binaries.
+    # Use atomic push to prevent race conditions with concurrent releases.
+    - name: Create and push tag
+      if: steps.bump.outputs.has_release == '1'
+      shell: bash
+      run: |
+        # Fetch latest tags to ensure we have the most recent state.
+        git fetch --tags origin
+
+        # Re-check if our calculated tag already exists (race condition protection).
+        if git rev-parse "${{ steps.bump.outputs.next_tag }}" >/dev/null 2>&1; then
+          echo "Tag ${{ steps.bump.outputs.next_tag }} already exists! Another release beat us to it."
+          echo "This is expected behavior with concurrent PRs. Skipping release."
+          exit 0
+        fi
+
+        # Create and push tag atomically.
+        git tag "${{ steps.bump.outputs.next_tag }}"
+        git push origin "${{ steps.bump.outputs.next_tag }}"
+
+    # Install xk6 for building k6 binaries with the extension.
+    - name: Install xk6
+      if: steps.bump.outputs.has_release == '1'
+      shell: bash
+      run: |
+        go install go.k6.io/xk6/cmd/xk6@${{ env.XK6_VERSION }}
+
+    # Build k6 binaries with xk6-kv extension for all platforms.
+    # This creates pre-compiled binaries and packages them GoReleaser-style.
+    - name: Build and package k6 binaries with xk6-kv
+      if: steps.bump.outputs.has_release == '1'
+      shell: bash
+      run: |
+        MODULE_NAME=$(go list -m)
+        VERSION="${{ steps.bump.outputs.next_tag }}"
+        PROJECT_NAME="${{ env.PROJECT_NAME }}"
+
+        echo "Building k6 binaries with $MODULE_NAME@$VERSION for multiple platforms..."
+        mkdir -p dist
+
+        # Function to build and package.
+        build_and_package() {
+          local os=$1
+          local arch=$2
+          local binary_name=$3
+          local archive_name="${PROJECT_NAME}_${VERSION}_${os}_${arch}"
+          
+          echo "Building for ${os}/${arch}..."
+          
+          # Build binary.
+          GOOS=$os GOARCH=$arch xk6 build \
+            --with "$MODULE_NAME=." \
+            --output "dist/tmp_${binary_name}"
+          
+          # Create archive based on platform.
+          if [[ "$os" == "windows" ]]; then
+            # Windows: create zip with k6.exe.
+            mv "dist/tmp_${binary_name}" "dist/${binary_name}"
+            (cd dist && zip "${archive_name}.zip" "${binary_name}")
+            rm "dist/${binary_name}"
+            echo "Created ${archive_name}.zip"
+          else
+            # Unix: create tar.gz with k6.
+            mv "dist/tmp_${binary_name}" "dist/${binary_name}"
+            tar -czf "dist/${archive_name}.tar.gz" -C dist "${binary_name}"
+            rm "dist/${binary_name}"
+            echo "Created ${archive_name}.tar.gz"
+          fi
+        }
+
+        # Build for all platforms.
+        build_and_package "linux" "amd64" "k6"
+        build_and_package "linux" "arm64" "k6"
+        build_and_package "darwin" "amd64" "k6"
+        build_and_package "darwin" "arm64" "k6"
+        build_and_package "windows" "amd64" "k6.exe"
+        build_and_package "windows" "arm64" "k6.exe"
+
+        echo ""
+        echo "All binaries built and packaged successfully!"
+        echo ""
+        echo "Release artifacts:"
+        ls -lh dist/*.{tar.gz,zip} 2>/dev/null || ls -lh dist/
+
+    # Generate changelog from commits since last tag.
+    - name: Generate changelog
+      if: steps.bump.outputs.has_release == '1'
+      id: changelog
+      shell: bash
+      run: |
+        LAST_TAG="${{ steps.bump.outputs.last_tag }}"
+        NEXT_TAG="${{ steps.bump.outputs.next_tag }}"
+
+        if [[ "$LAST_TAG" == "1.0.0" ]]; then
+          # First release - include all commits.
+          COMMITS=$(git log --pretty=format:"- %s (%h)" --reverse)
+        else
+          # Subsequent releases - commits since last tag.
+          COMMITS=$(git log v${LAST_TAG}..HEAD --pretty=format:"- %s (%h)" --reverse)
+        fi
+
+        # Create changelog content.
+        {
+          echo "## What's Changed"
+          echo ""
+          echo "$COMMITS"
+          echo ""
+          echo "## Installation"
+          echo ""
+          echo "### Download Pre-built Binary"
+          echo ""
+          echo "Download the archive for your platform, extract it, and run:"
+          echo ""
+          echo "\`\`\`bash"
+          echo "# Linux/macOS"
+          echo "tar -xzf xk6-kv_${NEXT_TAG}_linux_amd64.tar.gz"
+          echo "./k6 version"
+          echo ""
+          echo "# Windows (PowerShell)"
+          echo "Expand-Archive xk6-kv_${NEXT_TAG}_windows_amd64.zip"
+          echo ".\\k6.exe version"
+          echo "\`\`\`"
+          echo ""
+          echo "### Build from Source"
+          echo ""
+          echo "\`\`\`bash"
+          echo "xk6 build --with ${{ env.MODULE_REPO }}@$NEXT_TAG"
+          echo "\`\`\`"
+          echo ""
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/commits/$NEXT_TAG"
+        } > changelog.md
+
+        cat changelog.md
+
+    # Create GitHub release with packaged binaries.
+    - name: Create GitHub Release
+      if: steps.bump.outputs.has_release == '1'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.bump.outputs.next_tag }}
+        name: Release ${{ steps.bump.outputs.next_tag }}
+        body_path: changelog.md
+        draft: false
+        prerelease: false
+        files: |
+          dist/*.tar.gz
+          dist/*.zip
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}

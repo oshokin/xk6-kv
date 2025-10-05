@@ -1,0 +1,308 @@
+version: "3"
+
+silent: true
+
+vars:
+  # -------------------------------
+  # Platform Configuration
+  # -------------------------------
+
+  # Path separator per OS.
+  PS: '{{fromSlash "/"}}'
+
+  # Cross-platform mkdir/rm helpers.
+  RMRF: '{{if eq OS "windows"}}powershell.exe -Command "Remove-Item -Force -Recurse -ErrorAction SilentlyContinue -Path{{else}}rm -rf{{end}}'
+  RMRF_END: '{{if eq OS "windows"}}; exit 0"{{end}}'
+  MKDIR: '{{if eq OS "windows"}}powershell.exe -Command "New-Item -ItemType Directory -Force -Path{{else}}mkdir -p{{end}}'
+  MKDIR_END: '{{if eq OS "windows"}} | Out-Null"{{end}}'
+
+  # -------------------------------
+  # Project Directories
+  # -------------------------------
+
+  # Local bin & temp dirs (kept in repo root).
+  BIN_DIR: "{{.TASKFILE_DIR}}{{.PS}}bin"
+
+  # -------------------------------
+  # Tool Versions
+  # -------------------------------
+
+  # Linting tool version.
+  GOLANGCI_TAG: "latest"
+  # k6 extension builder version.
+  XK6_TAG: "latest"
+
+  # -------------------------------
+  # Tool Binaries
+  # -------------------------------
+
+  GOLANGCI_BIN: "{{.BIN_DIR}}{{.PS}}golangci-lint{{exeExt}}"
+  XK6_BIN: "{{.BIN_DIR}}{{.PS}}xk6{{exeExt}}"
+  K6_BIN: "{{.BIN_DIR}}{{.PS}}k6{{exeExt}}"
+
+  # -------------------------------
+  # Version Detection
+  # -------------------------------
+
+  # Commands to check current versions of installed tools.
+  GOLANGCI_VERSION_OUTPUT:
+    sh: '{{if eq OS "windows"}}powershell -Command "try { if (Test-Path ''{{.GOLANGCI_BIN}}'') { & ''{{.GOLANGCI_BIN}}'' version } } catch { }; exit 0"{{else}}"{{.GOLANGCI_BIN}}" version 2> /dev/null || true{{end}}'
+  XK6_VERSION_OUTPUT:
+    sh: '{{if eq OS "windows"}}powershell -Command "try { if (Test-Path ''{{.XK6_BIN}}'') { & ''{{.XK6_BIN}}'' version } } catch { }; exit 0"{{else}}"{{.XK6_BIN}}" version 2> /dev/null || true{{end}}'
+
+  # Regex patterns to extract version numbers from tool outputs.
+  GOLANGCI_CURRENT_TAG: '{{regexFind "v([0-9]+.){2}([0-9a-z])+" (regexFind "version v([0-9]+.){2}([0-9a-z])+ " .GOLANGCI_VERSION_OUTPUT)}}'
+  XK6_CURRENT_TAG: '{{regexFind "v([0-9]+.){2}([0-9a-z])+" .XK6_VERSION_OUTPUT}}'
+
+  # -------------------------------
+  # E2E Test Configuration
+  # -------------------------------
+
+  # Default JS scenario path for e2e/integration.
+  # Change at runtime: `task test-e2e-memory-track E2E_JS="e2e/get-or-set.js"`.
+  E2E_JS: "{{.E2E_JS | default (printf `e2e%sget-or-set.js` .PS)}}"
+
+  # E2E defaults (can be overridden on CLI).
+  VUS: "{{.VUS | default `50`}}"
+  ITERATIONS: "{{.ITERATIONS | default `1000`}}"
+  TOTAL_FAKE_ORDERS: "{{.TOTAL_FAKE_ORDERS | default `1000`}}"
+  RETRY_WAIT_MS: "{{.RETRY_WAIT_MS | default `50`}}"
+  MAX_RETRY: "{{.MAX_RETRY | default `5`}}"
+
+tasks:
+  # -------------------------------
+  # Default Task
+  # -------------------------------
+
+  default:
+    desc: "Show common tasks"
+    cmds:
+      - task -l
+
+  # -------------------------------
+  # Git Hooks
+  # -------------------------------
+
+  install-githooks:
+    desc: "Configure Git hooks for this repository"
+    cmds:
+      - |
+        echo "Setting up Git hooks..."
+        git config --local core.hooksPath .githooks
+        {{if ne OS "windows"}}
+          chmod +x .githooks/commit-msg
+        {{end}}
+        echo "Git hooks configured successfully!"
+        echo "Commit messages must now start with: fix:, feat:, or major:"
+
+  remove-githooks:
+    desc: "Disable Git hooks for this repository"
+    cmds:
+      - |
+        echo "Disabling Git hooks..."
+        git config --local --unset core.hooksPath || echo "Hooks path was not set"
+        echo "Git hooks disabled. You can now use any commit message format."
+
+  # -------------------------------
+  # Version Management
+  # -------------------------------
+
+  fetch-tags:
+    desc: "Fetch tags from origin"
+    cmds:
+      - |
+        echo "Fetching tags from origin..."
+        git fetch --tags
+
+  version-check:
+    desc: "Check what the next version would be based on commits"
+    deps: [fetch-tags]
+    cmds:
+      - |
+        echo "Analyzing commits for version bump..."
+        {{if eq OS "windows"}}
+          powershell -ExecutionPolicy Bypass -File scripts/semver_next.ps1
+        {{else}}
+          bash scripts/semver_next.sh
+        {{end}}
+
+  # -------------------------------
+  # Tool Installation
+  # -------------------------------
+
+  _ensure-bin:
+    internal: true
+    cmds:
+      - "{{.MKDIR}} '{{.BIN_DIR}}'{{.MKDIR_END}}"
+
+  install-lint:
+    desc: "Install golangci-lint into ./bin"
+    deps: [_ensure-bin]
+    cmds:
+      - |
+        # Only install if current version doesn't match desired version.
+        {{if (not (eq .GOLANGCI_CURRENT_TAG .GOLANGCI_TAG))}}
+          echo "Installing golangci-lint, version: {{.GOLANGCI_TAG}}..."
+          {{if eq OS "windows"}}
+            powershell.exe -Command "\$env:GOBIN = '{{.BIN_DIR}}'; go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{.GOLANGCI_TAG}}"
+          {{else}}
+            go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{.GOLANGCI_TAG}}
+          {{end}}
+        {{end}}
+    env:
+      GOBIN: "{{.BIN_DIR}}"
+
+  install-xk6:
+    desc: "Install xk6 into ./bin"
+    deps: [_ensure-bin]
+    cmds:
+      - |
+        # Only install if current version doesn't match desired version.
+        {{if (not (eq .XK6_CURRENT_TAG .XK6_TAG))}}
+          echo "Installing xk6, version: {{.XK6_TAG}}..."
+          {{if eq OS "windows"}}
+            powershell.exe -Command "\$env:GOBIN = '{{.BIN_DIR}}'; go install go.k6.io/xk6/cmd/xk6@{{.XK6_TAG}}"
+          {{else}}
+            go install go.k6.io/xk6/cmd/xk6@{{.XK6_TAG}}
+          {{end}}
+        {{end}}
+    env:
+      GOBIN: "{{.BIN_DIR}}"
+
+  install-tools:
+    desc: "Install golangci-lint and xk6"
+    deps: [install-lint, install-xk6]
+
+  # -------------------------------
+  # Build
+  # -------------------------------
+
+  build-k6:
+    desc: "Build k6 with local xk6-kv from current directory into ./bin/k6"
+    deps: [install-xk6, _ensure-bin]
+    cmds:
+      - |
+        {{if eq OS "windows"}}
+          echo "Note: Building k6 requires CGO. If this fails, install gcc (MinGW-w64) or use WSL."
+          powershell.exe -Command "\$env:CGO_ENABLED = '1'; \$MODULE_NAME = go list -m; Write-Host \"Building k6 with local \$MODULE_NAME...\"; & '{{.XK6_BIN}}' build --with \"\$MODULE_NAME=.\" -o '{{.K6_BIN}}'"
+        {{else}}
+          MODULE_NAME=$(go list -m)
+          echo "Building k6 with local $MODULE_NAME..."
+          "{{.XK6_BIN}}" build --with "$MODULE_NAME=." -o "{{.K6_BIN}}"
+        {{end}}
+    env:
+      CGO_ENABLED: "1"
+
+  # -------------------------------
+  # Code Quality
+  # -------------------------------
+
+  lint-fix:
+    desc: "Run golangci-lint with --fix"
+    deps: [install-lint]
+    cmds:
+      - '"{{.GOLANGCI_BIN}}" config verify'
+      - '"{{.GOLANGCI_BIN}}" run --fix'
+
+  lint:
+    desc: "Run golangci-lint"
+    deps: [install-lint]
+    cmds:
+      - '"{{.GOLANGCI_BIN}}" config verify'
+      - '"{{.GOLANGCI_BIN}}" run'
+
+  # -------------------------------
+  # Unit Testing
+  # -------------------------------
+
+  test:
+    desc: "Run unit tests"
+    cmds:
+      - go test -v ./...
+
+  test-race:
+    desc: "Run unit tests with race detector"
+    cmds:
+      - |
+        {{if eq OS "windows"}}
+          echo "Note: Race detector requires CGO. If this fails, install gcc (MinGW-w64) or use WSL."
+          powershell.exe -Command "\$env:CGO_ENABLED = '1'; go test -race -v ./..."
+        {{else}}
+          go test -race -v ./...
+        {{end}}
+    env:
+      CGO_ENABLED: "1"
+
+  # -------------------------------
+  # E2E Testing
+  # -------------------------------
+
+  test-e2e-memory-no-track:
+    desc: "Run e2e: memory backend, trackKeys=false"
+    deps: [build-k6]
+    cmds:
+      - '"{{.K6_BIN}}" run "{{.E2E_JS}}"'
+    env:
+      KV_BACKEND: "memory"
+      KV_TRACK_KEYS: "false"
+      VUS: "{{.VUS}}"
+      ITERATIONS: "{{.ITERATIONS}}"
+      TOTAL_FAKE_ORDERS: "{{.TOTAL_FAKE_ORDERS}}"
+      RETRY_WAIT_MS: "{{.RETRY_WAIT_MS}}"
+      MAX_RETRY: "{{.MAX_RETRY}}"
+      LOG_CLAIMS: "false"
+
+  test-e2e-memory-track:
+    desc: "Run e2e: memory backend, trackKeys=true"
+    deps: [build-k6]
+    cmds:
+      - '"{{.K6_BIN}}" run "{{.E2E_JS}}"'
+    env:
+      KV_BACKEND: "memory"
+      KV_TRACK_KEYS: "true"
+      VUS: "{{.VUS}}"
+      ITERATIONS: "{{.ITERATIONS}}"
+      TOTAL_FAKE_ORDERS: "{{.TOTAL_FAKE_ORDERS}}"
+      RETRY_WAIT_MS: "{{.RETRY_WAIT_MS}}"
+      MAX_RETRY: "{{.MAX_RETRY}}"
+      LOG_CLAIMS: "false"
+
+  test-e2e-disk-no-track:
+    desc: "Run e2e: disk backend, trackKeys=false"
+    deps: [build-k6]
+    cmds:
+      - '"{{.K6_BIN}}" run "{{.E2E_JS}}"'
+    env:
+      KV_BACKEND: "disk"
+      KV_TRACK_KEYS: "false"
+      VUS: "{{.VUS}}"
+      ITERATIONS: "{{.ITERATIONS}}"
+      TOTAL_FAKE_ORDERS: "{{.TOTAL_FAKE_ORDERS}}"
+      RETRY_WAIT_MS: "{{.RETRY_WAIT_MS}}"
+      MAX_RETRY: "{{.MAX_RETRY}}"
+      LOG_CLAIMS: "false"
+
+  test-e2e-disk-track:
+    desc: "Run e2e: disk backend, trackKeys=true"
+    deps: [build-k6]
+    cmds:
+      - '"{{.K6_BIN}}" run "{{.E2E_JS}}"'
+    env:
+      KV_BACKEND: "disk"
+      KV_TRACK_KEYS: "true"
+      VUS: "{{.VUS}}"
+      ITERATIONS: "{{.ITERATIONS}}"
+      TOTAL_FAKE_ORDERS: "{{.TOTAL_FAKE_ORDERS}}"
+      RETRY_WAIT_MS: "{{.RETRY_WAIT_MS}}"
+      MAX_RETRY: "{{.MAX_RETRY}}"
+      LOG_CLAIMS: "false"
+
+  # -------------------------------
+  # Cleanup
+  # -------------------------------
+
+  clean:
+    desc: "Remove binaries and temporary files"
+    cmds:
+      - "{{.RMRF}} '{{.BIN_DIR}}'{{.RMRF_END}}"
+      - "{{.RMRF}} '.k6.kv'{{.RMRF_END}}"
