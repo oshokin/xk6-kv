@@ -28,11 +28,16 @@ if [[ "${1:-}" == "--emit-gh-output" ]]; then
 fi
 
 # Attempt to find the latest Git tag to determine current version.
+# Use version-sorted tags to get the highest version, not just any tag.
 found_tag=true
 last_tag=""
-if last_tag=$(git describe --tags --abbrev=0 2>/dev/null); then
+if last_tag=$(git tag --sort=-version:refname | head -n 1); then
   # Successfully found a tag, use it as current version.
-  :
+  # Ensure we have a valid tag format
+  if [[ -z "$last_tag" ]]; then
+    found_tag=false
+    last_tag="1.0.0"
+  fi
 else
   # No tags found, this will be the first release.
   found_tag=false

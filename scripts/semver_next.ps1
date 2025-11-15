@@ -28,12 +28,18 @@ if ($args.Count -gt 0 -and $args[0] -eq "--emit-gh-output") {
 }
 
 # Attempt to find the latest Git tag to determine current version.
+# Use version-sorted tags to get the highest version, not just any tag.
 $foundTag = $true
 $lastTag = ""
 try {
-    # Successfully found a tag, use it as current version.
-    $lastTag = git describe --tags --abbrev=0 2>$null
-    if (-not $lastTag) {
+    # Get version-sorted tags and take the highest one.
+    $tags = git tag --sort=-version:refname
+    if ($tags) {
+        $lastTag = ($tags | Select-Object -First 1).Trim()
+        if (-not $lastTag) {
+            throw "No tags found"
+        }
+    } else {
         throw "No tags found"
     }
 } catch {
