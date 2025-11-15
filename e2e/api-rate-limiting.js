@@ -61,6 +61,9 @@ const kv = openKv(
     : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
 );
 
+// Rationale: 20 VUs × 100 iterations approximate a busy API minute. Thresholds
+// enforce that rate checks and reset logic stay rock solid without adding long
+// runtime to CI.
 export const options = {
   // Vary these to increase contention. Start with 20×100 like the shared script.
   vus: parseInt(__ENV.VUS || '20', 10),
@@ -74,14 +77,13 @@ export const options = {
   }
 };
 
-// -----------------------
-// Test setup & teardown.
-// -----------------------
+// setup: clear every counter so the first request of each run behaves the same.
 export async function setup() {
   // Start with a clean state so each run is deterministic.
   await kv.clear();
 }
 
+// teardown: close BoltDB cleanly so later runs do not trip over open handles.
 export async function teardown() {
   // For disk backends, close the store cleanly so the file can be reused immediately.
   if (SELECTED_BACKEND_NAME === 'disk') {
@@ -89,9 +91,8 @@ export async function teardown() {
   }
 }
 
-// -------------------------------
-// The main iteration body (VUs).
-// -------------------------------
+// Each iteration represents a single API call: increment usage, enforce the
+// limit, and reset counters when the sliding window elapses.
 export default async function apiRateLimitingTest() {
   const userId = `user:${exec.vu.idInTest}`;
   const rateLimitKey = `rate_limit:${userId}`;

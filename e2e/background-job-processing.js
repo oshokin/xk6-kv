@@ -28,13 +28,13 @@ import { openKv } from 'k6/x/kv';
 //
 // ATOMIC OPERATIONS TESTED:
 // - randomKey(): Find available jobs to process
-// - swap(): Atomically claim job (change status to processing)
+// - compareAndSwap(): Atomically claim job slots (deterministic ownership)
 // - deleteIfExists(): Complete job processing atomically
-// - set(): Create new jobs (producer behavior)
-// - list(): Monitor job queue health
+// - set(): Recycle job slots for future work
+// - list(): Monitor queue health
 //
 // CONCURRENCY PATTERN:
-// - Producer: VUs create new jobs
+// - Producer: VUs recycle completed jobs back into the queue
 // - Consumer: VUs process existing jobs
 // - Coordination: Shared KV store prevents duplicate processing
 // - Atomic claiming ensures only one worker per job
@@ -53,6 +53,12 @@ const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
   (__ENV.KV_TRACK_KEYS && __ENV.KV_TRACK_KEYS.toLowerCase() === 'true') || true;
 
+// Job queue configuration (deterministic slots and retries).
+const JOB_KEY_PREFIX = 'job:';
+const JOB_SLOT_COUNT = parseInt(__ENV.JOB_SLOTS || '40', 10);
+const MAX_CLAIM_ATTEMPTS = 20;
+const CLAIM_RETRY_SLEEP_SECONDS = 0.005;
+
 // ---------------------------------------------
 // Open a shared KV store available to all VUs.
 // ---------------------------------------------
@@ -62,105 +68,165 @@ const kv = openKv(
     : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
 );
 
+// Rationale: 20 VUs × 100 iterations provide enough churn to keep the queue
+// busy while still finishing quickly. The near-100% thresholds guarantee that
+// every slot is claimed, processed, and monitored without "expected" failures.
 export const options = {
-  // Vary these to increase contention. Start with 20×100 like the shared script.
   vus: parseInt(__ENV.VUS || '20', 10),
   iterations: parseInt(__ENV.ITERATIONS || '100', 10),
-
-  // Optional: add thresholds to fail fast if we start choking.
   thresholds: {
-    // Require that at least 90% of iterations process jobs successfully.
-    // NOTE: Some failures are EXPECTED and VALIDATE correct behavior:
-    // - randomKey() may return null when jobs are consumed quickly (race condition)
-    // - deleteIfExists() may return false when another worker already processed the job
-    // - swap() may fail if job was already claimed by another worker
-    // These failures confirm that atomic operations correctly prevent duplicate processing.
-    'checks{job:processed}': ['rate>0.90'],
-    'checks{job:created}': ['rate>0.95']
+    'checks{job:claimed}': ['rate>0.999'],
+    'checks{job:processed}': ['rate>0.999'],
+    'checks{job:monitoring}': ['rate>0.999']
   }
 };
 
-// -----------------------
-// Test setup & teardown.
-// -----------------------
+// setup: seeds deterministic job slots so we can prove deterministic fairness
+// across backends, including disk.
 export async function setup() {
-  // Start with a clean state so each run is deterministic.
   await kv.clear();
 
-  // Pre-populate some jobs.
-  for (let i = 1; i <= 50; i++) {
-    await kv.set(`job:${i}`, {
-      id: i,
-      type: 'email',
-      payload: { to: `user${i}@example.com`, subject: 'Test Email' },
-      createdAt: Date.now()
-    });
+  for (let i = 0; i < JOB_SLOT_COUNT; i++) {
+    await kv.set(jobKeyFromIndex(i), buildQueuedJob(i));
   }
 }
 
 export async function teardown() {
-  // For disk backends, close the store cleanly so the file can be reused immediately.
   if (SELECTED_BACKEND_NAME === 'disk') {
     kv.close();
   }
 }
 
-// -------------------------------
-// The main iteration body (VUs).
-// -------------------------------
+// Each VU claims a slot, simulates work, recycles the job, and emits health
+// metrics—touching every atomic helper the queue exposes.
 export default async function backgroundJobProcessingTest() {
   const vuId = exec.vu.idInTest;
 
-  // Test 1: Create new job (producer behavior).
-  if (Math.random() < 0.3) { // 30% chance to create job
-    const jobId = `job:${Date.now()}:${vuId}`;
-    const jobData = {
-      id: jobId,
-      type: 'notification',
-      payload: { userId: vuId, message: 'Test notification' },
-      createdAt: Date.now()
-    };
+  const claim = await claimJobSlot(vuId);
 
-    await kv.set(jobId, jobData);
-
-    check(true, {
-      'job:created': () => true
-    });
-  }
-
-  // Test 2: Process random job (consumer behavior).
-  // NOTE: randomKey() may return null if all jobs are being processed concurrently.
-  // This is EXPECTED behavior - it means the system is working correctly under high load.
-  const randomJobKey = await kv.randomKey({ prefix: 'job:' });
-
-  if (randomJobKey) {
-    // Test 3: Claim job atomically (swap to processing state).
-    const { previous: jobData, loaded } = await kv.swap(randomJobKey, {
-      ...(await kv.get(randomJobKey)),
-      status: 'processing',
-      processedBy: vuId,
-      processedAt: Date.now()
-    });
-
-    if (loaded && jobData) {
-      // Test 4: Process the job.
-      sleep(0.01); // Simulate processing time
-
-      // Test 5: Complete job (deleteIfExists).
-      // NOTE: deleteIfExists() may return false if another worker already processed this job.
-      // This is EXPECTED behavior - it validates that atomic operations prevent duplicate processing.
-      const deleted = await kv.deleteIfExists(randomJobKey);
-
-      check(deleted, {
-        'job:processed': () => deleted
-      });
-    }
-  }
-
-  // Test 6: List pending jobs (monitoring).
-  const pendingJobs = await kv.list({ prefix: 'job:', limit: 10 });
-
-  check(pendingJobs.length >= 0, {
-    'job:monitoring': () => pendingJobs.length >= 0
+  check(Boolean(claim), {
+    'job:claimed': () => Boolean(claim)
   });
+
+  // Simulate work.
+  sleep(0.01);
+
+  const processed = await recycleJobSlot(claim.jobKey, claim.jobSnapshot);
+
+  check(processed, {
+    'job:processed': () => processed
+  });
+
+  const queueSample = await kv.list({ prefix: JOB_KEY_PREFIX, limit: 5 });
+
+  check(queueSample.length > 0, {
+    'job:monitoring': () => queueSample.length > 0
+  });
+}
+
+// jobKeyFromIndex: deterministic mapping of slot numbers to shared keys so all
+// VUs contend on the same namespace.
+function jobKeyFromIndex(index) {
+  return `${JOB_KEY_PREFIX}${String(index + 1).padStart(4, '0')}`;
+}
+
+// buildQueuedJob: creates the initial "queued" payload so the queue always has
+// something to process immediately after setup.
+function buildQueuedJob(index) {
+  return {
+    id: jobKeyFromIndex(index),
+    state: 'queued',
+    type: 'email',
+    version: 0,
+    payload: {
+      to: `user${index + 1}@example.com`,
+      subject: 'Queued Job'
+    },
+    createdAt: Date.now()
+  };
+}
+
+// claimJobSlot: attempts to claim work via CAS with both random and sequential
+// probes, guaranteeing we cover race conditions and order-statistics logic.
+async function claimJobSlot(vuId) {
+  for (let attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt++) {
+    const candidateKeys = await buildCandidateKeys(attempt);
+
+    for (const jobKey of candidateKeys) {
+      const snapshot = await safeGet(jobKey);
+
+      if (!snapshot || snapshot.state !== 'queued') {
+        continue;
+      }
+
+      const claimedSnapshot = {
+        ...snapshot,
+        state: 'processing',
+        claimedBy: vuId,
+        claimedAt: Date.now()
+      };
+
+      const claimed = await kv.compareAndSwap(jobKey, snapshot, claimedSnapshot);
+
+      if (claimed) {
+        return { jobKey, jobSnapshot: claimedSnapshot };
+      }
+    }
+
+    sleep(CLAIM_RETRY_SLEEP_SECONDS);
+  }
+
+  throw new Error(`Unable to claim any job slot after ${MAX_CLAIM_ATTEMPTS} attempts`);
+}
+
+// buildCandidateKeys: mixes pseudo-random sampling with deterministic coverage
+// so every slot eventually gets checked even if randomKey skips it.
+async function buildCandidateKeys(iteration) {
+  const keys = new Set();
+  const randomCandidate = await kv.randomKey({ prefix: JOB_KEY_PREFIX });
+
+  if (randomCandidate) {
+    keys.add(randomCandidate);
+  }
+
+  for (let offset = 0; offset < JOB_SLOT_COUNT; offset++) {
+    keys.add(jobKeyFromIndex((iteration + offset) % JOB_SLOT_COUNT));
+  }
+
+  return keys;
+}
+
+// recycleJobSlot: deletes the claimed job and immediately requeues it, keeping
+// pressure on the system without growing memory usage.
+async function recycleJobSlot(jobKey, jobSnapshot) {
+  const deleted = await kv.deleteIfExists(jobKey);
+
+  if (!deleted) {
+    return false;
+  }
+
+  const recycledJob = {
+    id: jobSnapshot.id,
+    state: 'queued',
+    type: jobSnapshot.type,
+    version: (jobSnapshot.version || 0) + 1,
+    payload: jobSnapshot.payload,
+    createdAt: jobSnapshot.createdAt,
+    lastProcessedAt: Date.now(),
+    lastProcessedBy: jobSnapshot.claimedBy
+  };
+
+  await kv.set(jobKey, recycledJob);
+
+  return true;
+}
+
+// safeGet: wraps kv.get() to swallow "not found" errors that can happen during
+// high churn, letting the caller decide what to do.
+async function safeGet(key) {
+  try {
+    return await kv.get(key);
+  } catch (err) {
+    return null;
+  }
 }

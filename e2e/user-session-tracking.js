@@ -58,6 +58,9 @@ const kv = openKv(
     : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
 );
 
+// Rationale: 20 VUs × 100 iterations represent a busy application hour without
+// overwhelming CI. Thresholds ensure session creation, activity updates, and
+// cleanup hooks never silently degrade.
 export const options = {
   // Vary these to increase contention. Start with 20×100 like the shared script.
   vus: parseInt(__ENV.VUS || '20', 10),
@@ -72,14 +75,13 @@ export const options = {
   }
 };
 
-// -----------------------
-// Test setup & teardown.
-// -----------------------
+// setup: purge all sessions so we can assert deterministic counters per run.
 export async function setup() {
   // Start with a clean state so each run is deterministic.
   await kv.clear();
 }
 
+// teardown: close disk stores so repeated test runs on the same file stay fast.
 export async function teardown() {
   // For disk backends, close the store cleanly so the file can be reused immediately.
   if (SELECTED_BACKEND_NAME === 'disk') {
@@ -87,9 +89,8 @@ export async function teardown() {
   }
 }
 
-// -------------------------------
-// The main iteration body (VUs).
-// -------------------------------
+// Each virtual user creates a session, tracks page views, performs existence
+// checks, and occasionally triggers cleanup to cover the full lifecycle.
 export default async function userSessionTrackingTest() {
   const userId = `user:${exec.vu.idInTest}:${Math.floor(Math.random() * 1000)}`;
   const sessionId = `session:${userId}:${Date.now()}`;

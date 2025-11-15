@@ -29,15 +29,14 @@ import { openKv } from 'k6/x/kv';
 // ATOMIC OPERATIONS TESTED:
 // - swap(): Atomically update cached data
 // - compareAndSwap(): Update version numbers atomically
-// - compareAndDelete(): Invalidate related caches conditionally
-// - randomKey(): Find cached items to update
+// - compareAndDelete(): Invalidate related caches deterministically
 // - exists(): Verify cache health
 // - list(): Monitor cache state
 //
 // CONCURRENCY PATTERN:
 // - Multiple VUs represent different microservices
 // - Each VU updates different cached entities
-// - Shared KV store ensures cache consistency
+// - Deterministic key selection prevents false positives
 // - Version-based invalidation prevents stale data
 //
 // PERFORMANCE CHARACTERISTICS:
@@ -54,6 +53,10 @@ const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
   (__ENV.KV_TRACK_KEYS && __ENV.KV_TRACK_KEYS.toLowerCase() === 'true') || true;
 
+// Dataset configuration (number of products and CAS retry budget).
+const PRODUCT_COUNT = parseInt(__ENV.PRODUCT_COUNT || '20', 10);
+const VERSION_RETRY_ATTEMPTS = 10;
+
 // ---------------------------------------------
 // Open a shared KV store available to all VUs.
 // ---------------------------------------------
@@ -63,104 +66,85 @@ const kv = openKv(
     : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
 );
 
+// Rationale: 20 VUs × 100 iterations give enough overlap to expose CAS or
+// swap() regressions while keeping the job under a second on CI. Thresholds
+// require that every cache update, invalidation, and health check succeeds.
 export const options = {
-  // Vary these to increase contention. Start with 20×100 like the shared script.
   vus: parseInt(__ENV.VUS || '20', 10),
   iterations: parseInt(__ENV.ITERATIONS || '100', 10),
-
-  // Optional: add thresholds to fail fast if we start choking.
   thresholds: {
-    // Require that at least 90% of iterations invalidate caches successfully.
-    'checks{cache:invalidated}': ['rate>0.90'],
-    'checks{cache:updated}': ['rate>0.95']
+    'checks{cache:updated}': ['rate>0.999'],
+    'checks{cache:invalidated}': ['rate>0.999'],
+    'checks{cache:health}': ['rate>0.999']
   }
 };
 
-// -----------------------
-// Test setup & teardown.
-// -----------------------
+// setup: seeds a deterministic product catalog so every run exercises the same
+// data dependencies and version numbers.
 export async function setup() {
-  // Start with a clean state so each run is deterministic.
   await kv.clear();
 
-  // Pre-populate cache entries.
-  for (let i = 1; i <= 20; i++) {
+  for (let i = 1; i <= PRODUCT_COUNT; i++) {
     const productId = `product:${i}`;
-    const version = `v${Math.floor(Math.random() * 10)}`;
+    const version = `v${i}`;
 
-    await kv.set(`${productId}:data`, {
-      id: i,
-      name: `Product ${i}`,
-      price: Math.floor(Math.random() * 1000),
-      version: version,
-      cachedAt: Date.now()
-    });
-
+    await kv.set(`${productId}:data`, buildProductData(i, version));
     await kv.set(`${productId}:version`, version);
+    await kv.set(`${productId}:related`, buildRelatedState(productId, version));
   }
 }
 
 export async function teardown() {
-  // For disk backends, close the store cleanly so the file can be reused immediately.
   if (SELECTED_BACKEND_NAME === 'disk') {
     kv.close();
   }
 }
 
-// -------------------------------
-// The main iteration body (VUs).
-// -------------------------------
+// Each VU deterministically selects a product, updates its cache entry, bumps
+// the version via CAS, invalidates related data, and rebuilds the dependency.
 export default async function microserviceCacheManagementTest() {
   const vuId = exec.vu.idInTest;
+  const iterationSeed = exec.scenario.iterationInTest;
+  const productIndex = (iterationSeed % PRODUCT_COUNT) + 1;
+  const productId = `product:${productIndex}`;
+  const dataKey = `${productId}:data`;
+  const versionKey = `${productId}:version`;
+  const relatedKey = `${productId}:related`;
 
-  // Test 1: Random product update (cache invalidation trigger).
-  const randomProductKey = await kv.randomKey({ prefix: 'product:' });
+  const currentData = await kv.get(dataKey);
 
-  if (randomProductKey && randomProductKey.includes(':data')) {
-    const productId = randomProductKey.split(':data')[0];
-    const versionKey = `${productId}:version`;
+  const newData = {
+    ...currentData,
+    price: (currentData.price + iterationSeed) % 1000,
+    version: `v${Date.now()}`,
+    updatedAt: Date.now(),
+    updatedBy: vuId
+  };
 
-    // Test 2: Get current version.
-    const currentVersion = await kv.get(versionKey);
+  const { loaded } = await kv.swap(dataKey, newData);
 
-    if (currentVersion) {
-      // Test 3: Update product data (swap).
-      const newData = {
-        id: productId.split(':')[1],
-        name: `Updated Product ${productId.split(':')[1]}`,
-        price: Math.floor(Math.random() * 1000),
-        version: `v${Date.now()}`,
-        updatedAt: Date.now(),
-        updatedBy: vuId
-      };
+  check(loaded, {
+    'cache:updated': () => loaded
+  });
 
-      const { previous: oldData, loaded } = await kv.swap(randomProductKey, newData);
+  const bumpedVersion = await compareAndSwapVersion(versionKey);
 
-      check(loaded, {
-        'cache:updated': () => loaded
-      });
+  check(Boolean(bumpedVersion), {
+    'cache:version': () => Boolean(bumpedVersion)
+  });
 
-      // Test 4: Update version atomically (compareAndSwap).
-      const newVersion = newData.version;
-      const versionUpdated = await kv.compareAndSwap(versionKey, currentVersion, newVersion);
+  const invalidated = await invalidateRelatedCache(relatedKey);
 
-      if (versionUpdated) {
-        // Test 5: Invalidate related caches (compareAndDelete).
-        const relatedCacheKey = `${productId}:related`;
-        const invalidated = await kv.compareAndDelete(relatedCacheKey, 'stale');
+  check(invalidated, {
+    'cache:invalidated': () => invalidated
+  });
 
-        check(true, {
-          'cache:invalidated': () => true
-        });
-      }
-    }
-  }
+  await kv.set(relatedKey, buildRelatedState(productId, bumpedVersion || newData.version));
 
-  // Test 6: Check cache health (exists, list).
-  const cacheEntries = await kv.list({ prefix: 'product:', limit: 5 });
+  const cacheEntries = await kv.list({ prefix: 'product:', limit: 3 });
 
   for (const entry of cacheEntries) {
-    if (entry.key.includes(':data')) {
+    if (entry.key.endsWith(':data')) {
       const exists = await kv.exists(entry.key);
       check(exists, {
         'cache:health': () => exists
@@ -168,6 +152,71 @@ export default async function microserviceCacheManagementTest() {
     }
   }
 
-  // Simulate some processing time.
   sleep(0.01);
+}
+
+// buildProductData: produces deterministic product payloads so diffing caches
+// is straightforward when debugging.
+function buildProductData(id, version) {
+  return {
+    id,
+    name: `Product ${id}`,
+    price: (id * 137) % 1000,
+    version,
+    cachedAt: Date.now()
+  };
+}
+
+// buildRelatedState: represents an edge cache (e.g., aggregated response) that
+// needs invalidation whenever the base product changes.
+function buildRelatedState(productId, version) {
+  return {
+    productId,
+    cachedVersion: version,
+    status: 'stale'
+  };
+}
+
+// compareAndSwapVersion: retries CAS until the version bump succeeds, ensuring
+// we actually validate concurrency primitives instead of bailing silently.
+async function compareAndSwapVersion(versionKey) {
+  for (let attempt = 0; attempt < VERSION_RETRY_ATTEMPTS; attempt++) {
+    let currentVersion;
+
+    try {
+      currentVersion = await kv.get(versionKey);
+    } catch (err) {
+      return null;
+    }
+
+    const nextVersion = bumpVersionLabel(currentVersion);
+    const swapped = await kv.compareAndSwap(versionKey, currentVersion, nextVersion);
+
+    if (swapped) {
+      return nextVersion;
+    }
+  }
+
+  return null;
+}
+
+// invalidateRelatedCache: ensures compareAndDelete behaves atomically by only
+// deleting when the cached version matches the snapshot fetched earlier.
+async function invalidateRelatedCache(relatedKey) {
+  let snapshot;
+
+  try {
+    snapshot = await kv.get(relatedKey);
+  } catch (err) {
+    return false;
+  }
+
+  return kv.compareAndDelete(relatedKey, snapshot);
+}
+
+// bumpVersionLabel: normalizes version strings (v123 → v124) so CAS inputs are
+// consistent even if previous writers used different formatting.
+function bumpVersionLabel(currentVersion) {
+  const numeric = parseInt(String(currentVersion).replace(/\D/g, ''), 10) || 0;
+  return `v${numeric + 1}`;
 }

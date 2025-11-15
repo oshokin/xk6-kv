@@ -38,20 +38,17 @@ import { openKv } from 'k6/x/kv';
 // - Critical for business operations (revenue depends on successful claims)
 // - Must handle thousands of concurrent order claims per second
 
-// The total number of synthetic "orders" we pretend to pull from a backend.
-// We intentionally keep this configurable via env var to scale tests quickly.
+// Synthetic dataset size (number of orders available per run).
 const TOTAL_NUMBER_OF_SYNTHETIC_ALLOCATED_ORDERS =
   (__ENV.TOTAL_FAKE_ORDERS && parseInt(__ENV.TOTAL_FAKE_ORDERS, 10)) || 1000;
 
-// We will try a few times to "claim" an order in case of a race.
+// Retry budget for claiming orders under contention.
 const MAXIMUM_NUMBER_OF_RETRY_ATTEMPTS_TO_CLAIM_ORDER = 5;
 
-// The wait time between retry attempts in milliseconds.
-// We use a tiny sleep to yield in heavy contention scenarios.
+// Backoff duration (ms) between retries when claiming orders.
 const WAIT_TIME_BETWEEN_RETRY_ATTEMPTS_IN_MILLISECONDS = 50;
 
-// We generate stable, readable order keys for kv.
-// The same prefix is used across all VUs to test inter-VU coordination.
+// Namespace prefix used for shared order keys.
 const PERSISTENT_ORDER_CLAIM_KEY_PREFIX = 'order-';
 
 // Backend selection: memory (default) or disk.
@@ -79,9 +76,10 @@ const SYNTHETIC_ALLOCATED_ORDER_ID_LIST = Array.from(
   (_, i) => i + 1, // Use 1..N for friendlier logs
 );
 
-// -----------------
-// k6 test options.
-// -----------------
+// Rationale: 50 VUs × 1000 iterations intentionally overwhelm the shared pool
+// so every execution hits heavy contention. That pressure makes regressions in
+// getOrSet() immediately visible, yet the whole scenario still completes within
+// seconds on CI runners.
 export const options = {
   // Vary these to increase contention. Start with 50×1000 like the shared script.
   vus: parseInt(__ENV.VUS || '50', 10),
@@ -94,15 +92,14 @@ export const options = {
   },
 };
 
-// -----------------------
-// Test setup & teardown.
-// -----------------------
+// setup: erase every order key so each run starts from the same initial state.
 export async function setup() {
   // Start with a clean state so each run is deterministic.
   // This clears only the kv store, not the local array of order IDs.
   await kv.clear();
 }
 
+// teardown: close disk-backed stores so the BoltDB file can be reused instantly.
 export async function teardown() {
   // For disk backends, close the store cleanly so the file can be reused immediately.
   if (SELECTED_BACKEND_NAME === 'disk') {
@@ -110,13 +107,13 @@ export async function teardown() {
   }
 }
 
-// -------------------------------
-// The main iteration body (VUs).
-// -------------------------------
+// Each iteration tries to atomically grab the next unclaimed order, simulates
+// processing work, and releases the slot so future iterations can catch bugs in
+// ordering or fairness.
 export default async function mainScenarioIteration() {
   // Try to pick a single "ALLOCATED" order and atomically claim it via kv.getOrSet(...).
   // This is the concurrency hotspot we want to verify under load.
-  const claimedOrderId = await claimOneAllocatedOrderOrThrow();
+  const claimedOrder = await claimOneAllocatedOrderOrThrow();
 
   // At this point, the order has been "claimed" for processing by this VU.
   // In a real test you'd call an HTTP API; here we just pretend to do something expensive.
@@ -126,8 +123,11 @@ export default async function mainScenarioIteration() {
   // Assert that we indeed claimed something. 
   // We use built-in k6 `check` instead of external `expect`.
   check(true, {
-    'claimed order id is present': () => claimedOrderId !== undefined,
+    'claimed order id is present': () => claimedOrder.id !== undefined,
   }, { type: 'order-claimed' });
+
+  // Release the slot so future iterations can re-claim the same order.
+  await kv.delete(claimedOrder.key);
 
   // Optional noisy log - turn on with LOG_CLAIMS=true.
   if (__ENV.LOG_CLAIMS === 'true') {
@@ -135,9 +135,9 @@ export default async function mainScenarioIteration() {
   }
 }
 
-// ----------------------------------------------------------
-// Helper: atomically "claim" an unprocessed order using KV.
-// ----------------------------------------------------------
+// claimOneAllocatedOrderOrThrow: scans the deterministic dataset until it finds
+// an unclaimed order, proving that getOrSet() guards ownership even when every
+// VU is pounding the same keys.
 async function claimOneAllocatedOrderOrThrow() {
   // Loop over the list of order IDs and
   // try to atomically "claim" the very first one whose key is absent.
@@ -168,13 +168,17 @@ async function claimOneAllocatedOrderOrThrow() {
       throw new Error('No unprocessed orders found (all claimed already).');
     }
 
-    return orderIdWeHaveClaimed;
+    const orderKey = `${PERSISTENT_ORDER_CLAIM_KEY_PREFIX}${orderIdWeHaveClaimed}`;
+
+    return {
+      id: orderIdWeHaveClaimed,
+      key: orderKey
+    };
   }, MAXIMUM_NUMBER_OF_RETRY_ATTEMPTS_TO_CLAIM_ORDER, WAIT_TIME_BETWEEN_RETRY_ATTEMPTS_IN_MILLISECONDS);
 }
 
-// -------------------------------
-// Helper: generic retry wrapper.
-// -------------------------------
+// withRetry: tiny helper that yields between attempts so we do not spin-lock
+// under contention; if we still fail, the test rightfully surfaces the bug.
 async function withRetry(fn, maximumAttempts, intervalMs) {
   let lastObservedError;
   for (let attemptNumber = 0; attemptNumber < maximumAttempts; attemptNumber++) {

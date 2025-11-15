@@ -28,8 +28,8 @@ import { openKv } from 'k6/x/kv';
 //
 // ATOMIC OPERATIONS TESTED:
 // - getOrSet(): Initialize feature flags with defaults
-// - compareAndSwap(): Update feature configurations atomically
 // - incrementBy(): Track feature usage statistics
+// - compareAndSwap(): Update feature configurations atomically
 // - exists(): Verify feature flag availability
 // - list(): Monitor all feature flags
 //
@@ -37,7 +37,7 @@ import { openKv } from 'k6/x/kv';
 // - Multiple VUs represent different users
 // - Each VU checks feature flags and tracks usage
 // - Shared KV store ensures consistent feature state
-// - Rollout percentages control feature visibility
+// - Deterministic retry loops ensure every CAS succeeds or surfaces a bug
 //
 // PERFORMANCE CHARACTERISTICS:
 // - High read frequency (every user interaction)
@@ -53,6 +53,10 @@ const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
   (__ENV.KV_TRACK_KEYS && __ENV.KV_TRACK_KEYS.toLowerCase() === 'true') || true;
 
+// Feature flag configuration (coverage set and CAS retries).
+const FLAG_NAMES = ['new-checkout', 'dark-mode', 'premium-features', 'beta-search'];
+const MAX_FLAG_UPDATE_ATTEMPTS = 10;
+
 // ---------------------------------------------
 // Open a shared KV store available to all VUs.
 // ---------------------------------------------
@@ -62,83 +66,54 @@ const kv = openKv(
     : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
 );
 
+// Rationale: 20 VUs × 100 iterations mirror a busy rollout window. Thresholds
+// require that flag reads, updates, and monitoring logic never regress under
+// deterministic CAS contention.
 export const options = {
-  // Vary these to increase contention. Start with 20×100 like the shared script.
   vus: parseInt(__ENV.VUS || '20', 10),
   iterations: parseInt(__ENV.ITERATIONS || '100', 10),
-
-  // Optional: add thresholds to fail fast if we start choking.
   thresholds: {
-    // Require that at least 95% of iterations handle feature flags successfully.
-    'checks{flag:enabled}': ['rate>0.95'],
-    // NOTE: Some compareAndSwap failures are EXPECTED and VALIDATE correct behavior:
-    // - compareAndSwap() may return false when another VU updates the flag first (race condition)
-    // - This confirms that atomic operations correctly prevent concurrent modification conflicts.
-    // - A 90% success rate is expected under high concurrency (20 VUs × 100 iterations).
-    'checks{flag:updated}': ['rate>0.90']
+    'checks{flag:enabled}': ['rate>0.999'],
+    'checks{flag:updated}': ['rate>0.999'],
+    'checks{flag:monitoring}': ['rate>0.999']
   }
 };
 
-// -----------------------
-// Test setup & teardown.
-// -----------------------
+// setup: creates a known flag set so monitoring checks can assert the exact
+// number of entries returned by list().
 export async function setup() {
-  // Start with a clean state so each run is deterministic.
   await kv.clear();
 
-  // Pre-populate some feature flags.
-  const flags = [
-    { name: 'new-checkout', enabled: true, rollout: 50 },
-    { name: 'dark-mode', enabled: false, rollout: 0 },
-    { name: 'premium-features', enabled: true, rollout: 100 },
-    { name: 'beta-search', enabled: false, rollout: 25 }
-  ];
-
-  for (const flag of flags) {
-    await kv.set(`flag:${flag.name}`, {
-      ...flag,
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    });
+  for (const flagName of FLAG_NAMES) {
+    await kv.set(`flag:${flagName}`, buildDefaultFlag(flagName));
   }
 }
 
 export async function teardown() {
-  // For disk backends, close the store cleanly so the file can be reused immediately.
   if (SELECTED_BACKEND_NAME === 'disk') {
     kv.close();
   }
 }
 
-// -------------------------------
-// The main iteration body (VUs).
-// -------------------------------
+// Each iteration emulates a user checking feature gates, recording usage, and
+// occasionally acting as an admin to change rollout percentages.
 export default async function abTestingFeatureFlagsTest() {
   const vuId = exec.vu.idInTest;
-  const userId = `user:${vuId}:${Math.floor(Math.random() * 1000)}`;
-
-  // Test 1: Check feature flag (getOrSet for default).
-  const flagName = 'new-checkout';
+  const iterationSeed = exec.scenario.iterationInTest;
+  const flagName = FLAG_NAMES[iterationSeed % FLAG_NAMES.length];
   const flagKey = `flag:${flagName}`;
+  const userId = `user:${vuId}:${iterationSeed}`;
 
-  const { value: flag, loaded } = await kv.getOrSet(flagKey, {
-    name: flagName,
-    enabled: false,
-    rollout: 0,
-    createdAt: Date.now(),
-    updatedAt: Date.now()
+  const { value: flag } = await kv.getOrSet(flagKey, buildDefaultFlag(flagName));
+
+  check(Boolean(flag), {
+    'flag:enabled': () => Boolean(flag) && typeof flag.enabled === 'boolean'
   });
 
-  check(loaded, {
-    'flag:enabled': () => loaded && flag.enabled
-  });
+  const userSegment = (vuId * 31 + iterationSeed * 17) % 100;
+  const shouldSeeFeature = flag.enabled && userSegment < flag.rollout;
 
-  // Test 2: Check if user should see feature (rollout logic).
-  const userHash = userId.split(':').pop() % 100;
-  const shouldShowFeature = flag.enabled && userHash < flag.rollout;
-
-  if (shouldShowFeature) {
-    // Test 3: Track feature usage.
+  if (shouldSeeFeature) {
     const usageKey = `usage:${flagName}:${userId}`;
     const usageCount = await kv.incrementBy(usageKey, 1);
 
@@ -147,42 +122,64 @@ export default async function abTestingFeatureFlagsTest() {
     });
   }
 
-  // Test 4: Admin updates flag (compareAndSwap).
-  // NOTE: compareAndSwap() may return false if another VU updated the flag first.
-  // This is EXPECTED behavior - it validates that atomic operations prevent concurrent modification conflicts.
-  // Under high concurrency (20 VUs), some updates will fail, which is correct behavior.
-  if (Math.random() < 0.1) { // 10% chance to update flag
-    const currentFlag = await kv.get(flagKey);
+  const updated = await updateFlagWithRetry(flagKey, flag, vuId);
 
-    if (currentFlag) {
-      const newRollout = Math.floor(Math.random() * 100);
-      const updated = await kv.compareAndSwap(flagKey, currentFlag, {
-        ...currentFlag,
-        rollout: newRollout,
-        updatedAt: Date.now(),
-        updatedBy: vuId
-      });
-
-      check(updated, {
-        'flag:updated': () => updated
-      });
-    }
-  }
-
-  // Test 5: List all flags (monitoring).
-  const allFlags = await kv.list({ prefix: 'flag:', limit: 10 });
-
-  check(allFlags.length > 0, {
-    'flag:monitoring': () => allFlags.length > 0
+  check(updated, {
+    'flag:updated': () => updated
   });
 
-  // Test 6: Check flag existence.
+  const allFlags = await kv.list({ prefix: 'flag:', limit: FLAG_NAMES.length });
+
+  check(allFlags.length === FLAG_NAMES.length, {
+    'flag:monitoring': () => allFlags.length === FLAG_NAMES.length
+  });
+
   const flagExists = await kv.exists(flagKey);
 
   check(flagExists, {
     'flag:exists': () => flagExists
   });
 
-  // Simulate feature usage.
   sleep(0.01);
+}
+
+// buildDefaultFlag: baseline configuration for each feature so getOrSet() has a
+// deterministic payload to insert on first use.
+function buildDefaultFlag(name) {
+  return {
+    name,
+    enabled: name !== 'dark-mode',
+    rollout: name === 'premium-features' ? 100 : 50,
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+}
+
+// updateFlagWithRetry: CAS loop that keeps trying until it successfully applies
+// an update, ensuring compareAndSwap() is truly tested under contention.
+async function updateFlagWithRetry(flagKey, initialFlag, vuId) {
+  let snapshot = initialFlag;
+
+  for (let attempt = 0; attempt < MAX_FLAG_UPDATE_ATTEMPTS; attempt++) {
+    const proposed = {
+      ...snapshot,
+      rollout: (snapshot.rollout + 7) % 100,
+      updatedAt: Date.now(),
+      updatedBy: vuId
+    };
+
+    const updated = await kv.compareAndSwap(flagKey, snapshot, proposed);
+
+    if (updated) {
+      return true;
+    }
+
+    try {
+      snapshot = await kv.get(flagKey);
+    } catch (err) {
+      return false;
+    }
+  }
+
+  return false;
 }
