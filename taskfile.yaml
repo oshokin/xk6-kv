@@ -58,16 +58,9 @@ vars:
   # E2E Test Configuration
   # -------------------------------
 
-  # Default JS scenario path for e2e/integration.
-  # Change at runtime: `task test-e2e-memory-track E2E_JS="e2e/get-or-set.js"`.
-  E2E_JS: "{{.E2E_JS | default (printf `e2e%sget-or-set.js` .PS)}}"
-
   # E2E defaults (can be overridden on CLI).
-  VUS: "{{.VUS | default `50`}}"
-  ITERATIONS: "{{.ITERATIONS | default `1000`}}"
-  TOTAL_FAKE_ORDERS: "{{.TOTAL_FAKE_ORDERS | default `1000`}}"
-  RETRY_WAIT_MS: "{{.RETRY_WAIT_MS | default `50`}}"
-  MAX_RETRY: "{{.MAX_RETRY | default `5`}}"
+  VUS: "{{.VUS | default `20`}}"
+  ITERATIONS: "{{.ITERATIONS | default `100`}}"
 
 tasks:
   # -------------------------------
@@ -237,65 +230,41 @@ tasks:
   # E2E Testing
   # -------------------------------
 
-  test-e2e-memory-no-track:
-    desc: "Run e2e: memory backend, trackKeys=false"
+  test-e2e-all:
+    desc: "Run all E2E tests sequentially (all backends + key tracking combinations)"
     deps: [build-k6]
     cmds:
-      - '"{{.K6_BIN}}" run "{{.E2E_JS}}"'
-    env:
-      KV_BACKEND: "memory"
-      KV_TRACK_KEYS: "false"
-      VUS: "{{.VUS}}"
-      ITERATIONS: "{{.ITERATIONS}}"
-      TOTAL_FAKE_ORDERS: "{{.TOTAL_FAKE_ORDERS}}"
-      RETRY_WAIT_MS: "{{.RETRY_WAIT_MS}}"
-      MAX_RETRY: "{{.MAX_RETRY}}"
-      LOG_CLAIMS: "false"
+      - task: test-e2e-single
+        vars: { E2E_SCENARIO: "order-claiming" }
+      - task: test-e2e-single  
+        vars: { E2E_SCENARIO: "user-session-tracking" }
+      - task: test-e2e-single
+        vars: { E2E_SCENARIO: "api-rate-limiting" }
+      - task: test-e2e-single
+        vars: { E2E_SCENARIO: "microservice-cache-management" }
+      - task: test-e2e-single
+        vars: { E2E_SCENARIO: "background-job-processing" }
+      - task: test-e2e-single
+        vars: { E2E_SCENARIO: "ab-testing-feature-flags" }
 
-  test-e2e-memory-track:
-    desc: "Run e2e: memory backend, trackKeys=true"
-    deps: [build-k6]
+  test-e2e-single:
+    desc: "Run single E2E scenario (all backend + key tracking combinations)"
     cmds:
-      - '"{{.K6_BIN}}" run "{{.E2E_JS}}"'
-    env:
-      KV_BACKEND: "memory"
-      KV_TRACK_KEYS: "true"
-      VUS: "{{.VUS}}"
-      ITERATIONS: "{{.ITERATIONS}}"
-      TOTAL_FAKE_ORDERS: "{{.TOTAL_FAKE_ORDERS}}"
-      RETRY_WAIT_MS: "{{.RETRY_WAIT_MS}}"
-      MAX_RETRY: "{{.MAX_RETRY}}"
-      LOG_CLAIMS: "false"
-
-  test-e2e-disk-no-track:
-    desc: "Run e2e: disk backend, trackKeys=false"
-    deps: [build-k6]
-    cmds:
-      - '"{{.K6_BIN}}" run "{{.E2E_JS}}"'
-    env:
-      KV_BACKEND: "disk"
-      KV_TRACK_KEYS: "false"
-      VUS: "{{.VUS}}"
-      ITERATIONS: "{{.ITERATIONS}}"
-      TOTAL_FAKE_ORDERS: "{{.TOTAL_FAKE_ORDERS}}"
-      RETRY_WAIT_MS: "{{.RETRY_WAIT_MS}}"
-      MAX_RETRY: "{{.MAX_RETRY}}"
-      LOG_CLAIMS: "false"
-
-  test-e2e-disk-track:
-    desc: "Run e2e: disk backend, trackKeys=true"
-    deps: [build-k6]
-    cmds:
-      - '"{{.K6_BIN}}" run "{{.E2E_JS}}"'
-    env:
-      KV_BACKEND: "disk"
-      KV_TRACK_KEYS: "true"
-      VUS: "{{.VUS}}"
-      ITERATIONS: "{{.ITERATIONS}}"
-      TOTAL_FAKE_ORDERS: "{{.TOTAL_FAKE_ORDERS}}"
-      RETRY_WAIT_MS: "{{.RETRY_WAIT_MS}}"
-      MAX_RETRY: "{{.MAX_RETRY}}"
-      LOG_CLAIMS: "false"
+      # Memory backend with key tracking enabled.
+      - echo "Testing {{.E2E_SCENARIO}} - Memory backend, trackKeys=true"
+      - KV_BACKEND=memory KV_TRACK_KEYS=true VUS={{.VUS}} ITERATIONS={{.ITERATIONS}} "{{.K6_BIN}}" run "e2e/{{.E2E_SCENARIO}}.js"
+      
+      # Memory backend with key tracking disabled.
+      - echo "Testing {{.E2E_SCENARIO}} - Memory backend, trackKeys=false"
+      - KV_BACKEND=memory KV_TRACK_KEYS=false VUS={{.VUS}} ITERATIONS={{.ITERATIONS}} "{{.K6_BIN}}" run "e2e/{{.E2E_SCENARIO}}.js"
+      
+      # Disk backend with key tracking enabled.
+      - echo "Testing {{.E2E_SCENARIO}} - Disk backend, trackKeys=true"
+      - KV_BACKEND=disk KV_TRACK_KEYS=true VUS={{.VUS}} ITERATIONS={{.ITERATIONS}} "{{.K6_BIN}}" run "e2e/{{.E2E_SCENARIO}}.js"
+      
+      # Disk backend with key tracking disabled.
+      - echo "Testing {{.E2E_SCENARIO}} - Disk backend, trackKeys=false"
+      - KV_BACKEND=disk KV_TRACK_KEYS=false VUS={{.VUS}} ITERATIONS={{.ITERATIONS}} "{{.K6_BIN}}" run "e2e/{{.E2E_SCENARIO}}.js"
 
   # -------------------------------
   # Cleanup

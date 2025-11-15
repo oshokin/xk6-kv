@@ -117,7 +117,7 @@ Expand-Archive -Path k6.zip -DestinationPath .
 go install go.k6.io/xk6/cmd/xk6@latest
 ```
 
-2. Build a k6 binary with the xk6-kv extension:
+1. Build a k6 binary with the xk6-kv extension:
 
 ```bash
 # Build the latest version
@@ -127,7 +127,7 @@ xk6 build --with github.com/oshokin/xk6-kv@latest
 xk6 build --with github.com/oshokin/xk6-kv@v1.3.6
 ```
 
-3. The built binary will be in your current directory:
+1. The built binary will be in your current directory:
 
 ```bash
 ./k6 version
@@ -614,7 +614,7 @@ The taskfile is **fully cross-platform** and works identically on **Linux, macOS
 
 #### Install Task (once)
 
-**Linux/macOS/WSL**
+##### Linux/macOS/WSL
 
 ```bash
 # Homebrew (macOS / Linuxbrew)
@@ -624,7 +624,7 @@ brew install go-task/tap/go-task
 sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
 ```
 
-**Windows (PowerShell)**
+##### Windows (PowerShell)
 
 ```powershell
 # Scoop (recommended)
@@ -637,6 +637,7 @@ choco install go-task
 ```
 
 > **Requirements:**
+>
 > - Go 1.25+ in your PATH
 > - For `test-race` and `build-k6` on Windows: gcc (MinGW-w64) or use WSL
 > - Task automatically handles platform differences (PowerShell vs Bash)
@@ -664,6 +665,7 @@ task install-xk6
 ```
 
 **Version Management:**
+
 - Uses "latest" by default for easy updates
 - Checks installed versions to avoid unnecessary reinstalls
 - Works on all platforms (Windows, Linux, macOS)
@@ -693,6 +695,7 @@ task build-k6
 ```
 
 **Windows Note:** Building k6 requires CGO (gcc). The task will display a helpful message if gcc is missing. Options:
+
 - Install [MinGW-w64](https://www.mingw-w64.org/)
 - Use WSL for building
 - Download pre-built binaries from [Releases](https://github.com/oshokin/xk6-kv/releases)
@@ -715,7 +718,7 @@ task test-race
 
 By default, tasks run the script at `e2e/get-or-set.js`. You can point to a different JS with `E2E_JS`.
 
-**Memory backend**
+##### Memory backend
 
 ```bash
 # No key tracking (prefix randomKey uses a two-pass scan)
@@ -725,7 +728,7 @@ task test-e2e-memory-no-track
 task test-e2e-memory-track
 ```
 
-**Disk backend**
+##### Disk backend
 
 ```bash
 # No key tracking
@@ -793,6 +796,7 @@ task build-k6
 This uses `--with github.com/oshokin/xk6-kv=.` to tell xk6 to use your working directory instead of fetching from GitHub.
 
 **Cross-Platform Support:**
+
 - Linux/macOS/WSL: Native build with bash
 - Windows: PowerShell-based build with helpful CGO messages
 
@@ -919,12 +923,14 @@ This project uses:
 - **golines** for line length enforcement (max 120 characters)
 
 Run `task lint-fix` before committing to ensure your code is properly formatted and passes all checks. This single command:
+
 1. Runs `golangci-lint run --fix` to auto-fix linting issues
 2. Runs `gofumpt -l -w .` to format all Go code
 
 ### Cross-Platform Development
 
 The development environment works seamlessly across:
+
 - **Windows** (native PowerShell)
 - **Linux** (native Bash)
 - **macOS** (native Bash)

@@ -29,10 +29,12 @@ runs:
         echo "MODULE_REPO=github.com/oshokin/xk6-kv" >> $GITHUB_ENV
 
     # Check out repository with full Git history for version analysis.
+    # When triggered by tag push, checkout the tag; otherwise checkout the default branch.
     - name: Checkout
       uses: actions/checkout@v5
       with:
         fetch-depth: 0 # Fetch all tags and history for semantic versioning.
+        ref: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.ref || github.ref }}
 
     # Set up Go environment for building k6 binaries.
     - name: Set up Go
@@ -42,6 +44,7 @@ runs:
 
     # Analyze commit messages since last tag to determine version bump.
     # Uses the semver_next.sh script to implement semantic versioning logic.
+    # If triggered by a tag push, use that tag instead of calculating a new one.
     # Fetch latest tags first to ensure accurate version calculation.
     - name: Compute next version
       id: bump
@@ -49,6 +52,36 @@ runs:
       run: |
         # Ensure we have the absolute latest tags for accurate version calculation.
         git fetch --tags origin
+        
+        # If this workflow was triggered by a tag push, use that tag.
+        GITHUB_REF="${{ github.ref }}"
+        if [[ "${{ github.event_name }}" == "push" && "$GITHUB_REF" =~ ^refs/tags/ ]]; then
+          # Extract tag name from ref (e.g., refs/tags/v1.4.1 -> v1.4.1)
+          pushed_tag="${{ github.ref_name }}"
+          
+          # Verify the tag exists and is valid
+          if git rev-parse "$pushed_tag" >/dev/null 2>&1; then
+            # Get the previous tag for changelog generation
+            # Try to find the tag before this one
+            prev_tag=$(git describe --tags --abbrev=0 "$pushed_tag^" 2>/dev/null || git tag --sort=-version:refname | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | sed -n "2p" || echo "1.0.0")
+            prev_tag_normalized=$(echo "$prev_tag" | sed 's/^v//')
+            
+            # Use the pushed tag as the release tag
+            {
+              echo "last_tag=$prev_tag_normalized"
+              echo "next_tag=$pushed_tag"
+              echo "bump=none"
+              echo "has_release=1"
+            } >>"$GITHUB_OUTPUT"
+            
+            echo "Using pushed tag: $pushed_tag (previous tag: $prev_tag)"
+            exit 0
+          else
+            echo "Warning: Tag $pushed_tag not found, falling back to semver calculation"
+          fi
+        fi
+        
+        # Default behavior: calculate next version from commits
         bash scripts/semver_next.sh --emit-gh-output
 
     # Skip release if no commits found (should rarely happen).
@@ -71,10 +104,19 @@ runs:
     # Create and push the new version tag to trigger release builds.
     # Tag creation must happen before building binaries.
     # Use atomic push to prevent race conditions with concurrent releases.
+    # Skip if tag was already pushed (tag push trigger).
     - name: Create and push tag
       if: steps.bump.outputs.has_release == '1'
       shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
       run: |
+        # Skip tag creation if this was triggered by a tag push (tag already exists)
+        if [[ "$EVENT_NAME" == "push" ]]; then
+          echo "Workflow triggered by tag push - skipping tag creation (tag already exists)"
+          exit 0
+        fi
+        
         # Fetch latest tags to ensure we have the most recent state.
         git fetch --tags origin
 
@@ -167,7 +209,13 @@ runs:
           COMMITS=$(git log --pretty=format:"- %s (%h)" --reverse)
         else
           # Subsequent releases - commits since last tag.
-          COMMITS=$(git log v${LAST_TAG}..HEAD --pretty=format:"- %s (%h)" --reverse)
+          # Use the tag reference directly for accurate range
+          if git rev-parse "v${LAST_TAG}" >/dev/null 2>&1; then
+            COMMITS=$(git log "v${LAST_TAG}..${NEXT_TAG}" --pretty=format:"- %s (%h)" --reverse)
+          else
+            # Fallback if tag format doesn't match
+            COMMITS=$(git log "${LAST_TAG}..${NEXT_TAG}" --pretty=format:"- %s (%h)" --reverse 2>/dev/null || git log "${NEXT_TAG}" --pretty=format:"- %s (%h)" -1)
+          fi
         fi
 
         # Create changelog content.
