@@ -88,6 +88,15 @@ type Store interface {
 	// Size returns the number of keys currently stored.
 	Size() (int64, error)
 
+	// Scan is a cursor-based iterator over keys, ordered lexicographically.
+	// If prefix is non-empty, only keys starting with prefix are considered.
+	// If afterKey is non-empty, scanning starts from the first key strictly greater than afterKey;
+	// otherwise from the first key matching prefix.
+	// If limit > 0, at most limit entries are returned.
+	// If limit <= 0, all matching entries are returned until the end of the prefix range.
+	// Returns a ScanPage with Entries and NextKey (empty when scan is complete).
+	Scan(prefix, afterKey string, limit int64) (*ScanPage, error)
+
 	// List returns key-value pairs whose keys start with prefix.
 	// If limit > 0, at most limit entries are returned.
 	// If limit <= 0, all matching entries are returned.
@@ -120,4 +129,15 @@ type Entry struct {
 	// Value holds the stored value in the implementation's native representation
 	// (commonly a []byte produced/consumed by a higher-level serializer).
 	Value any
+}
+
+// ScanPage represents a single page of results from Scan().
+type ScanPage struct {
+	// Entries is the page of key-value pairs.
+	Entries []Entry
+
+	// NextKey is the last key of this page when more entries are available
+	// for the given prefix and limit. It is an empty string when the scan
+	// has reached the end of the keyspace (for that prefix).
+	NextKey string
 }

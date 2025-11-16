@@ -11,6 +11,7 @@ import (
 	"sync"
 )
 
+// errUnsupportedValueType is returned when a value of an unsupported type is set.
 var errUnsupportedValueType = errors.New("unsupported value type (want []byte or string)")
 
 // MemoryStore is an in-memory key-value store implementation.
@@ -205,6 +206,7 @@ func (s *MemoryStore) CompareAndSwap(key string, oldValue any, newValue any) (bo
 	if !exists {
 		return false, nil
 	}
+
 	// Compare current value with old value.
 	if !bytes.Equal(current, oldBytes) {
 		return false, nil
@@ -312,61 +314,21 @@ func (s *MemoryStore) Size() (int64, error) {
 	return int64(len(s.container)), nil
 }
 
-// List returns key-value pairs filtered by prefix and limited by "limit".
-//
-// The result is sorted lexicographically by key for deterministic ordering.
-// Passing limit <= 0 means "no limit".
-//
-// NOTE: This is O(n log n) due to the sort and scans the whole map in memory.
-// For very large datasets, prefer disk backend with cursors.
-func (s *MemoryStore) List(prefix string, limit int64) ([]Entry, error) {
+// Scan returns a page of key-value pairs, ordered lexicographically.
+// If prefix is non-empty, only keys starting with prefix are considered.
+// If afterKey is non-empty, scanning starts strictly after it; otherwise from the first key.
+// If limit > 0, at most limit entries are returned; if limit <= 0, all matching entries are returned.
+// Returns a ScanPage with Entries and NextKey (set to the last key when more results exist; empty when done).
+func (s *MemoryStore) Scan(prefix, afterKey string, limit int64) (*ScanPage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Collect matching keys (full scan)
-	keys := make([]string, 0, len(s.container))
-
-	for k := range s.container {
-		if prefix != "" && !strings.HasPrefix(k, prefix) {
-			continue
-		}
-
-		keys = append(keys, k)
+	// No tracking: fall back to a simple sorted-slice implementation.
+	if !s.trackKeys || s.ost == nil {
+		return s.scanWithoutTrackingLocked(prefix, afterKey, limit), nil
 	}
 
-	// Lexicographical sort for deterministic ordering
-	sort.Strings(keys)
-
-	var (
-		// Pre-allocate result capacity to reduce reallocations.
-		maxEntries = len(keys)
-		// Apply limit if set.
-		hasLimit = limit > 0
-	)
-
-	if hasLimit && limit < int64(maxEntries) {
-		maxEntries = int(limit)
-	}
-
-	var (
-		entries = make([]Entry, 0, maxEntries)
-		count   int64
-	)
-
-	for _, k := range keys {
-		if hasLimit && count >= limit {
-			break
-		}
-
-		entries = append(entries, Entry{
-			Key:   k,
-			Value: s.container[k],
-		})
-
-		count++
-	}
-
-	return entries, nil
+	return s.scanWithTrackingLocked(prefix, afterKey, limit), nil
 }
 
 // RandomKey returns a random key, optionally filtered by "prefix".
@@ -443,6 +405,19 @@ func normalizeToBytes(value any) ([]byte, error) {
 	}
 }
 
+// List returns key-value pairs whose keys start with prefix, sorted lexicographically.
+// If limit > 0, at most limit entries are returned.
+// If limit <= 0, all matching entries are returned.
+// For very large datasets, prefer disk backend or use Scan directly.
+func (s *MemoryStore) List(prefix string, limit int64) ([]Entry, error) {
+	page, err := s.Scan(prefix, "", limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return page.Entries, nil
+}
+
 // addKeyLocked inserts k into tracking indexes.
 // Precondition: s.mu must be held by caller. No-op if key already indexed.
 func (s *MemoryStore) addKeyLocked(k string) {
@@ -503,6 +478,174 @@ func (s *MemoryStore) removeKeyLocked(k string) {
 	if s.ost != nil {
 		s.ost.Delete(k)
 	}
+}
+
+// scanWithoutTrackingLocked implements Scan when trackKeys is disabled by collecting
+// matching keys into a slice, sorting them, then applying afterKey and limit filters.
+// Precondition: s.mu is held for reading.
+func (s *MemoryStore) scanWithoutTrackingLocked(prefix, afterKey string, limit int64) *ScanPage {
+	// Collect matching keys.
+	keys := make([]string, 0, len(s.container))
+
+	for k := range s.container {
+		if prefix != "" && !strings.HasPrefix(k, prefix) {
+			continue
+		}
+
+		keys = append(keys, k)
+	}
+
+	if len(keys) == 0 {
+		return new(ScanPage)
+	}
+
+	// Lexicographical sort.
+	sort.Strings(keys)
+
+	// Find start index strictly after afterKey.
+	start := 0
+	if afterKey != "" {
+		start = sort.Search(len(keys), func(i int) bool {
+			return keys[i] > afterKey
+		})
+	}
+
+	if start >= len(keys) {
+		return new(ScanPage)
+	}
+
+	// Apply limit.
+	end := len(keys)
+	if limit > 0 && int64(end-start) > limit {
+		end = start + int(limit)
+	}
+
+	entries := make([]Entry, 0, end-start)
+	for i := start; i < end; i++ {
+		k := keys[i]
+		entries = append(entries, Entry{
+			Key:   k,
+			Value: s.container[k],
+		})
+	}
+
+	page := &ScanPage{
+		Entries: entries,
+	}
+
+	// If limit was set and we haven't reached the last key, expose a NextKey.
+	if limit > 0 && end < len(keys) {
+		page.NextKey = keys[end-1]
+	}
+
+	return page
+}
+
+// scanWithTrackingLocked implements Scan using the OSTree index for O(log n + limit * log n)
+// performance via Rank/Kth operations instead of sorting.
+// Precondition: s.mu is held for reading.
+func (s *MemoryStore) scanWithTrackingLocked(prefix, afterKey string, limit int64) *ScanPage {
+	if s.ost == nil || s.ost.Len() == 0 {
+		return new(ScanPage)
+	}
+
+	l, r := s.scanRangeBounds(prefix)
+	if l >= r {
+		return new(ScanPage)
+	}
+
+	start, ok := s.scanStartIndex(l, r, afterKey)
+	if !ok {
+		return new(ScanPage)
+	}
+
+	end := s.clampScanEnd(start, r, limit)
+	if start >= end {
+		return new(ScanPage)
+	}
+
+	page := &ScanPage{
+		Entries: s.collectEntriesInRange(start, end),
+	}
+
+	// There are more keys in the prefix range after this page when end < r.
+	if limit > 0 && end < r {
+		if lastKey, ok := s.ost.Kth(end - 1); ok {
+			page.NextKey = lastKey
+		}
+	}
+
+	return page
+}
+
+// scanRangeBounds returns the range bounds for a scan given a prefix.
+func (s *MemoryStore) scanRangeBounds(prefix string) (int, int) {
+	if prefix == "" {
+		return 0, s.ost.Len()
+	}
+
+	return s.ost.RangeBounds(prefix)
+}
+
+// scanStartIndex returns the start index for a scan given a lower bound, upper bound, and afterKey.
+func (s *MemoryStore) scanStartIndex(l, r int, afterKey string) (int, bool) {
+	if afterKey == "" {
+		return l, true
+	}
+
+	idx := max(s.ost.Rank(afterKey), l)
+
+	if idx < r {
+		if keyAtIdx, ok := s.ost.Kth(idx); ok && keyAtIdx <= afterKey {
+			idx++
+		}
+	}
+
+	if idx >= r {
+		return 0, false
+	}
+
+	return idx, true
+}
+
+// clampScanEnd returns the end index for a scan given a start index, upper bound, and limit.
+func (s *MemoryStore) clampScanEnd(start, r int, limit int64) int {
+	if limit <= 0 {
+		return r
+	}
+
+	maxEnd := start + int(limit)
+	if maxEnd < r {
+		return maxEnd
+	}
+
+	return r
+}
+
+// collectEntriesInRange collects entries in the range [start, end) from the OSTree.
+func (s *MemoryStore) collectEntriesInRange(start, end int) []Entry {
+	entries := make([]Entry, 0, end-start)
+
+	for i := start; i < end; i++ {
+		key, ok := s.ost.Kth(i)
+		if !ok {
+			break
+		}
+
+		value, exists := s.container[key]
+		if !exists {
+			// Index and container are out of sync; this shouldn't normally happen,
+			// but we fail soft by skipping the missing entry.
+			continue
+		}
+
+		entries = append(entries, Entry{
+			Key:   key,
+			Value: value,
+		})
+	}
+
+	return entries
 }
 
 // randomKeyTracked returns a random key using indexes.

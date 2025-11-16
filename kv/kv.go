@@ -1,6 +1,7 @@
 package kv
 
 import (
+	"encoding/base64"
 	"fmt"
 
 	"github.com/grafana/sobek"
@@ -315,6 +316,63 @@ func (k *KV) Close() error {
 	return k.store.Close()
 }
 
+// Scan returns a Promise that resolves to { entries: [], cursor: string, done: bool }.
+// It supports cursor-based pagination over keys, ordered lexicographically.
+// Pass the cursor from a previous result to continue; omit it (or pass "") to start fresh.
+func (k *KV) Scan(options sobek.Value) *sobek.Promise {
+	scanOptions := ImportScanOptions(k.vu.Runtime(), options)
+
+	return k.runAsyncWithStore(
+		func(s store.Store) (any, error) {
+			var afterKey string
+
+			if scanOptions.Cursor != "" {
+				raw, err := base64.StdEncoding.DecodeString(scanOptions.Cursor)
+				if err != nil {
+					return nil, fmt.Errorf("invalid cursor for scan(): %w", err)
+				}
+
+				afterKey = string(raw)
+			}
+
+			page, err := s.Scan(scanOptions.Prefix, afterKey, scanOptions.Limit)
+			if err != nil {
+				return nil, err
+			}
+
+			jsEntries := make([]ListEntry, len(page.Entries))
+			for i, entry := range page.Entries {
+				jsEntries[i] = ListEntry{
+					Key:   entry.Key,
+					Value: entry.Value,
+				}
+			}
+
+			var (
+				cursor string
+				done   bool
+			)
+
+			if page.NextKey != "" {
+				cursor = base64.StdEncoding.EncodeToString([]byte(page.NextKey))
+				done = false
+			} else {
+				cursor = ""
+				done = true
+			}
+
+			return ScanResult{
+				Entries: jsEntries,
+				Cursor:  cursor,
+				Done:    done,
+			}, nil
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
+}
+
 // List returns a Promise that resolves to an array of { key, value } objects,
 // ordered lexicographically by key. Options support prefix and limit.
 func (k *KV) List(options sobek.Value) *sobek.Promise {
@@ -384,6 +442,68 @@ type ListEntry struct {
 
 	// Value is the stored value (type depends on the store's serializer).
 	Value any `json:"value"`
+}
+
+// ScanOptions holds optional filters for Scan().
+type ScanOptions struct {
+	// Prefix selects only keys that start with the given string.
+	Prefix string `json:"prefix"`
+
+	// Limit is the maximum number of entries to return in a single page;
+	// <= 0 means "no limit" (effectively behaves like list()).
+	Limit int64 `json:"limit"`
+
+	// Cursor is an opaque continuation token previously returned from Scan().
+	// It is a base64-encoded representation of the last key in the previous page.
+	Cursor string `json:"cursor"`
+
+	// isLimitSet indicates whether Limit was explicitly provided from JS.
+	isLimitSet bool
+}
+
+// ScanResult is the JS-facing result of kv.scan().
+type ScanResult struct {
+	// Entries holds the page of key/value pairs.
+	Entries []ListEntry `json:"entries"`
+
+	// Cursor is an opaque continuation token. The first call should pass an
+	// empty cursor (or omit it); subsequent calls should pass the cursor from
+	// the previous result. When Cursor is empty, the scan is complete.
+	Cursor string `json:"cursor"`
+
+	// Done is true when the scan is complete (i.e., Cursor == "").
+	Done bool `json:"done"`
+}
+
+// ImportScanOptions converts a Sobek value into ScanOptions.
+// Accepts null/undefined and partial objects; unknown fields are ignored.
+func ImportScanOptions(rt *sobek.Runtime, options sobek.Value) ScanOptions {
+	scanOptions := ScanOptions{}
+
+	if common.IsNullish(options) {
+		return scanOptions
+	}
+
+	optionsObj := options.ToObject(rt)
+
+	scanOptions.Prefix = optionsObj.Get("prefix").String()
+	scanOptions.Cursor = optionsObj.Get("cursor").String()
+
+	limitValue := optionsObj.Get("limit")
+	if limitValue == nil {
+		return scanOptions
+	}
+
+	var (
+		parsedLimit int64
+		err         = rt.ExportTo(limitValue, &parsedLimit)
+	)
+	if err == nil {
+		scanOptions.Limit = parsedLimit
+		scanOptions.isLimitSet = true
+	}
+
+	return scanOptions
 }
 
 // ListOptions describes filters for List(); all fields are optional.

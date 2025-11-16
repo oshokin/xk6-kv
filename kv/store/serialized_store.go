@@ -146,18 +146,41 @@ func (s *SerializedStore) Size() (int64, error) {
 	return s.store.Size()
 }
 
-// List returns entries (Key, Value) filtered by prefix and limited by 'limit'.
-// All values are deserialized when the raw type is []byte or string; otherwise
-// they are returned unchanged.
-func (s *SerializedStore) List(prefix string, limit int64) ([]Entry, error) {
-	// Get the raw entries from the underlying store.
-	rawEntries, err := s.store.List(prefix, limit)
+// Scan returns a page of key-value pairs, ordered lexicographically.
+// If prefix is non-empty, only keys starting with prefix are considered.
+// If afterKey is non-empty, scanning starts strictly after it; otherwise from the first key.
+// If limit > 0, at most limit entries are returned; if limit <= 0, all matching entries are returned.
+// Values are deserialized when the raw type is []byte or string; otherwise returned unchanged.
+// Returns a ScanPage with Entries and NextKey (set to the last key when more results exist; empty when done).
+func (s *SerializedStore) Scan(prefix, afterKey string, limit int64) (*ScanPage, error) {
+	// Get the raw page from the underlying store.
+	rawPage, err := s.store.Scan(prefix, afterKey, limit)
 	if err != nil {
 		return nil, err
 	}
 
 	// Deserialize each entry's value.
-	return s.deserializeEntries(rawEntries)
+	entries, err := s.deserializeEntries(rawPage.Entries)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ScanPage{
+		Entries: entries,
+		NextKey: rawPage.NextKey,
+	}, nil
+}
+
+// List returns key-value pairs whose keys start with prefix, sorted lexicographically.
+// If limit > 0, at most limit entries are returned; if limit <= 0, all matching entries are returned.
+// Values are deserialized. This delegates to Scan internally.
+func (s *SerializedStore) List(prefix string, limit int64) ([]Entry, error) {
+	page, err := s.Scan(prefix, "", limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return page.Entries, nil
 }
 
 // RandomKey returns a random key (optionally constrained by "prefix") from the underlying store.

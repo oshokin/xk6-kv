@@ -95,11 +95,11 @@ func BenchmarkDiskStore_IncrementBy(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-incr-*.db")
+			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-increment-by-*.db")
 
 			b.ResetTimer()
 
-			for range b.N {
+			for b.Loop() {
 				_, _ = store.IncrementBy("ctr", 1)
 			}
 		})
@@ -112,7 +112,7 @@ func BenchmarkDiskStore_GetOrSet(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-gos-*.db")
+			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-get-or-set-*.db")
 
 			b.ResetTimer()
 
@@ -149,12 +149,12 @@ func BenchmarkDiskStore_CompareAndSwap(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-cas-*.db")
+			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-compare-and-swap-*.db")
 			require.NoError(b, store.Set("k", "0"))
 
 			b.ResetTimer()
 
-			for range b.N {
+			for b.Loop() {
 				_, _ = store.CompareAndSwap("k", "0", "1")
 			}
 		})
@@ -167,7 +167,7 @@ func BenchmarkDiskStore_CompareAndSwap_Contention(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-casct-*.db")
+			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-compare-and-swap-contention-*.db")
 			require.NoError(b, store.Set("k", "v0"))
 
 			b.ResetTimer()
@@ -189,13 +189,13 @@ func BenchmarkDiskStore_RandomKey(b *testing.B) {
 
 			const genericKeys = 10_000
 
-			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-rand-*.db")
+			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-random-key-*.db")
 
 			b.StopTimer()
 			seedDiskStore(b, store, genericKeys, "key-")
 			b.StartTimer()
 
-			for range b.N {
+			for b.Loop() {
 				_, _ = store.RandomKey("")
 			}
 		})
@@ -209,7 +209,7 @@ func BenchmarkDiskStore_RandomKey_WithPrefix(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-randpfx-*.db")
+			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-random-key-with-prefix-*.db")
 
 			// Seed 10k generic + 2k with "pfx-".
 			b.StopTimer()
@@ -222,7 +222,7 @@ func BenchmarkDiskStore_RandomKey_WithPrefix(b *testing.B) {
 
 			b.StartTimer()
 
-			for range b.N {
+			for b.Loop() {
 				_, _ = store.RandomKey("pfx-")
 			}
 		})
@@ -237,7 +237,7 @@ func BenchmarkDiskStore_Delete(b *testing.B) {
 			b.Run(fmt.Sprintf("trackKeys=%v/size=%d", trackKeys, totalSize), func(b *testing.B) {
 				b.ReportAllocs()
 
-				store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-del-*.db")
+				store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-delete-*.db")
 
 				b.StopTimer()
 				seedDiskStore(b, store, totalSize, "key-")
@@ -289,12 +289,12 @@ func BenchmarkDiskStore_DeleteIfExists(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-die-*.db")
+			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-delete-if-exists-*.db")
 			require.NoError(b, store.Set("k", "v"))
 
 			b.ResetTimer()
 
-			for range b.N {
+			for b.Loop() {
 				_, _ = store.DeleteIfExists("k")
 
 				// Re-seed outside timing.
@@ -312,12 +312,12 @@ func BenchmarkDiskStore_CompareAndDelete(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-cndel-*.db")
+			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-compare-and-delete-*.db")
 			require.NoError(b, store.Set("k", "v"))
 
 			b.ResetTimer()
 
-			for range b.N {
+			for b.Loop() {
 				_, _ = store.CompareAndDelete("k", "v")
 
 				// Re-seed outside timing.
@@ -325,6 +325,44 @@ func BenchmarkDiskStore_CompareAndDelete(b *testing.B) {
 				require.NoError(b, store.Set("k", "v"))
 				b.StartTimer()
 			}
+		})
+	}
+}
+
+// BenchmarkDiskStore_Scan measures paginated scans across large datasets with and without tracking.
+func BenchmarkDiskStore_Scan(b *testing.B) {
+	const (
+		totalPerPrefix = 10_000
+		pageLimit      = 100
+		resumeLimit    = 32
+	)
+
+	prefixes := []string{"user:", "order:", "misc:"}
+
+	for _, trackKeys := range []bool{true, false} {
+		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
+			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-scan-*.db")
+
+			b.StopTimer()
+
+			for _, prefix := range prefixes {
+				seedDiskStore(b, store, totalPerPrefix, prefix)
+			}
+
+			b.StartTimer()
+
+			b.Run("PrefixUserLimit100", func(b *testing.B) {
+				runScanBenchmark(b, store, "user:", "", pageLimit)
+			})
+
+			b.Run("PrefixUserUnlimited", func(b *testing.B) {
+				runScanBenchmark(b, store, "user:", "", 0)
+			})
+
+			b.Run("PrefixOrderResume", func(b *testing.B) {
+				startAfter := fmt.Sprintf("order:%05d", totalPerPrefix/2)
+				runScanBenchmark(b, store, "order:", startAfter, resumeLimit)
+			})
 		})
 	}
 }
@@ -351,7 +389,7 @@ func BenchmarkDiskStore_List(b *testing.B) {
 
 				b.ResetTimer()
 
-				for range b.N {
+				for b.Loop() {
 					_, _ = store.List("", 0)
 				}
 			})
@@ -361,7 +399,7 @@ func BenchmarkDiskStore_List(b *testing.B) {
 
 				b.ResetTimer()
 
-				for range b.N {
+				for b.Loop() {
 					_, _ = store.List("prefix", 0)
 				}
 			})
@@ -371,7 +409,7 @@ func BenchmarkDiskStore_List(b *testing.B) {
 
 				b.ResetTimer()
 
-				for range b.N {
+				for b.Loop() {
 					_, _ = store.List("", 10)
 				}
 			})
@@ -381,7 +419,7 @@ func BenchmarkDiskStore_List(b *testing.B) {
 
 				b.ResetTimer()
 
-				for range b.N {
+				for b.Loop() {
 					_, _ = store.List("prefix", 10)
 				}
 			})
@@ -395,14 +433,14 @@ func BenchmarkDiskStore_RebuildKeyList(b *testing.B) {
 	b.Run("trackKeys=true", func(b *testing.B) {
 		b.ReportAllocs()
 
-		store := newBenchmarkDiskStore(b, true, "diskstore-bench-rebuild-*.db")
+		store := newBenchmarkDiskStore(b, true, "diskstore-bench-rebuild-key-list-*.db")
 
 		// Fill with keys.
 		b.StopTimer()
 		seedDiskStore(b, store, 10_000, "key-")
 		b.StartTimer()
 
-		for range b.N {
+		for b.Loop() {
 			_ = store.RebuildKeyList()
 		}
 	})
@@ -415,7 +453,7 @@ func BenchmarkDiskStore_Concurrent(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-conc-*.db")
+			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-concurrent-*.db")
 
 			b.StopTimer()
 			seedDiskStore(b, store, 1000, "key-")
@@ -447,7 +485,7 @@ func BenchmarkDiskStore_Concurrent(b *testing.B) {
 func BenchmarkDiskStore_AtomicConcurrent(b *testing.B) {
 	b.ReportAllocs()
 
-	store := newBenchmarkDiskStore(b, true, "diskstore-bench-atomic-*.db")
+	store := newBenchmarkDiskStore(b, true, "diskstore-bench-atomic-concurrent-*.db")
 
 	b.RunParallel(func(parallelBench *testing.PB) {
 		var i int

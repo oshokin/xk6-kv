@@ -45,21 +45,20 @@ import { openKv } from 'k6/x/kv';
 // - Must handle thousands of concurrent cache operations
 // - Low latency impact (cache operations should be fast)
 
-// Backend selection: memory (default) or disk.
+// Selected backend (memory or disk) used for cache data.
 const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
 
-// Optional: enable key tracking in memory backend to stress the tracking paths.
-// (No effect for disk backend; safe to leave on)
+// Enables in-memory key tracking when the backend is memory.
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
   (__ENV.KV_TRACK_KEYS && __ENV.KV_TRACK_KEYS.toLowerCase() === 'true') || true;
 
-// Dataset configuration (number of products and CAS retry budget).
+// Total number of products seeded into the cache.
 const PRODUCT_COUNT = parseInt(__ENV.PRODUCT_COUNT || '20', 10);
+
+// Maximum CAS retries when bumping product versions.
 const VERSION_RETRY_ATTEMPTS = 10;
 
-// ---------------------------------------------
-// Open a shared KV store available to all VUs.
-// ---------------------------------------------
+// Shared KV store handle used by all VUs.
 const kv = openKv(
   SELECTED_BACKEND_NAME === 'disk'
     ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
@@ -94,6 +93,7 @@ export async function setup() {
   }
 }
 
+// teardown: closes BoltDB cleanly so later runs do not trip over open handles.
 export async function teardown() {
   if (SELECTED_BACKEND_NAME === 'disk') {
     kv.close();
@@ -214,7 +214,7 @@ async function invalidateRelatedCache(relatedKey) {
   return kv.compareAndDelete(relatedKey, snapshot);
 }
 
-// bumpVersionLabel: normalizes version strings (v123 → v124) so CAS inputs are
+// bumpVersionLabel: normalizes version strings (v123 -> v124) so CAS inputs are
 // consistent even if previous writers used different formatting.
 function bumpVersionLabel(currentVersion) {
   const numeric = parseInt(String(currentVersion).replace(/\D/g, ''), 10) || 0;

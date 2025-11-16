@@ -30,7 +30,7 @@ func BenchmarkOSTree_Insert(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 
-			for range b.N {
+			for b.Loop() {
 				tree := NewOSTree()
 
 				// No require inside timed loop to avoid timing overhead.
@@ -122,7 +122,7 @@ func BenchmarkOSTree_Kth(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	for range b.N {
+	for b.Loop() {
 		randomIndex := rand.IntN(totalElementCount)
 
 		_, _ = tree.Kth(randomIndex)

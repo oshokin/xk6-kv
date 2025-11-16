@@ -74,7 +74,7 @@ func BenchmarkMemoryStore_IncrementBy(b *testing.B) {
 
 			b.ResetTimer()
 
-			for range b.N {
+			for b.Loop() {
 				_, _ = store.IncrementBy("ctr", 1)
 			}
 		})
@@ -131,7 +131,7 @@ func BenchmarkMemoryStore_CompareAndSwap(b *testing.B) {
 
 			b.ResetTimer()
 
-			for range b.N {
+			for b.Loop() {
 				_, _ = store.CompareAndSwap("k", "0", "1")
 			}
 		})
@@ -169,7 +169,7 @@ func BenchmarkMemoryStore_RandomKey(b *testing.B) {
 			seedMemoryStore(b, store, genericKeys, "key-")
 			b.StartTimer()
 
-			for range b.N {
+			for b.Loop() {
 				_, _ = store.RandomKey("")
 			}
 		})
@@ -196,7 +196,7 @@ func BenchmarkMemoryStore_RandomKey_WithPrefix(b *testing.B) {
 
 			b.StartTimer()
 
-			for range b.N {
+			for b.Loop() {
 				_, _ = store.RandomKey("pfx-")
 			}
 		})
@@ -270,7 +270,7 @@ func BenchmarkMemoryStore_DeleteIfExists(b *testing.B) {
 
 			b.ResetTimer()
 
-			for range b.N {
+			for b.Loop() {
 				_, _ = store.DeleteIfExists("k")
 
 				b.StopTimer()
@@ -296,7 +296,7 @@ func BenchmarkMemoryStore_CompareAndDelete(b *testing.B) {
 
 			b.ResetTimer()
 
-			for range b.N {
+			for b.Loop() {
 				_, _ = store.CompareAndDelete("k", "v")
 
 				b.StopTimer()
@@ -306,6 +306,44 @@ func BenchmarkMemoryStore_CompareAndDelete(b *testing.B) {
 
 				b.StartTimer()
 			}
+		})
+	}
+}
+
+// BenchmarkMemoryStore_Scan measures paginated scans across large datasets with and without tracking.
+func BenchmarkMemoryStore_Scan(b *testing.B) {
+	const (
+		totalPerPrefix = 10_000
+		pageLimit      = 100
+		resumeLimit    = 32
+	)
+
+	prefixes := []string{"user:", "order:", "misc:"}
+
+	for _, trackKeys := range []bool{true, false} {
+		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
+			store := NewMemoryStore(trackKeys)
+
+			b.StopTimer()
+
+			for _, prefix := range prefixes {
+				seedMemoryStore(b, store, totalPerPrefix, prefix)
+			}
+
+			b.StartTimer()
+
+			b.Run("PrefixUserLimit100", func(b *testing.B) {
+				runScanBenchmark(b, store, "user:", "", pageLimit)
+			})
+
+			b.Run("PrefixUserUnlimited", func(b *testing.B) {
+				runScanBenchmark(b, store, "user:", "", 0)
+			})
+
+			b.Run("PrefixOrderResume", func(b *testing.B) {
+				startAfter := fmt.Sprintf("order:%05d", totalPerPrefix/2)
+				runScanBenchmark(b, store, "order:", startAfter, resumeLimit)
+			})
 		})
 	}
 }
@@ -328,7 +366,7 @@ func BenchmarkMemoryStore_List(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 
-				for range b.N {
+				for b.Loop() {
 					_, _ = store.List("", 0)
 				}
 			})
@@ -338,7 +376,7 @@ func BenchmarkMemoryStore_List(b *testing.B) {
 
 				b.ResetTimer()
 
-				for range b.N {
+				for b.Loop() {
 					_, _ = store.List("prefix", 0)
 				}
 			})
@@ -348,7 +386,7 @@ func BenchmarkMemoryStore_List(b *testing.B) {
 
 				b.ResetTimer()
 
-				for range b.N {
+				for b.Loop() {
 					_, _ = store.List("", 10)
 				}
 			})
@@ -358,7 +396,7 @@ func BenchmarkMemoryStore_List(b *testing.B) {
 
 				b.ResetTimer()
 
-				for range b.N {
+				for b.Loop() {
 					_, _ = store.List("prefix", 10)
 				}
 			})
@@ -430,4 +468,26 @@ func BenchmarkMemoryStore_AtomicConcurrent(b *testing.B) {
 			i++
 		}
 	})
+}
+
+func runScanBenchmark(b *testing.B, store Store, prefix, initialAfter string, limit int64) {
+	b.Helper()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		after := initialAfter
+
+		for {
+			page, err := store.Scan(prefix, after, limit)
+			if err != nil {
+				b.Fatalf("scan failed: %v", err)
+			}
+
+			if len(page.Entries) == 0 || page.NextKey == "" {
+				break
+			}
+
+			after = page.NextKey
+		}
+	}
 }

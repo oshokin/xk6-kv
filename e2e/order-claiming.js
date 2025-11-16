@@ -59,9 +59,7 @@ const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
   (__ENV.KV_TRACK_KEYS && __ENV.KV_TRACK_KEYS.toLowerCase() === 'true') || true;
 
-// ---------------------------------------------
-// Open a shared KV store available to all VUs.
-// ---------------------------------------------
+// Shared KV store handle used by all VUs.
 const kv = openKv(
   SELECTED_BACKEND_NAME === 'disk'
     ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }

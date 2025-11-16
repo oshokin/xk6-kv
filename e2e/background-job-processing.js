@@ -45,23 +45,26 @@ import { openKv } from 'k6/x/kv';
 // - Must handle job failures gracefully
 // - Low latency for job claiming (fast worker assignment)
 
-// Backend selection: memory (default) or disk.
+// Selected backend (memory or disk) used by the queue.
 const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
 
-// Optional: enable key tracking in memory backend to stress the tracking paths.
-// (No effect for disk backend; safe to leave on)
+// Enables in-memory key tracking when the backend is memory.
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
   (__ENV.KV_TRACK_KEYS && __ENV.KV_TRACK_KEYS.toLowerCase() === 'true') || true;
 
-// Job queue configuration (deterministic slots and retries).
+// Prefix applied to every job slot stored in KV.
 const JOB_KEY_PREFIX = 'job:';
+
+// Number of deterministic job slots maintained in the queue.
 const JOB_SLOT_COUNT = parseInt(__ENV.JOB_SLOTS || '40', 10);
+
+// Maximum attempts when trying to claim a job via CAS.
 const MAX_CLAIM_ATTEMPTS = 20;
+
+// Sleep duration between CAS retries when claiming jobs.
 const CLAIM_RETRY_SLEEP_SECONDS = 0.005;
 
-// ---------------------------------------------
-// Open a shared KV store available to all VUs.
-// ---------------------------------------------
+// Shared KV store handle used by all VUs.
 const kv = openKv(
   SELECTED_BACKEND_NAME === 'disk'
     ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
@@ -91,6 +94,7 @@ export async function setup() {
   }
 }
 
+// teardown: closes BoltDB cleanly so later runs do not trip over open handles.
 export async function teardown() {
   if (SELECTED_BACKEND_NAME === 'disk') {
     kv.close();

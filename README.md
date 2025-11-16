@@ -23,6 +23,7 @@ A k6 extension providing a persistent key-value store to share state across Virt
 - 🎲 **Random Key Selection**: Uniform sampling with optional prefix filtering
 - 🔍 **Key Tracking**: Optional O(1) random key access via in-memory indexing
 - 🏷️ **Prefix Support**: Filter operations by key prefixes
+- 🧭 **Cursor Scanning**: Stream large datasets via `scan()` with continuation tokens
 - 📝 **Serialization**: JSON or string serialization
 - ⚡ **High Performance**: Optimized for concurrent workloads
 
@@ -157,6 +158,24 @@ All methods return Promises except `close()`.
 
 #### Query Operations
 
+- **`scan(options?: ScanOptions): Promise<ScanResult>`** - Streams entries in lexicographic order using cursor-based pagination.
+
+  ```typescript
+  interface ScanOptions {
+    prefix?: string; // Filter by key prefix
+    limit?: number;  // Max results per page (<= 0 means "read to the end")
+    cursor?: string; // Base64 cursor produced by the previous page ("" starts a new scan)
+  }
+
+  interface ScanResult {
+    entries: Array<{ key: string; value: any }>;
+    cursor: string; // Base64 cursor for the next page
+    done: boolean;  // True when the scan reached the end of the prefix window
+  }
+  ```
+
+  Use `scan()` when the keyspace is too large to materialize with `list()` or when you need restart-safe pagination.
+
 - **`list(options?: ListOptions): Promise<Array<{ key: string; value: any }>>`** - Returns entries sorted lexicographically by key.
 
   ```typescript
@@ -180,13 +199,13 @@ All methods return Promises except `close()`.
 
 ### Performance Notes
 
-- **`trackKeys: true`**: `randomKey()` without prefix → O(1); with prefix → O(log n)
+- **`trackKeys: true`**: `randomKey()` without prefix -> O(1); with prefix -> O(log n)
 - **`trackKeys: false`**: `randomKey()` uses two-pass scan (fine for small-to-medium sets)
 - Both backends are optimized for concurrent workloads, but there's synchronization overhead between VUs
 
 ## Usage Examples
 
-Complete examples are available in the [`examples/`](./examples) directory.
+Complete examples are available in the [`examples/`](./examples) directory, and production-grade k6 scenarios live under [`e2e/`](./e2e).
 
 ### Producer / Consumer
 
@@ -281,9 +300,9 @@ Run `task lint-fix` before committing.
 
 This project uses **automated semantic versioning** based on commit messages:
 
-- **`fix: description`** → Patch version (1.0.0 → 1.0.1)
-- **`feat: description`** → Minor version (1.0.0 → 1.1.0)
-- **`major: description`** → Major version (1.0.0 → 2.0.0)
+- **`fix: description`** -> Patch version (1.0.0 -> 1.0.1)
+- **`feat: description`** -> Minor version (1.0.0 -> 1.1.0)
+- **`major: description`** -> Major version (1.0.0 -> 2.0.0)
 
 When commits are pushed to `main`:
 

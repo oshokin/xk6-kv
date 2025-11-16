@@ -62,6 +62,15 @@ vars:
   VUS: "{{.VUS | default `20`}}"
   ITERATIONS: "{{.ITERATIONS | default `100`}}"
 
+  # Dynamically list all e2e test scenarios from e2e/*.js files (space-separated).
+  E2E_SCENARIOS:
+    sh: |
+      {{if eq OS "windows"}}
+        powershell.exe -Command "Get-ChildItem e2e\*.js | Select-Object -ExpandProperty BaseName"
+      {{else}}
+        ls e2e/*.js | xargs -n1 basename -s .js
+      {{end}}
+
 tasks:
   # -------------------------------
   # Default Task
@@ -234,18 +243,9 @@ tasks:
     desc: "Run all E2E tests sequentially (all backends + key tracking combinations)"
     deps: [build-k6]
     cmds:
-      - task: test-e2e-single
-        vars: { E2E_SCENARIO: "order-claiming" }
-      - task: test-e2e-single  
-        vars: { E2E_SCENARIO: "user-session-tracking" }
-      - task: test-e2e-single
-        vars: { E2E_SCENARIO: "api-rate-limiting" }
-      - task: test-e2e-single
-        vars: { E2E_SCENARIO: "microservice-cache-management" }
-      - task: test-e2e-single
-        vars: { E2E_SCENARIO: "background-job-processing" }
-      - task: test-e2e-single
-        vars: { E2E_SCENARIO: "ab-testing-feature-flags" }
+      - for: { var: E2E_SCENARIOS }
+        task: test-e2e-single
+        vars: { E2E_SCENARIO: "{{.ITEM}}" }
 
   test-e2e-single:
     desc: "Run single E2E scenario (all backend + key tracking combinations)"

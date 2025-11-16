@@ -77,7 +77,7 @@ func (rm *RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
 // Currently, only openKv() is exported.
 func (mi *ModuleInstance) Exports() modules.Exports {
 	return modules.Exports{
-		Named: map[string]interface{}{
+		Named: map[string]any{
 			"openKv": mi.OpenKv,
 		},
 	}

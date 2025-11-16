@@ -45,21 +45,20 @@ import { openKv } from 'k6/x/kv';
 // - Must handle thousands of concurrent feature checks
 // - Low latency impact (feature checks should be fast)
 
-// Backend selection: memory (default) or disk.
+// Selected backend (memory or disk) for the scenario.
 const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
 
-// Optional: enable key tracking in memory backend to stress the tracking paths.
-// (No effect for disk backend; safe to leave on)
+// Enables in-memory key tracking when the backend is memory.
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
   (__ENV.KV_TRACK_KEYS && __ENV.KV_TRACK_KEYS.toLowerCase() === 'true') || true;
 
-// Feature flag configuration (coverage set and CAS retries).
+// Static list of feature flags that the test exercises.
 const FLAG_NAMES = ['new-checkout', 'dark-mode', 'premium-features', 'beta-search'];
+
+// Maximum CAS retries before surfacing a flag update failure.
 const MAX_FLAG_UPDATE_ATTEMPTS = 10;
 
-// ---------------------------------------------
-// Open a shared KV store available to all VUs.
-// ---------------------------------------------
+// Shared KV store handle used by all VUs.
 const kv = openKv(
   SELECTED_BACKEND_NAME === 'disk'
     ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
@@ -89,6 +88,7 @@ export async function setup() {
   }
 }
 
+// teardown: closes BoltDB cleanly so later runs do not trip over open handles.
 export async function teardown() {
   if (SELECTED_BACKEND_NAME === 'disk') {
     kv.close();

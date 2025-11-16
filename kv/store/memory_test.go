@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -451,7 +452,7 @@ func TestMemoryStore_CompareAndDelete_ConcurrentSingleWinner(t *testing.T) {
 
 	wg.Add(concurrencyLevel)
 
-	for i := 0; i < concurrencyLevel; i++ {
+	for range concurrencyLevel {
 		go func() {
 			defer wg.Done()
 
@@ -529,6 +530,260 @@ func TestMemoryStore_Size(t *testing.T) {
 	size, err = store.Size()
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, size, "size must equal number of entries")
+}
+
+// TestMemoryStore_Scan_PrefixPagination exercises Scan across multiple prefixes, pagination limits,
+// empty prefixes, limit <= 0 semantics, and ensures results stay in sync with List() in both
+// tracking modes.
+func TestMemoryStore_Scan_PrefixPagination(t *testing.T) {
+	t.Parallel()
+
+	prefixData := []struct {
+		prefix string
+		count  int
+	}{
+		{prefix: "alpha", count: 5},
+		{prefix: "beta", count: 6},
+		{prefix: "gamma", count: 7},
+	}
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(trackKeys)
+			prefixKeys := seedStorePrefixes(t, store, prefixData)
+
+			// Collect full scan with pagination and compare to List results (keys and values).
+			const pageSize = int64(3)
+
+			var (
+				allScanEntries []Entry
+				after          string
+			)
+
+			for {
+				page := mustScanStore(t, store, "", after, pageSize)
+
+				if page.NextKey == "" {
+					require.True(t, int64(len(page.Entries)) <= pageSize || pageSize <= 0, "page exceeded limit")
+				} else {
+					require.NotEmpty(t, page.Entries, "NextKey must only be set when entries exist")
+					assert.Equal(t, page.Entries[len(page.Entries)-1].Key, page.NextKey, "NextKey must equal last key in page")
+				}
+
+				allScanEntries = append(allScanEntries, page.Entries...)
+
+				if page.NextKey == "" {
+					break
+				}
+
+				after = page.NextKey
+			}
+
+			listEntries := mustListStore(t, store)
+			assert.Equal(
+				t,
+				keysFromEntries(listEntries),
+				keysFromEntries(allScanEntries),
+				"Scan keys must match List keys",
+			)
+			assert.Equal(
+				t,
+				valuesFromEntries(listEntries),
+				valuesFromEntries(allScanEntries),
+				"Scan values must match List values",
+			)
+
+			// Per-prefix scanning with pagination.
+			for _, data := range prefixData {
+				var (
+					prefixCollected []string
+					afterPrefix     string
+				)
+
+				for {
+					page := mustScanStore(t, store, data.prefix+":", afterPrefix, 2)
+
+					for _, entry := range page.Entries {
+						assert.Truef(
+							t,
+							strings.HasPrefix(entry.Key, data.prefix+":"),
+							"unexpected prefix entry: %s",
+							entry.Key,
+						)
+						prefixCollected = append(prefixCollected, entry.Key)
+					}
+
+					if page.NextKey == "" {
+						break
+					}
+
+					assert.Equal(t, page.Entries[len(page.Entries)-1].Key, page.NextKey)
+					afterPrefix = page.NextKey
+				}
+
+				assert.Equal(t, prefixKeys[data.prefix], prefixCollected, "prefix scan mismatch")
+			}
+
+			// limit <= 0 should return entire prefix range after the provided cursor.
+			page := mustScanStore(t, store, "beta:", "beta:03", 0)
+			assert.Equal(t, prefixKeys["beta"][3:], keysFromEntries(page.Entries))
+			assert.Empty(t, page.NextKey, "NextKey must be empty when limit <= 0")
+
+			// afterKey outside prefix must result in an empty page.
+			page = mustScanStore(t, store, "beta:", "gamma:99", 5)
+			assert.Empty(t, page.Entries)
+			assert.Empty(t, page.NextKey)
+
+			// Non-existent prefix should yield empty result.
+			page = mustScanStore(t, store, "does-not-exist:", "", 5)
+			assert.Empty(t, page.Entries)
+			assert.Empty(t, page.NextKey)
+
+			// Ensure List and Scan stay in sync after deletions.
+			require.NoError(t, store.Delete("alpha:02"))
+			require.NoError(t, store.Delete("gamma:05"))
+
+			scanAfterDelete := collectScanEntries(t, store, 4)
+			listAfterDelete := mustListStore(t, store)
+			assert.Equal(
+				t,
+				keysFromEntries(listAfterDelete),
+				keysFromEntries(scanAfterDelete),
+				"Scan/List keys must match after deletes",
+			)
+		})
+	}
+}
+
+// TestMemoryStore_Scan_ConcurrentMutations ensures Scan remains safe under concurrent Set/Delete
+// workloads for both tracking modes and that NextKey always reflects the last entry key when set.
+func TestMemoryStore_Scan_ConcurrentMutations(t *testing.T) {
+	t.Parallel()
+
+	const (
+		initialKeys  = 128
+		pageSize     = int64(5)
+		iterations   = 256
+		prefix       = "conc"
+		prefixFormat = "%s:%03d"
+	)
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(trackKeys)
+
+			for i := range initialKeys {
+				require.NoError(t, store.Set(fmt.Sprintf(prefixFormat, prefix, i), fmt.Sprintf("value-%d", i)))
+			}
+
+			var wg sync.WaitGroup
+			wg.Add(3)
+
+			// Global scanner.
+			go func() {
+				defer wg.Done()
+
+				for range iterations {
+					page, err := store.Scan("", "", pageSize)
+					if err != nil {
+						t.Errorf("global scan failed: %v", err)
+						return
+					}
+
+					if len(page.Entries) == 0 {
+						continue
+					}
+
+					if page.NextKey != "" {
+						assert.Equal(t, page.Entries[len(page.Entries)-1].Key, page.NextKey)
+					}
+
+					for _, entry := range page.Entries {
+						assert.NotEmpty(t, entry.Key)
+					}
+				}
+			}()
+
+			// Prefix scanner.
+			go func() {
+				defer wg.Done()
+
+				for range iterations {
+					page, err := store.Scan(prefix+":", "", pageSize)
+					if err != nil {
+						t.Errorf("prefix scan failed: %v", err)
+						return
+					}
+
+					if page.NextKey != "" && len(page.Entries) > 0 {
+						assert.Equal(t, page.Entries[len(page.Entries)-1].Key, page.NextKey)
+					}
+				}
+			}()
+
+			// Writer / deleter.
+			go func() {
+				defer wg.Done()
+
+				for i := range iterations {
+					key := fmt.Sprintf(prefixFormat, prefix, i%initialKeys)
+
+					if i%2 == 0 {
+						if err := store.Delete(key); err != nil {
+							t.Errorf("delete failed: %v", err)
+							return
+						}
+					} else {
+						if err := store.Set(key, fmt.Sprintf("value-updated-%d", i)); err != nil {
+							t.Errorf("set failed: %v", err)
+							return
+						}
+					}
+				}
+			}()
+
+			wg.Wait()
+		})
+	}
+}
+
+// TestMemoryStore_Scan_MutationAfterPagination ensures inserting keys below the previously
+// returned cursor does not cause duplicates in subsequent pages.
+func TestMemoryStore_Scan_MutationAfterPagination(t *testing.T) {
+	t.Parallel()
+
+	initialKeys := []string{"k1", "k2", "k3", "k4"}
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(trackKeys)
+
+			for _, key := range initialKeys {
+				require.NoError(t, store.Set(key, key+"-value"))
+			}
+
+			firstPage := mustScanStore(t, store, "", "", 2)
+			require.Equal(t, []string{"k1", "k2"}, keysFromEntries(firstPage.Entries))
+			require.Equal(t, "k2", firstPage.NextKey)
+
+			// Insert a key lexicographically before NextKey.
+			require.NoError(t, store.Set("k1.5", "k1.5-value"))
+
+			secondPage := mustScanStore(t, store, "", firstPage.NextKey, 2)
+			require.Equal(t, []string{"k3", "k4"}, keysFromEntries(secondPage.Entries))
+			assert.Empty(t, secondPage.NextKey, "final page must not expose NextKey")
+
+			// Ensure the newly inserted key appears when scanning from scratch.
+			fullScan := collectScanEntries(t, store, 0)
+			assert.Equal(t, []string{"k1", "k1.5", "k2", "k3", "k4"}, keysFromEntries(fullScan))
+		})
+	}
 }
 
 // TestMemoryStore_List checks listing with/without prefix and with limits, verifying both contents
@@ -688,12 +943,12 @@ func TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key, "no-match prefix must return empty key")
 
-	mustDeleteFromMemoryStore(t, store, "a:1")
+	mustDeleteFromStore(t, store, "a:1")
 	key, err = store.RandomKey("a:")
 	require.NoError(t, err)
 	assert.Equal(t, "a:2", key, "after delete, the only remaining prefixed key must be returned")
 
-	mustClearMemoryStore(t, store)
+	mustClearStore(t, store)
 	key, err = store.RandomKey("a:")
 	require.NoError(t, err)
 	assert.Empty(t, key, "after clear, prefix must return empty key")
@@ -756,24 +1011,7 @@ func TestMemoryStore_Close(t *testing.T) {
 	require.NoError(t, store.Close())
 }
 
-func mustSetInMemoryStore(t *testing.T, store *MemoryStore, key string, value any) {
-	t.Helper()
-
-	require.NoErrorf(t, store.Set(key, value), "Set(%q) must succeed", key)
-}
-
-func mustDeleteFromMemoryStore(t *testing.T, store *MemoryStore, key string) {
-	t.Helper()
-
-	require.NoErrorf(t, store.Delete(key), "Delete(%q) must succeed", key)
-}
-
-func mustClearMemoryStore(t *testing.T, store *MemoryStore) {
-	t.Helper()
-
-	require.NoError(t, store.Clear(), "Clear() must succeed")
-}
-
+// TestMemory_GetOrSet_Delete_Interleave_NoPanic ensures that GetOrSet and Delete can be called concurrently without panicking.
 func TestMemory_GetOrSet_Delete_Interleave_NoPanic(t *testing.T) {
 	t.Parallel()
 
@@ -820,4 +1058,128 @@ func TestMemory_GetOrSet_Delete_Interleave_NoPanic(t *testing.T) {
 	// If the implementation mishandles swap-delete or slice bounds on empty lists,
 	// a panic would bubble up and fail this test.
 	wg.Wait()
+}
+
+// mustSetInMemoryStore sets a key in the memory store and panics if it fails.
+func mustSetInMemoryStore(t *testing.T, store Store, key string, value any) {
+	t.Helper()
+
+	require.NoErrorf(t, store.Set(key, value), "Set(%q) must succeed", key)
+}
+
+// mustDeleteFromStore deletes a key in the store and panics if it fails.
+func mustDeleteFromStore(t *testing.T, store Store, key string) {
+	t.Helper()
+
+	require.NoErrorf(t, store.Delete(key), "Delete(%q) must succeed", key)
+}
+
+// mustClearStore clears the store and panics if it fails.
+func mustClearStore(t *testing.T, store Store) {
+	t.Helper()
+
+	require.NoError(t, store.Clear(), "Clear() must succeed")
+}
+
+// seedStorePrefixes seeds the store with prefixes and panics if it fails.
+func seedStorePrefixes(t *testing.T, store Store, data []struct {
+	prefix string
+	count  int
+},
+) map[string][]string {
+	t.Helper()
+
+	prefixKeys := make(map[string][]string, len(data))
+
+	for _, cfg := range data {
+		for i := 1; i <= cfg.count; i++ {
+			key := fmt.Sprintf("%s:%02d", cfg.prefix, i)
+			value := fmt.Sprintf("%s-value-%02d", cfg.prefix, i)
+			require.NoError(t, store.Set(key, value))
+			prefixKeys[cfg.prefix] = append(prefixKeys[cfg.prefix], key)
+		}
+	}
+
+	for prefix := range prefixKeys {
+		sort.Strings(prefixKeys[prefix])
+	}
+
+	return prefixKeys
+}
+
+// mustScanStore scans the store and panics if it fails.
+func mustScanStore(t *testing.T, store Store, prefix, after string, limit int64) *ScanPage {
+	t.Helper()
+
+	page, err := store.Scan(prefix, after, limit)
+	require.NoError(t, err)
+
+	return page
+}
+
+// mustListStore lists the store and panics if it fails.
+func mustListStore(t *testing.T, store Store) []Entry {
+	t.Helper()
+
+	entries, err := store.List("", 0)
+	require.NoError(t, err)
+
+	return entries
+}
+
+// keysFromEntries returns the keys from a list of entries.
+func keysFromEntries(entries []Entry) []string {
+	keys := make([]string, len(entries))
+
+	for i, entry := range entries {
+		keys[i] = entry.Key
+	}
+
+	return keys
+}
+
+// valuesFromEntries returns the values from a list of entries.
+func valuesFromEntries(entries []Entry) map[string]string {
+	values := make(map[string]string, len(entries))
+
+	for _, entry := range entries {
+		values[entry.Key] = entryValueAsString(entry.Value)
+	}
+
+	return values
+}
+
+// collectScanEntries collects the entries from a scan and panics if it fails.
+func collectScanEntries(t *testing.T, store Store, limit int64) []Entry {
+	t.Helper()
+
+	var (
+		results []Entry
+		after   string
+	)
+
+	for {
+		page := mustScanStore(t, store, "", after, limit)
+		results = append(results, page.Entries...)
+
+		if page.NextKey == "" {
+			break
+		}
+
+		after = page.NextKey
+	}
+
+	return results
+}
+
+// entryValueAsString returns the value of an entry as a string.
+func entryValueAsString(value any) string {
+	switch v := value.(type) {
+	case []byte:
+		return string(v)
+	case string:
+		return v
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
