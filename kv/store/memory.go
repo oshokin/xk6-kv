@@ -52,6 +52,12 @@ func NewMemoryStore(trackKeys bool) *MemoryStore {
 	}
 }
 
+// Open prepares the store for use.
+// MemoryStore keeps everything in-memory, so there is nothing to initialize.
+func (s *MemoryStore) Open() error {
+	return nil
+}
+
 // Get returns the current value for the given key as raw []byte.
 //
 // The returned value is the stored bytes; serialization concerns are handled

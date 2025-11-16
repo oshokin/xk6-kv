@@ -99,13 +99,13 @@ func TestMemoryStore_IncrementBy_Basic(t *testing.T) {
 
 	store := NewMemoryStore(true)
 
-	newVal, err := store.IncrementBy("ctr", 5)
+	newValue, err := store.IncrementBy("ctr", 5)
 	require.NoError(t, err)
-	assert.EqualValues(t, 5, newVal)
+	assert.EqualValues(t, 5, newValue)
 
-	newVal, err = store.IncrementBy("ctr", -2)
+	newValue, err = store.IncrementBy("ctr", -2)
 	require.NoError(t, err)
-	assert.EqualValues(t, 3, newVal)
+	assert.EqualValues(t, 3, newValue)
 
 	require.NoError(t, store.Set("bad", "not-an-int"))
 	_, err = store.IncrementBy("bad", 1)
@@ -153,16 +153,17 @@ func TestMemoryStore_GetOrSet_Basic(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(true)
+	value, loaded, err := store.GetOrSet("k", "v1")
 
-	val, loaded, err := store.GetOrSet("k", "v1")
 	require.NoError(t, err)
 	require.False(t, loaded, "first insert must be loaded=false")
-	assert.Equal(t, []byte("v1"), val.([]byte))
+	assert.Equal(t, []byte("v1"), value.([]byte))
 
-	val, loaded, err = store.GetOrSet("k", "v2")
+	value, loaded, err = store.GetOrSet("k", "v2")
+
 	require.NoError(t, err)
 	require.True(t, loaded, "existing key must return loaded=true")
-	assert.Equal(t, []byte("v1"), val.([]byte), "existing value must be returned")
+	assert.Equal(t, []byte("v1"), value.([]byte), "existing value must be returned")
 }
 
 // TestMemoryStore_GetOrSet_Concurrent ensures only one goroutine creates the value and

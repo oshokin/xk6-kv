@@ -20,6 +20,11 @@ package store
 //   - RandomKey(prefix) returns "" and a nil error when there are no matching
 //     keys; this is an intentional, user-friendly behavior.
 type Store interface {
+	// Open ensures the store is ready to accept operations by initializing any
+	// deferred resources (file handles, background workers, etc.).
+	// It SHOULD be safe to call Open multiple times concurrently.
+	Open() error
+
 	// Get returns the current value stored under key.
 	//
 	// If the key does not exist, an error is returned.

@@ -22,6 +22,8 @@ func newBenchmarkDiskStore(b *testing.B, trackKeys bool, namePattern string) *Di
 
 	store := NewDiskStore(trackKeys, tempFile.Name())
 
+	require.NoError(b, store.Open())
+
 	b.Cleanup(func() {
 		_ = store.Close()
 

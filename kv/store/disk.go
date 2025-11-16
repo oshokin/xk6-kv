@@ -78,6 +78,74 @@ func NewDiskStore(trackKeys bool, path string) *DiskStore {
 	}
 }
 
+// Open initializes the underlying BoltDB handle when needed and increments the
+// reference counter for each caller. It is safe for concurrent use.
+func (s *DiskStore) Open() error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if s.opened.Load() {
+		// Increment the reference counter for each caller.
+		s.refCount.Add(1)
+
+		return nil
+	}
+
+	// Open the database file.
+	handler, err := bolt.Open(s.path, 0o600, nil)
+	if err != nil {
+		// If the path is not the default, try to open the default path.
+		if s.path != DefaultDiskStorePath {
+			handler, err = bolt.Open(DefaultDiskStorePath, 0o600, nil)
+			if err != nil {
+				return err
+			}
+
+			s.path = DefaultDiskStorePath
+		} else {
+			return err
+		}
+	}
+
+	// Create the internal bucket if it doesn't exist.
+	err = handler.Update(func(tx *bolt.Tx) error {
+		_, bucketErr := tx.CreateBucketIfNotExists([]byte(DefaultKvBucket))
+		if bucketErr != nil {
+			return fmt.Errorf("failed to create internal bucket %q: %w", DefaultKvBucket, bucketErr)
+		}
+
+		return nil
+	})
+	if err != nil {
+		_ = handler.Close()
+
+		return err
+	}
+
+	// Set the handle and bucket.
+	s.handle = handler
+	s.bucket = []byte(DefaultKvBucket)
+
+	// Rebuild the key list if tracking is enabled.
+	if s.trackKeys {
+		s.keysLock.Lock()
+		rebuildErr := s.rebuildKeyListLocked()
+		s.keysLock.Unlock()
+
+		if rebuildErr != nil {
+			_ = handler.Close()
+
+			return fmt.Errorf("failed to initialize key list: %w", rebuildErr)
+		}
+	}
+
+	// We open store once, so we can't increment the reference counter.
+	s.opened.Store(true)
+	s.refCount.Store(1)
+
+	return nil
+}
+
 // resolveDiskPath normalizes user-provided paths and applies fast-fail defaults.
 // Empty strings or directory-like inputs revert to the default DB file path.
 func resolveDiskPath(candidate string) string {
@@ -102,7 +170,7 @@ func resolveDiskPath(candidate string) string {
 // an unnecessary Bolt transaction when the key is definitely missing.
 func (s *DiskStore) Get(key string) (any, error) {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return nil, fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -146,7 +214,7 @@ func (s *DiskStore) Get(key string) (any, error) {
 // If this is a new key and tracking is enabled, we update indexes.
 func (s *DiskStore) Set(key string, value any) error {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -193,13 +261,13 @@ func (s *DiskStore) Set(key string, value any) error {
 // Returns the new value as int64.
 func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return 0, fmt.Errorf("failed to open disk store: %w", err)
 	}
 
 	var (
-		newVal int64
-		wasNew bool
+		newValue int64
+		wasNew   bool
 	)
 
 	// Update the value in the database within a BoltDB transaction.
@@ -209,16 +277,16 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 			return errors.New("bucket not found")
 		}
 
-		// Get current value.
-		current := bucket.Get([]byte(key))
+		// Get currentValue value.
+		currentValue := bucket.Get([]byte(key))
 
 		// Parse current value or start from 0.
-		var currentInt int64
+		var parsedCurrentValue int64
 
-		if current != nil {
+		if currentValue != nil {
 			var err error
 
-			currentInt, err = strconv.ParseInt(string(current), 10, 64)
+			parsedCurrentValue, err = strconv.ParseInt(string(currentValue), 10, 64)
 			if err != nil {
 				return fmt.Errorf("value at %q is not a valid integer: %w", key, err)
 			}
@@ -227,10 +295,10 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 		}
 
 		// Calculate new value.
-		currentInt += delta
-		newVal = currentInt
+		parsedCurrentValue += delta
+		newValue = parsedCurrentValue
 
-		return bucket.Put([]byte(key), []byte(strconv.FormatInt(currentInt, 10)))
+		return bucket.Put([]byte(key), []byte(strconv.FormatInt(parsedCurrentValue, 10)))
 	})
 	if err != nil {
 		return 0, fmt.Errorf("unable to increment value in disk store: %w", err)
@@ -243,14 +311,14 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 		s.keysLock.Unlock()
 	}
 
-	return newVal, nil
+	return newValue, nil
 }
 
 // GetOrSet returns the existing value (loaded=true) if key is present,
 // otherwise stores "value" and returns it (loaded=false).
 func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, err error) {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return nil, false, fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -304,7 +372,7 @@ func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, er
 // Swap replaces the value and returns the previous value (if existed) and whether it existed.
 func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err error) {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return nil, false, fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -356,7 +424,7 @@ func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err 
 // CompareAndSwap replaces value only if current equals 'old'. Returns true if swapped.
 func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool, error) {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return false, fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -408,7 +476,7 @@ func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool
 // (swap-with-last trick) and updates the OSTree.
 func (s *DiskStore) Delete(key string) error {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -439,7 +507,7 @@ func (s *DiskStore) Delete(key string) error {
 // With tracking: in-memory O(1). Without: single Bolt read.
 func (s *DiskStore) Exists(key string) (bool, error) {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return false, fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -473,7 +541,7 @@ func (s *DiskStore) Exists(key string) (bool, error) {
 // DeleteIfExists deletes key if it exists. Returns true if deleted.
 func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return false, fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -518,7 +586,7 @@ func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 // Returns true if deleted.
 func (s *DiskStore) CompareAndDelete(key string, oldValue any) (bool, error) {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return false, fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -573,7 +641,7 @@ func (s *DiskStore) CompareAndDelete(key string, oldValue any) (bool, error) {
 // We drop and recreate the bucket (cheap), then reset in-memory indexes.
 func (s *DiskStore) Clear() error {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -616,7 +684,7 @@ func (s *DiskStore) Clear() error {
 // Size returns the number of keys in the store (O(1) from Bolt stats).
 func (s *DiskStore) Size() (int64, error) {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return 0, fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -646,7 +714,7 @@ func (s *DiskStore) Size() (int64, error) {
 // Returns a ScanPage with Entries and NextKey (set to the last key when more results exist; empty when done).
 func (s *DiskStore) Scan(prefix, afterKey string, limit int64) (*ScanPage, error) {
 	// Ensure the store is open.
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return nil, fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -690,7 +758,7 @@ func (s *DiskStore) List(prefix string, limit int64) ([]Entry, error) {
 //     prefix!=""  -> O(log n) via OSTree.
 //   - trackKeys = false -> two-pass scan over BoltDB cursor.
 func (s *DiskStore) RandomKey(prefix string) (string, error) {
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return "", err
 	}
 
@@ -708,7 +776,7 @@ func (s *DiskStore) RebuildKeyList() error {
 		return nil
 	}
 
-	if err := s.open(); err != nil {
+	if err := s.ensureOpen(); err != nil {
 		return fmt.Errorf("failed to open disk store: %w", err)
 	}
 
@@ -735,103 +803,34 @@ func (s *DiskStore) Close() error {
 		return nil
 	}
 
-	// Decrement the reference count exactly once per Close call on an open DB.
-	newCount := s.refCount.Add(-1)
-
-	// If there are still users, keep the DB open.
-	if newCount > 0 {
+	// If there are still references to the store, do nothing.
+	remaining := s.refCount.Add(-1)
+	if remaining > 0 {
 		return nil
 	}
 
-	// We are the last closer: actually close the handle.
-	if newCount < 0 {
-		s.refCount.Store(0)
-	}
-
+	// Close the DB.
 	if err := s.handle.Close(); err != nil {
+		// If we fail to close the DB, increment the reference counter to match the open.
+		s.refCount.Add(1)
 		return err
 	}
 
+	// Reset the store to its initial state.
 	s.opened.Store(false)
+	s.refCount.Store(0)
 
 	return nil
 }
 
-// open ensures the DB is open and increments the reference counter once.
-// It is safe to call multiple times; we only open once, but we increment the
-// internal refcount for each open() to match Close() calls.
-//
-// Non-obvious: the fast-path returns with a bumped refCount so that Close()
-// can properly balance concurrent users.
-func (s *DiskStore) open() error {
-	// Fast path: if already open, just bump the refcount.
+// ensureOpen checks whether the store is already opened. It is invoked by all
+// operations that require an active Bolt handle.
+func (s *DiskStore) ensureOpen() error {
 	if s.opened.Load() {
-		s.refCount.Add(1)
 		return nil
 	}
 
-	// Only one goroutine performs the first open/initialization.
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	// Another goroutine may have opened it while we were waiting.
-	if s.opened.Load() {
-		s.refCount.Add(1)
-
-		return nil
-	}
-
-	// Open the BoltDB file. If the configured path fails, fall back to the default file.
-	handler, err := bolt.Open(s.path, 0o600, nil)
-	if err != nil {
-		if s.path != DefaultDiskStorePath {
-			handler, err = bolt.Open(DefaultDiskStorePath, 0o600, nil)
-			if err != nil {
-				return err
-			}
-
-			s.path = DefaultDiskStorePath
-		} else {
-			return err
-		}
-	}
-
-	// Ensure the application bucket exists.
-	err = handler.Update(func(tx *bolt.Tx) error {
-		_, bucketErr := tx.CreateBucketIfNotExists([]byte(DefaultKvBucket))
-		if bucketErr != nil {
-			return fmt.Errorf("failed to create internal bucket %q: %w", DefaultKvBucket, bucketErr)
-		}
-
-		return nil
-	})
-	if err != nil {
-		_ = handler.Close()
-
-		return err
-	}
-
-	s.handle = handler
-	s.bucket = []byte(DefaultKvBucket)
-	s.opened.Store(true)
-	s.refCount.Add(1)
-
-	// If tracking is enabled, hydrate keys slice/map and the OSTree.
-	if s.trackKeys {
-		s.keysLock.Lock()
-		err := s.rebuildKeyListLocked()
-		s.keysLock.Unlock()
-
-		if err != nil {
-			// If we fail to build the key list, close DB and return error.
-			_ = s.handle.Close()
-			s.opened.Store(false)
-
-			return fmt.Errorf("failed to initialize key list: %w", err)
-		}
-	}
-
-	return nil
+	return errors.New("disk store is closed; call Open() before performing operations")
 }
 
 // addKeyIndexLocked inserts key into in-memory indexes (O(1)).

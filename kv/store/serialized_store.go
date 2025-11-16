@@ -22,6 +22,11 @@ func NewSerializedStore(store Store, serializer Serializer) *SerializedStore {
 	}
 }
 
+// Open ensures the underlying store is ready before running operations.
+func (s *SerializedStore) Open() error {
+	return s.store.Open()
+}
+
 // Get fetches the raw value from the underlying store and deserializes it using
 // the configured serializer. If the underlying store returns a type other than
 // []byte or string, that value is returned as-is.
@@ -238,12 +243,15 @@ func (s *SerializedStore) deserializeEntries(rawEntries []Entry) ([]Entry, error
 	entries := make([]Entry, len(rawEntries))
 
 	for i, e := range rawEntries {
-		val, err := s.deserializeValue(e.Value)
+		value, err := s.deserializeValue(e.Value)
 		if err != nil {
 			return nil, fmt.Errorf("deserialize value for key %s: %w", e.Key, err)
 		}
 
-		entries[i] = Entry{Key: e.Key, Value: val}
+		entries[i] = Entry{
+			Key:   e.Key,
+			Value: value,
+		}
 	}
 
 	return entries, nil

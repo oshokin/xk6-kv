@@ -127,8 +127,13 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 		}
 
 		// Create a serialized store with the chosen store and serializer.
-		serializedStore := store.NewSerializedStore(baseStore, serializer)
-		mi.rm.store = serializedStore
+		mi.rm.store = store.NewSerializedStore(baseStore, serializer)
+	}
+
+	// Each VU invocation calls Open to bump the shared reference counter.
+	if err := mi.rm.store.Open(); err != nil {
+		common.Throw(mi.vu.Runtime(), err)
+		return nil
 	}
 
 	kv := NewKV(mi.vu, mi.rm.store)
