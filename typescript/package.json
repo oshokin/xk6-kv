@@ -1,0 +1,9 @@
+{
+  "name": "my-k6-project",
+  "version": "0.0.1",
+  "private": true,
+  "devDependencies": {
+    "@types/k6": "^1.4.0",
+    "typescript": "^5.0.0"
+  }
+}

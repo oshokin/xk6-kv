@@ -25,6 +25,7 @@ A k6 extension providing a persistent key-value store to share state across Virt
 - 🏷️ **Prefix Support**: Filter operations by key prefixes
 - 🧭 **Cursor Scanning**: Stream large datasets via `scan()` with continuation tokens
 - 📝 **Serialization**: JSON or string serialization
+- 📘 **TypeScript Support**: Full type declarations for IntelliSense and type safety
 - ⚡ **High Performance**: Optimized for concurrent workloads
 
 ## Installation
@@ -111,6 +112,11 @@ export async function teardown() {
     kv.close();
 }
 ```
+
+## TypeScript Support
+
+Full TypeScript support with IntelliSense and type safety! Copy the [`typescript/`](./typescript/) folder to your project for a ready-to-use starter kit.\
+See [`typescript/README.md`](./typescript/README.md) for complete setup instructions.
 
 ## API Reference
 
