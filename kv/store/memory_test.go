@@ -275,6 +275,24 @@ func TestMemoryStore_CompareAndSwap_Basic(t *testing.T) {
 	assert.Equal(t, []byte("new"), got.([]byte), "value must be updated")
 }
 
+func TestMemoryStore_CompareAndSwap_InsertWhenAbsent(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(true)
+
+	ok, err := store.CompareAndSwap("lock", nil, "holder")
+	require.NoError(t, err)
+	assert.True(t, ok, "CAS should create the key when oldValue is nil")
+
+	got, err := store.Get("lock")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("holder"), got.([]byte), "value must match inserted payload")
+
+	ok, err = store.CompareAndSwap("lock", nil, "other")
+	require.NoError(t, err)
+	assert.False(t, ok, "second CAS must fail because key now exists")
+}
+
 // TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner ensures exactly one CAS succeeds under contention.
 func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 	t.Parallel()

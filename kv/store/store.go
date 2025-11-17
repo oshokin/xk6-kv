@@ -67,6 +67,9 @@ type Store interface {
 	// byte representation.
 	// Returns false with nil error if the value did not
 	// match; returns an error only on storage failures.
+	//
+	// Special case: passing a nil oldValue means "swap only if the key is
+	// currently absent", mirroring sync/atomic.CompareAndSwap semantics.
 	CompareAndSwap(key string, oldValue any, newValue any) (bool, error)
 
 	// Delete removes key from the store.

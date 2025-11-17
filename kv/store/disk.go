@@ -136,24 +136,6 @@ func (s *DiskStore) Open() error {
 	return nil
 }
 
-// resolveDiskPath normalizes user-provided paths and applies fast-fail defaults.
-// Empty strings or directory-like inputs revert to the default DB file path.
-func resolveDiskPath(candidate string) string {
-	trimmed := strings.TrimSpace(candidate)
-	if trimmed == "" {
-		return DefaultDiskStorePath
-	}
-
-	cleaned := filepath.Clean(trimmed)
-
-	// Treat directory-like inputs as requests to use the default database file.
-	if strings.HasSuffix(trimmed, "/") || strings.HasSuffix(trimmed, "\\") {
-		return DefaultDiskStorePath
-	}
-
-	return cleaned
-}
-
 // Get retrieves the raw []byte value from the disk store.
 func (s *DiskStore) Get(key string) (any, error) {
 	// Ensure the store is open.
@@ -171,6 +153,9 @@ func (s *DiskStore) Get(key string) (any, error) {
 		}
 
 		value = bucket.Get([]byte(key))
+		if value != nil {
+			value = cloneBytes(value)
+		}
 
 		return nil
 	})
@@ -404,10 +389,18 @@ func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool
 		return false, fmt.Errorf("failed to open disk store: %w", err)
 	}
 
-	// Convert old value to bytes if it's not already.
-	oldBytes, err := normalizeToBytes(oldValue)
-	if err != nil {
-		return false, err
+	expectAbsent := oldValue == nil
+
+	var (
+		oldBytes []byte
+		err      error
+	)
+
+	if !expectAbsent {
+		oldBytes, err = normalizeToBytes(oldValue)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	// Convert new value to bytes if it's not already.
@@ -416,7 +409,10 @@ func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool
 		return false, err
 	}
 
-	var swapped bool
+	var (
+		swapped  bool
+		inserted bool
+	)
 
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
@@ -427,11 +423,17 @@ func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool
 		// Get current value.
 		current := bucket.Get([]byte(key))
 
-		// Compare current with old.
-		if (current == nil && oldValue != nil) ||
-			(current != nil && oldValue == nil) ||
-			(current != nil && oldValue != nil && !bytes.Equal(current, oldBytes)) {
-			return nil
+		switch {
+		case expectAbsent:
+			if current != nil {
+				return nil
+			}
+
+			inserted = true
+		default:
+			if current == nil || !bytes.Equal(current, oldBytes) {
+				return nil
+			}
 		}
 
 		// Values match, perform swap.
@@ -443,7 +445,13 @@ func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool
 		return false, fmt.Errorf("unable to compare and swap in disk store: %w", err)
 	}
 
-	// Indexes unchanged (key existed before and after).
+	// Indexes only change when a new key is inserted via expectAbsent semantics.
+	if swapped && inserted && s.trackKeys {
+		s.keysLock.Lock()
+		s.addKeyIndexLocked(key)
+		s.keysLock.Unlock()
+	}
+
 	return swapped, nil
 }
 
@@ -887,7 +895,7 @@ func (s *DiskStore) fillDiskScanPage(page *ScanPage, cursor *bolt.Cursor, prefix
 		lastKey := string(k)
 		page.Entries = append(page.Entries, Entry{
 			Key:   lastKey,
-			Value: v,
+			Value: cloneBytes(v),
 		})
 
 		if hasLimit && int64(len(page.Entries)) >= limit {
@@ -1108,4 +1116,31 @@ func (s *DiskStore) rebuildKeyListLocked() error {
 	}
 
 	return nil
+}
+
+// resolveDiskPath normalizes user-provided paths and applies fast-fail defaults.
+// Empty strings or directory-like inputs revert to the default DB file path.
+func resolveDiskPath(candidate string) string {
+	trimmed := strings.TrimSpace(candidate)
+	if trimmed == "" {
+		return DefaultDiskStorePath
+	}
+
+	cleaned := filepath.Clean(trimmed)
+
+	// Treat directory-like inputs as requests to use the default database file.
+	if strings.HasSuffix(trimmed, "/") || strings.HasSuffix(trimmed, "\\") {
+		return DefaultDiskStorePath
+	}
+
+	return cleaned
+}
+
+// cloneBytes returns a copy of the given byte slice.
+func cloneBytes(src []byte) []byte {
+	if src == nil {
+		return nil
+	}
+
+	return append([]byte(nil), src...)
 }

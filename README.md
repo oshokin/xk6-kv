@@ -158,7 +158,7 @@ All methods return Promises except `close()`.
 - **`incrementBy(key: string, delta: number): Promise<number>`** - Atomically increments numeric value. Treats missing keys as `0`.
 - **`getOrSet(key: string, value: any): Promise<{ value: any, loaded: boolean }>`** - Gets existing value or sets if absent. `loaded: true` means pre-existing.
 - **`swap(key: string, value: any): Promise<{ previous: any|null, loaded: boolean }>`** - Replaces value atomically. Returns previous value if existed.
-- **`compareAndSwap(key: string, oldValue: any, newValue: any): Promise<boolean>`** - Sets `newValue` only if current value equals `oldValue`.
+- **`compareAndSwap(key: string, oldValue: any, newValue: any): Promise<boolean>`** - Sets `newValue` only if current value equals `oldValue`. Pass `null`/`undefined` as `oldValue` to mean "only if the key is absent" (set-if-not-exists).
 - **`deleteIfExists(key: string): Promise<boolean>`** - Deletes key if it exists. Returns `true` if deleted.
 - **`compareAndDelete(key: string, oldValue: any): Promise<boolean>`** - Deletes key only if current value equals `oldValue`.
 
@@ -205,8 +205,8 @@ All methods return Promises except `close()`.
 
 ### Performance Notes
 
-- **`trackKeys: true`**: `randomKey()` without prefix -> O(1); with prefix -> O(log n)
-- **`trackKeys: false`**: `randomKey()` uses two-pass scan (fine for small-to-medium sets)
+- **`trackKeys: true`**: `randomKey()` without prefix -> O(1); with prefix -> O(log n). Achieving those speeds means every key is mirrored in memory across multiple helper structures, so large datasets consume noticeably more RAM and the slices/maps never shrink automatically. Budget for that footprint or rebuild the index periodically.
+- **`trackKeys: false`** (default): `randomKey()` falls back to a full-map/two-transaction scan, so heavy use remains O(n). Enable tracking or redesign workloads that call `randomKey()` frequently to avoid linear-time pauses.
 - Both backends are optimized for concurrent workloads, but there's synchronization overhead between VUs
 
 ## Usage Examples

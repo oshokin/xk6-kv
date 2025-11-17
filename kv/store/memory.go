@@ -192,10 +192,18 @@ func (s *MemoryStore) Swap(key string, value any) (previous any, loaded bool, er
 //
 // Both "old" and "new" must be []byte or string.
 func (s *MemoryStore) CompareAndSwap(key string, oldValue any, newValue any) (bool, error) {
-	// Convert old value to bytes.
-	oldBytes, err := normalizeToBytes(oldValue)
-	if err != nil {
-		return false, err
+	expectAbsent := oldValue == nil
+
+	var (
+		oldBytes []byte
+		err      error
+	)
+
+	if !expectAbsent {
+		oldBytes, err = normalizeToBytes(oldValue)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	// Convert new value to bytes.
@@ -209,20 +217,27 @@ func (s *MemoryStore) CompareAndSwap(key string, oldValue any, newValue any) (bo
 
 	// Get current value.
 	current, exists := s.container[key]
-	if !exists {
-		return false, nil
+
+	switch {
+	case expectAbsent:
+		if exists {
+			return false, nil
+		}
+
+		s.container[key] = newBytes
+		s.addKeyLocked(key)
+
+		return true, nil
+	default:
+		if !exists || !bytes.Equal(current, oldBytes) {
+			return false, nil
+		}
+
+		s.container[key] = newBytes
+
+		// Indexes do not change because the key already existed.
+		return true, nil
 	}
-
-	// Compare current value with old value.
-	if !bytes.Equal(current, oldBytes) {
-		return false, nil
-	}
-
-	// Update value.
-	s.container[key] = newBytes
-
-	// Indexes do not change because the key already existed.
-	return true, nil
 }
 
 // Delete removes key if present. It is not an error if the key does not exist.

@@ -54,10 +54,11 @@ const PERSISTENT_ORDER_CLAIM_KEY_PREFIX = 'order-';
 // Backend selection: memory (default) or disk.
 const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
 
-// Optional: enable key tracking in memory backend to stress the tracking paths.
-// (No effect for disk backend; safe to leave on)
+// Enables in-memory key tracking when the backend is memory.
+const TRACK_KEYS_OVERRIDE =
+  typeof __ENV.KV_TRACK_KEYS === 'string' ? __ENV.KV_TRACK_KEYS.toLowerCase() : '';
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
-  (__ENV.KV_TRACK_KEYS && __ENV.KV_TRACK_KEYS.toLowerCase() === 'true') || true;
+  TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
 
 // Shared KV store handle used by all VUs.
 const kv = openKv(

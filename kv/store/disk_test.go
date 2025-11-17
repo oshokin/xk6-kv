@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -330,6 +331,49 @@ func TestDiskStore_GetSet_RoundtripAndTypes(t *testing.T) {
 	require.Error(t, store.Set("invalid-key", 123), "Set of unsupported type must error")
 }
 
+// TestDiskStore_Get_ReturnsDistinctBuffers ensures that Get returns distinct buffers for each call.
+func TestDiskStore_Get_ReturnsDistinctBuffers(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("value-key", "value"))
+
+	firstAny, err := store.Get("value-key")
+	require.NoError(t, err)
+
+	secondAny, err := store.Get("value-key")
+	require.NoError(t, err)
+
+	first := firstAny.([]byte)
+	second := secondAny.([]byte)
+
+	require.Equal(t, []byte("value"), first)
+	require.Equal(t, []byte("value"), second)
+
+	if len(first) > 0 && len(second) > 0 {
+		firstPtr := uintptr(unsafe.Pointer(&first[0]))
+		secondPtr := uintptr(unsafe.Pointer(&second[0]))
+		require.NotEqual(t, firstPtr, secondPtr, "Get must return freshly cloned buffers")
+	}
+}
+
+func TestDiskStore_GetReturnsCopy(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("k", "value"))
+
+	raw, err := store.Get("k")
+	require.NoError(t, err)
+
+	buf := raw.([]byte)
+	buf[0] = 'X'
+
+	again, err := store.Get("k")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("value"), again.([]byte), "mutating returned slice must not affect stored value")
+}
+
 // TestDiskStore_Get_IgnoresStaleIndex ensures Get falls back to Bolt when
 // the tracking index temporarily misses a key.
 func TestDiskStore_Get_IgnoresStaleIndex(t *testing.T) {
@@ -557,6 +601,24 @@ func TestDiskStore_CompareAndSwap_Basic(t *testing.T) {
 	got, err = store.Get("k")
 	require.NoError(t, err)
 	assert.Equal(t, []byte("new"), got.([]byte), "value must be updated")
+}
+
+func TestDiskStore_CompareAndSwap_InsertWhenAbsent(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+
+	ok, err := store.CompareAndSwap("lock", nil, "holder")
+	require.NoError(t, err)
+	assert.True(t, ok, "CAS should insert when expecting absence")
+
+	got, err := store.Get("lock")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("holder"), got.([]byte))
+
+	ok, err = store.CompareAndSwap("lock", nil, "other")
+	require.NoError(t, err)
+	assert.False(t, ok, "subsequent CAS with nil expectation should fail")
 }
 
 // TestDiskStore_CompareAndSwap_ConcurrentSingleWinner ensures exactly one CAS succeeds under contention.
@@ -820,57 +882,51 @@ func TestDiskStore_Size(t *testing.T) {
 	assert.EqualValues(t, 2, size, "size must equal number of entries")
 }
 
-// TestDiskStore_List checks listing with/without prefix and with limits, verifying returned keys.
-func TestDiskStore_List(t *testing.T) {
+// TestDiskStore_Scan_ReturnsDistinctBuffers ensures that Scan returns distinct buffers for each page.
+func TestDiskStore_Scan_ReturnsDistinctBuffers(t *testing.T) {
 	t.Parallel()
 
 	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("scan-key", "v1"))
 
-	entries, err := store.List("", 0)
+	firstPage, err := store.Scan("", "", 1)
 	require.NoError(t, err)
-	assert.Empty(t, entries, "empty store must list zero entries")
+	require.Len(t, firstPage.Entries, 1)
 
-	testData := map[string]string{
-		"key1":      "value1",
-		"key2":      "value2",
-		"prefix1":   "value3",
-		"prefix2":   "value4",
-		"different": "value5",
-	}
-
-	for key, value := range testData {
-		require.NoError(t, store.Set(key, value))
-	}
-
-	entries, err = store.List("", 0)
+	secondPage, err := store.Scan("", "", 1)
 	require.NoError(t, err)
-	require.Len(t, entries, len(testData))
+	require.Len(t, secondPage.Entries, 1)
 
-	keyMap := make(map[string]bool, len(entries))
-	for _, entry := range entries {
-		keyMap[entry.Key] = true
+	first := firstPage.Entries[0].Value.([]byte)
+	second := secondPage.Entries[0].Value.([]byte)
+
+	require.Equal(t, []byte("v1"), first)
+	require.Equal(t, []byte("v1"), second)
+
+	if len(first) > 0 && len(second) > 0 {
+		firstPtr := uintptr(unsafe.Pointer(&first[0]))
+		secondPtr := uintptr(unsafe.Pointer(&second[0]))
+
+		require.NotEqual(t, firstPtr, secondPtr, "Scan must return freshly cloned buffers")
 	}
+}
 
-	for key := range testData {
-		assert.Truef(t, keyMap[key], "missing key in List: %s", key)
-	}
+func TestDiskStore_ScanReturnsCopy(t *testing.T) {
+	t.Parallel()
 
-	entries, err = store.List("prefix", 0)
+	store := newTestDiskStore(t, false, "", true)
+	require.NoError(t, store.Set("a", "value"))
+
+	page, err := store.Scan("", "", 1)
 	require.NoError(t, err)
-	assert.Len(t, entries, 2)
+	require.Len(t, page.Entries, 1)
 
-	for _, entry := range entries {
-		assert.Truef(t, strings.HasPrefix(entry.Key, "prefix"), "unexpected key without prefix: %s", entry.Key)
-	}
+	value := page.Entries[0].Value.([]byte)
+	value[0] = 'X'
 
-	entries, err = store.List("", 2)
+	again, err := store.Get("a")
 	require.NoError(t, err)
-	assert.Len(t, entries, 2)
-
-	entries, err = store.List("prefix", 1)
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	assert.True(t, strings.HasPrefix(entries[0].Key, "prefix"))
+	assert.Equal(t, []byte("value"), again.([]byte), "scan must return copies of values")
 }
 
 // TestDiskStore_Scan_PrefixPagination exercises Scan across multiple prefixes, pagination limits,
@@ -1126,6 +1182,59 @@ func TestDiskStore_Scan_MutationAfterPagination(t *testing.T) {
 			assert.Equal(t, []string{"k1", "k1.5", "k2", "k3", "k4"}, keysFromEntries(fullScan))
 		})
 	}
+}
+
+// TestDiskStore_List checks listing with/without prefix and with limits, verifying returned keys.
+func TestDiskStore_List(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+
+	entries, err := store.List("", 0)
+	require.NoError(t, err)
+	assert.Empty(t, entries, "empty store must list zero entries")
+
+	testData := map[string]string{
+		"key1":      "value1",
+		"key2":      "value2",
+		"prefix1":   "value3",
+		"prefix2":   "value4",
+		"different": "value5",
+	}
+
+	for key, value := range testData {
+		require.NoError(t, store.Set(key, value))
+	}
+
+	entries, err = store.List("", 0)
+	require.NoError(t, err)
+	require.Len(t, entries, len(testData))
+
+	keyMap := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		keyMap[entry.Key] = true
+	}
+
+	for key := range testData {
+		assert.Truef(t, keyMap[key], "missing key in List: %s", key)
+	}
+
+	entries, err = store.List("prefix", 0)
+	require.NoError(t, err)
+	assert.Len(t, entries, 2)
+
+	for _, entry := range entries {
+		assert.Truef(t, strings.HasPrefix(entry.Key, "prefix"), "unexpected key without prefix: %s", entry.Key)
+	}
+
+	entries, err = store.List("", 2)
+	require.NoError(t, err)
+	assert.Len(t, entries, 2)
+
+	entries, err = store.List("prefix", 1)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.True(t, strings.HasPrefix(entries[0].Key, "prefix"))
 }
 
 // TestDiskStore_KeyTrackingConsistency validates the internal key index (map/list) remains consistent

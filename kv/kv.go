@@ -201,6 +201,8 @@ func (k *KV) Swap(key sobek.Value, value sobek.Value) *sobek.Promise {
 // CompareAndSwap (CAS) returns a Promise that resolves to true iff the value at "key"
 // equals "oldValue" and is atomically replaced by "newValue".
 // Otherwise resolves to false.
+// Passing null/undefined (JS) for oldValue means "swap only if the key does not exist",
+// mirroring sync/atomic.CompareAndSwap semantics in Go.
 func (k *KV) CompareAndSwap(key, oldValue, newValue sobek.Value) *sobek.Promise {
 	var (
 		keyString   = key.String()

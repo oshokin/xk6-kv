@@ -49,8 +49,10 @@ import { openKv } from 'k6/x/kv';
 const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
 
 // Enables in-memory key tracking when the backend is memory.
+const TRACK_KEYS_OVERRIDE =
+  typeof __ENV.KV_TRACK_KEYS === 'string' ? __ENV.KV_TRACK_KEYS.toLowerCase() : '';
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
-  (__ENV.KV_TRACK_KEYS && __ENV.KV_TRACK_KEYS.toLowerCase() === 'true') || true;
+  TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
 
 // Total number of products seeded into the cache.
 const PRODUCT_COUNT = parseInt(__ENV.PRODUCT_COUNT || '20', 10);

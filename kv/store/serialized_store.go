@@ -102,9 +102,16 @@ func (s *SerializedStore) Swap(key string, value any) (any, bool, error) {
 // CompareAndSwap performs an atomic CAS using serialized 'oldValue' and 'newValue'.
 // It returns true on successful swap. No deserialization is needed here.
 func (s *SerializedStore) CompareAndSwap(key string, oldValue any, newValue any) (bool, error) {
-	oldSerializedValue, err := s.serializer.Serialize(oldValue)
-	if err != nil {
-		return false, err
+	var (
+		oldSerializedValue []byte
+		err                error
+	)
+
+	if oldValue != nil {
+		oldSerializedValue, err = s.serializer.Serialize(oldValue)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	newSerializedValue, err := s.serializer.Serialize(newValue)

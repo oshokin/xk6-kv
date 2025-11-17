@@ -340,6 +340,9 @@ declare module 'k6/x/kv' {
      * This is the fundamental building block for implementing locks and
      * other synchronization primitives.
      *
+     * Pass `null` (or leave undefined) for `oldValue` to express
+     * "swap only if the key is currently absent" (set-if-not-exists semantics).
+     *
      * @param key - The key to update
      * @param oldValue - The expected current value
      * @param newValue - The new value to set
