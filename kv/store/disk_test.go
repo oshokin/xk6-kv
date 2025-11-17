@@ -3,7 +3,6 @@ package store
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -82,15 +81,9 @@ func TestNewDiskStore_PathHandling(t *testing.T) {
 		store := newTestDiskStore(t, true, dir, false)
 		require.NotNil(t, store, "NewDiskStore() must not return nil")
 
-		t.Cleanup(func() {
-			_ = store.Close()
-
-			//nolint:forbidigo // tests may tidy up files created during fallback.
-			_ = os.Remove(DefaultDiskStorePath)
-		})
-
-		require.NoError(t, store.Open())
-		assert.Equal(t, DefaultDiskStorePath, store.path, "directory path must fall back to default")
+		err := store.Open()
+		require.ErrorContains(t, err, dir, "opening a directory path must surface the original error")
+		assert.Equal(t, dir, store.path, "directory path must remain unchanged (no fallback to default)")
 	})
 
 	t.Run("missing parent directory", func(t *testing.T) {
@@ -102,15 +95,9 @@ func TestNewDiskStore_PathHandling(t *testing.T) {
 		store := newTestDiskStore(t, true, missingDirectory, false)
 		require.NotNil(t, store, "NewDiskStore() must not return nil")
 
-		t.Cleanup(func() {
-			_ = store.Close()
-
-			//nolint:forbidigo // tests may tidy up files created during fallback.
-			_ = os.Remove(DefaultDiskStorePath)
-		})
-
-		require.NoError(t, store.Open())
-		assert.Equal(t, DefaultDiskStorePath, store.path, "missing parent must fall back to default")
+		err := store.Open()
+		require.ErrorContains(t, err, missingDirectory, "missing parent directory must propagate original error")
+		assert.Equal(t, missingDirectory, store.path, "path must remain unchanged (no fallback to default)")
 	})
 }
 
@@ -341,6 +328,49 @@ func TestDiskStore_GetSet_RoundtripAndTypes(t *testing.T) {
 
 	// Unsupported type should error.
 	require.Error(t, store.Set("invalid-key", 123), "Set of unsupported type must error")
+}
+
+// TestDiskStore_Get_IgnoresStaleIndex ensures Get falls back to Bolt when
+// the tracking index temporarily misses a key.
+func TestDiskStore_Get_IgnoresStaleIndex(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+
+	const key = "user:42"
+	require.NoError(t, store.Set(key, "value"))
+
+	// Simulate a stale index (e.g., reader racing with a writer that
+	// committed to Bolt but hasn't updated the in-memory map yet).
+	store.keysLock.Lock()
+	delete(store.keysMap, key)
+	store.keysLock.Unlock()
+
+	raw, err := store.Get(key)
+	require.NoError(t, err, "Get must read through stale index")
+
+	require.IsType(t, []byte{}, raw)
+	assert.Equal(t, []byte("value"), raw.([]byte))
+}
+
+// TestDiskStore_Exists_IgnoresStaleIndex ensures Exists rechecks Bolt before
+// returning false when the tracking map misses a key.
+func TestDiskStore_Exists_IgnoresStaleIndex(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+
+	const key = "user:exists"
+	require.NoError(t, store.Set(key, "value"))
+
+	// Simulate the index temporarily missing the key.
+	store.keysLock.Lock()
+	delete(store.keysMap, key)
+	store.keysLock.Unlock()
+
+	exists, err := store.Exists(key)
+	require.NoError(t, err, "Exists must not fail when rebuilding view")
+	assert.True(t, exists, "Exists must fall back to Bolt when index misses key")
 }
 
 // TestDiskStore_IncrementBy_Basic checks IncrementBy on absent key (start at 0), positive/negative

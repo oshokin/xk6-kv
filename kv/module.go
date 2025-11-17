@@ -2,6 +2,7 @@ package kv
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/grafana/sobek"
 	"go.k6.io/k6/js/common"
@@ -16,6 +17,12 @@ type (
 	RootModule struct {
 		// store is shared store instance, created on first openKv().
 		store store.Store
+
+		// opts holds the options used when the store was created.
+		opts Options
+
+		// mu protects store creation and configuration.
+		mu sync.Mutex
 	}
 
 	// ModuleInstance is created per VU.
@@ -30,6 +37,13 @@ type (
 		kv *KV
 	}
 )
+
+// testOpenKVStoreBarrier is a test hook invoked the moment a goroutine enters the
+// store-initialization path. It lets tests synchronize concurrent calls to OpenKv
+// without impacting production behavior (nil in non-test builds).
+//
+//nolint:gochecknoglobals // this is a test hook.
+var testOpenKVStoreBarrier func()
 
 const (
 	// BackendDisk is the persistent store backed by the filesystem.
@@ -72,6 +86,81 @@ func (rm *RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
 	}
 }
 
+// getOrCreateStore creates a new store if it doesn't exist,
+// or returns the existing store if the options are the same.
+func (rm *RootModule) getOrCreateStore(options Options) (store.Store, bool, error) {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if rm.store != nil {
+		if rm.opts.Equal(options) {
+			return rm.store, false, nil
+		}
+
+		return nil, false, fmt.Errorf(
+			"openKv already initialized with backend=%q serialization=%q trackKeys=%t path=%q",
+			rm.opts.Backend, rm.opts.Serialization, rm.opts.TrackKeys, rm.opts.Path,
+		)
+	}
+
+	if testOpenKVStoreBarrier != nil {
+		testOpenKVStoreBarrier()
+	}
+
+	baseStore, err := rm.createBaseStore(options)
+	if err != nil {
+		return nil, false, err
+	}
+
+	serializer, err := rm.createSerializer(options)
+	if err != nil {
+		return nil, false, err
+	}
+
+	rm.store = store.NewSerializedStore(baseStore, serializer)
+	rm.opts = options
+
+	return rm.store, true, nil
+}
+
+// createBaseStore creates a new base store based on the options.
+func (rm *RootModule) createBaseStore(options Options) (store.Store, error) {
+	switch options.Backend {
+	case BackendMemory:
+		return store.NewMemoryStore(options.TrackKeys), nil
+	case BackendDisk:
+		return store.NewDiskStore(options.TrackKeys, options.Path), nil
+	default:
+		return nil, fmt.Errorf("unsupported backend: %s", options.Backend)
+	}
+}
+
+// createSerializer creates a new serializer based on the options.
+func (rm *RootModule) createSerializer(options Options) (store.Serializer, error) {
+	switch options.Serialization {
+	case SerializationJSON:
+		return store.NewJSONSerializer(), nil
+	case SerializationString:
+		return store.NewStringSerializer(), nil
+	default:
+		return nil, fmt.Errorf("unsupported serialization: %s", options.Serialization)
+	}
+}
+
+// clearStoreOnFailure clears the store if it was newly created and failed to initialize.
+func (rm *RootModule) clearStoreOnFailure(candidate store.Store, isNewlyCreated bool) {
+	if !isNewlyCreated {
+		return
+	}
+
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if rm.store == candidate {
+		rm.store = nil
+	}
+}
+
 // Exports implements modules.Instance and exposes
 // the JavaScript API surface for this module.
 // Currently, only openKv() is exported.
@@ -102,41 +191,21 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 		return nil
 	}
 
-	if mi.rm.store == nil {
-		// Create the base store based on the backend option.
-		var baseStore store.Store
-
-		switch options.Backend {
-		case BackendMemory:
-			baseStore = store.NewMemoryStore(options.TrackKeys)
-		case BackendDisk:
-			baseStore = store.NewDiskStore(options.TrackKeys, options.Path)
-		}
-
-		// Create the serializer based on the serialization option.
-		var serializer store.Serializer
-
-		switch options.Serialization {
-		case SerializationJSON:
-			serializer = store.NewJSONSerializer()
-		case SerializationString:
-			serializer = store.NewStringSerializer()
-		default:
-			// Defensive default: JSON is a safe, structured default.
-			serializer = store.NewJSONSerializer()
-		}
-
-		// Create a serialized store with the chosen store and serializer.
-		mi.rm.store = store.NewSerializedStore(baseStore, serializer)
-	}
-
-	// Each VU invocation calls Open to bump the shared reference counter.
-	if err := mi.rm.store.Open(); err != nil {
+	backingStore, isNewlyCreated, err := mi.rm.getOrCreateStore(options)
+	if err != nil {
 		common.Throw(mi.vu.Runtime(), err)
 		return nil
 	}
 
-	kv := NewKV(mi.vu, mi.rm.store)
+	// Each VU invocation calls Open to bump the shared reference counter.
+	if err := backingStore.Open(); err != nil {
+		mi.rm.clearStoreOnFailure(backingStore, isNewlyCreated)
+		common.Throw(mi.vu.Runtime(), err)
+
+		return nil
+	}
+
+	kv := NewKV(mi.vu, backingStore)
 	mi.kv = kv
 
 	return mi.vu.Runtime().ToValue(mi.kv).ToObject(mi.vu.Runtime())
@@ -196,4 +265,12 @@ func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
 	}
 
 	return opts, nil
+}
+
+// Equal checks if two Options are equal.
+func (o Options) Equal(other Options) bool {
+	return o.Backend == other.Backend &&
+		o.Serialization == other.Serialization &&
+		o.TrackKeys == other.TrackKeys &&
+		o.Path == other.Path
 }

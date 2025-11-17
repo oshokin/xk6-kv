@@ -94,17 +94,7 @@ func (s *DiskStore) Open() error {
 	// Open the database file.
 	handler, err := bolt.Open(s.path, 0o600, nil)
 	if err != nil {
-		// If the path is not the default, try to open the default path.
-		if s.path != DefaultDiskStorePath {
-			handler, err = bolt.Open(DefaultDiskStorePath, 0o600, nil)
-			if err != nil {
-				return err
-			}
-
-			s.path = DefaultDiskStorePath
-		} else {
-			return err
-		}
+		return fmt.Errorf("failed to open disk store at %q: %w", s.path, err)
 	}
 
 	// Create the internal bucket if it doesn't exist.
@@ -165,24 +155,10 @@ func resolveDiskPath(candidate string) string {
 }
 
 // Get retrieves the raw []byte value from the disk store.
-//
-// With tracking enabled, we first check the in-memory index (O(1)) to avoid
-// an unnecessary Bolt transaction when the key is definitely missing.
 func (s *DiskStore) Get(key string) (any, error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
 		return nil, fmt.Errorf("failed to open disk store: %w", err)
-	}
-
-	// Fast negative check via in-memory index (if enabled).
-	if s.trackKeys {
-		s.keysLock.RLock()
-		_, exists := s.keysMap[key]
-		s.keysLock.RUnlock()
-
-		if !exists {
-			return nil, fmt.Errorf("key %q not found", key)
-		}
 	}
 
 	var value []byte
@@ -504,7 +480,8 @@ func (s *DiskStore) Delete(key string) error {
 }
 
 // Exists checks if a given key exists.
-// With tracking: in-memory O(1). Without: single Bolt read.
+// With tracking enabled, we trust positive hits from the in-memory index but
+// fall back to BoltDB for negative results to avoid stale reads.
 func (s *DiskStore) Exists(key string) (bool, error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
@@ -516,7 +493,9 @@ func (s *DiskStore) Exists(key string) (bool, error) {
 		_, exists := s.keysMap[key]
 		s.keysLock.RUnlock()
 
-		return exists, nil
+		if exists {
+			return true, nil
+		}
 	}
 
 	var exists bool

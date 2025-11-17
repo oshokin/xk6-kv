@@ -150,7 +150,7 @@ All methods return Promises except `close()`.
 - **`set(key: string, value: any): Promise<any>`** - Sets a key-value pair.
 - **`delete(key: string): Promise<boolean>`** - Removes a key-value pair (always resolves to `true`).
 - **`exists(key: string): Promise<boolean>`** - Checks if a key exists.
-- **`clear(): Promise<void>`** - Removes all entries.
+- **`clear(): Promise<boolean>`** - Removes all entries (always resolves to `true`).
 - **`size(): Promise<number>`** - Returns current store size (number of keys).
 
 #### Atomic Operations

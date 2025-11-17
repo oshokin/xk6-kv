@@ -251,14 +251,20 @@ declare module 'k6/x/kv' {
     /**
      * Removes all entries from the store.
      *
-     * @returns Promise that resolves when complete
+     * Always resolves to `true` (and rejects on error) so callers can treat
+     * the returned value as a simple success confirmation.
+     *
+     * @returns Promise that resolves to `true` when the operation completes
      *
      * @example
      * ```javascript
-     * await kv.clear();
+     * const ok = await kv.clear();
+     * if (ok) {
+     *   console.log("Store cleared");
+     * }
      * ```
      */
-    clear(): Promise<void>;
+    clear(): Promise<boolean>;
 
     /**
      * Returns the current number of keys in the store.
