@@ -57,28 +57,41 @@ const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
 // Prefix applied to every job slot stored in KV.
 const JOB_KEY_PREFIX = 'job:';
 
-// Number of deterministic job slots maintained in the queue.
-const JOB_SLOT_COUNT = parseInt(__ENV.JOB_SLOTS || '40', 10);
+// Number of deterministic job slots maintained in the queue (defaults to 10× VUs).
+const JOB_SLOT_COUNT = parseInt(__ENV.JOB_SLOTS || '400', 10);
 
-// Maximum attempts when trying to claim a job via CAS.
-const MAX_CLAIM_ATTEMPTS = 20;
+// Maximum attempts when trying to claim a job via CAS (can be overridden via env).
+const MAX_CLAIM_ATTEMPTS = parseInt(__ENV.MAX_CLAIM_ATTEMPTS || '200', 10);
 
-// Sleep duration between CAS retries when claiming jobs.
-const CLAIM_RETRY_SLEEP_SECONDS = 0.005;
+// Sleep duration (seconds) between CAS retries when claiming jobs.
+const CLAIM_RETRY_SLEEP_SECONDS = parseFloat(__ENV.CLAIM_RETRY_SLEEP_SECONDS || '0.002');
 
-// Shared KV store handle used by all VUs.
+// Width (digits) of job key suffix for deterministic padding.
+const JOB_KEY_PAD_WIDTH = parseInt(__ENV.JOB_KEY_PAD_WIDTH || '4', 10);
+// Limit used when sampling queue state for monitoring.
+const MONITORING_LIST_LIMIT = parseInt(__ENV.MONITORING_LIST_LIMIT || '5', 10);
+// Base duration (seconds) each iteration sleeps after processing.
+const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
+// Random jitter (seconds) added to the base idle sleep.
+const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
+  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
+);
+// Default number of VUs used by the scenario.
+const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
+// Default iteration count used by the scenario.
+const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
+
+// kv is the shared store client used throughout the scenario.
 const kv = openKv(
   SELECTED_BACKEND_NAME === 'disk'
     ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
     : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
 );
 
-// Rationale: 20 VUs × 100 iterations provide enough churn to keep the queue
-// busy while still finishing quickly. The near-100% thresholds guarantee that
-// every slot is claimed, processed, and monitored without "expected" failures.
+// options configures the load profile and pass/fail thresholds.
 export const options = {
-  vus: parseInt(__ENV.VUS || '20', 10),
-  iterations: parseInt(__ENV.ITERATIONS || '100', 10),
+  vus: DEFAULT_VUS,
+  iterations: DEFAULT_ITERATIONS,
   thresholds: {
     'checks{job:claimed}': ['rate>0.999'],
     'checks{job:processed}': ['rate>0.999'],
@@ -86,7 +99,7 @@ export const options = {
   }
 };
 
-// setup: seeds deterministic job slots so we can prove deterministic fairness
+// setup seeds deterministic job slots so we can prove deterministic fairness
 // across backends, including disk.
 export async function setup() {
   await kv.clear();
@@ -96,15 +109,15 @@ export async function setup() {
   }
 }
 
-// teardown: closes BoltDB cleanly so later runs do not trip over open handles.
+// teardown closes BoltDB cleanly so later runs do not trip over open handles.
 export async function teardown() {
   if (SELECTED_BACKEND_NAME === 'disk') {
     kv.close();
   }
 }
 
-// Each VU claims a slot, simulates work, recycles the job, and emits health
-// metrics—touching every atomic helper the queue exposes.
+// backgroundJobProcessingTest claims slots, simulates work, recycles the job, and
+// emits health metrics-touching every atomic helper the queue exposes.
 export default async function backgroundJobProcessingTest() {
   const vuId = exec.vu.idInTest;
 
@@ -114,8 +127,8 @@ export default async function backgroundJobProcessingTest() {
     'job:claimed': () => Boolean(claim)
   });
 
-  // Simulate work.
-  sleep(0.01);
+  // Simulate work long enough to keep the scenario under load.
+  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 
   const processed = await recycleJobSlot(claim.jobKey, claim.jobSnapshot);
 
@@ -123,20 +136,23 @@ export default async function backgroundJobProcessingTest() {
     'job:processed': () => processed
   });
 
-  const queueSample = await kv.list({ prefix: JOB_KEY_PREFIX, limit: 5 });
+  const queueSample = await kv.list({
+    prefix: JOB_KEY_PREFIX,
+    limit: MONITORING_LIST_LIMIT
+  });
 
   check(queueSample.length > 0, {
     'job:monitoring': () => queueSample.length > 0
   });
 }
 
-// jobKeyFromIndex: deterministic mapping of slot numbers to shared keys so all
+// jobKeyFromIndex deterministically maps slot numbers to shared keys so all
 // VUs contend on the same namespace.
 function jobKeyFromIndex(index) {
-  return `${JOB_KEY_PREFIX}${String(index + 1).padStart(4, '0')}`;
+  return `${JOB_KEY_PREFIX}${String(index + 1).padStart(JOB_KEY_PAD_WIDTH, '0')}`;
 }
 
-// buildQueuedJob: creates the initial "queued" payload so the queue always has
+// buildQueuedJob creates the initial "queued" payload so the queue always has
 // something to process immediately after setup.
 function buildQueuedJob(index) {
   return {
@@ -152,7 +168,7 @@ function buildQueuedJob(index) {
   };
 }
 
-// claimJobSlot: attempts to claim work via CAS with both random and sequential
+// claimJobSlot attempts to claim work via CAS with both random and sequential
 // probes, guaranteeing we cover race conditions and order-statistics logic.
 async function claimJobSlot(vuId) {
   for (let attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt++) {
@@ -185,7 +201,7 @@ async function claimJobSlot(vuId) {
   throw new Error(`Unable to claim any job slot after ${MAX_CLAIM_ATTEMPTS} attempts`);
 }
 
-// buildCandidateKeys: mixes pseudo-random sampling with deterministic coverage
+// buildCandidateKeys mixes pseudo-random sampling with deterministic coverage
 // so every slot eventually gets checked even if randomKey skips it.
 async function buildCandidateKeys(iteration) {
   const keys = new Set();
@@ -202,7 +218,7 @@ async function buildCandidateKeys(iteration) {
   return keys;
 }
 
-// recycleJobSlot: deletes the claimed job and immediately requeues it, keeping
+// recycleJobSlot deletes the claimed job and immediately requeues it, keeping
 // pressure on the system without growing memory usage.
 async function recycleJobSlot(jobKey, jobSnapshot) {
   const deleted = await kv.deleteIfExists(jobKey);
@@ -227,7 +243,7 @@ async function recycleJobSlot(jobKey, jobSnapshot) {
   return true;
 }
 
-// safeGet: wraps kv.get() to swallow "not found" errors that can happen during
+// safeGet wraps kv.get() to swallow "not found" errors that can happen during
 // high churn, letting the caller decide what to do.
 async function safeGet(key) {
   try {

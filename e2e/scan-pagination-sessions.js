@@ -43,7 +43,7 @@ const TRACK_KEYS_OVERRIDE =
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
   TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
 
-// Shared KV store handle used by all VUs.
+// kv is the shared store client used throughout the scenario.
 const kv = openKv(
   SELECTED_BACKEND_NAME === 'disk'
     ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
@@ -61,28 +61,39 @@ const PAGE_SIZE = parseInt(__ENV.PAGE_SIZE || '50', 10);
 
 // TTL metadata stored with each session record.
 const SESSION_TTL_SECONDS = parseInt(__ENV.SESSION_TTL_SECONDS || '300', 10);
+const SESSION_KEY_PAD_WIDTH = parseInt(__ENV.SESSION_KEY_PAD_WIDTH || '6', 10);
+const SESSION_USER_BUCKET_DIVISOR = parseInt(
+  __ENV.SESSION_USER_BUCKET_DIVISOR || '5',
+  10
+);
+const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
+const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
+  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
+);
+const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
+const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
 
-// 4 VUs × 10 iterations = 40 scans, enough to catch cursor bugs yet CI-friendly.
+// options configures the load profile and pass/fail thresholds.
 export const options = {
-  vus: parseInt(__ENV.VUS || '4', 10),
-  iterations: parseInt(__ENV.ITERATIONS || '10', 10),
+  vus: DEFAULT_VUS,
+  iterations: DEFAULT_ITERATIONS,
   thresholds: {
     'checks{scan:complete}': ['rate>0.98'],
     'checks{scan:has-data}': ['rate>0.98']
   }
 };
 
-// setup: seeds deterministic sessions so we can assert exact counts later.
+// setup seeds deterministic sessions so we can assert exact counts later.
 export async function setup() {
   await kv.clear();
 
   for (let i = 0; i < TOTAL_SESSIONS; i += 1) {
-    const paddedIndex = String(i).padStart(6, '0');
+    const paddedIndex = String(i).padStart(SESSION_KEY_PAD_WIDTH, '0');
     const key = `${SESSION_PREFIX}${paddedIndex}`;
 
     await kv.set(key, {
       sessionId: paddedIndex,
-      userId: `user-${Math.floor(i / 5)}`,
+      userId: `user-${Math.floor(i / SESSION_USER_BUCKET_DIVISOR)}`,
       createdAt: Date.now(),
       ttlSeconds: SESSION_TTL_SECONDS,
       lastSeenByWorker: null
@@ -90,14 +101,15 @@ export async function setup() {
   }
 }
 
-// teardown: closes BoltDB cleanly so later runs do not trip over open handles.
+// teardown closes BoltDB cleanly so later runs do not trip over open handles.
 export async function teardown() {
   if (SELECTED_BACKEND_NAME === 'disk') {
     kv.close();
   }
 }
 
-// Each iteration scans until `done` is true, verifying prefix ordering invariants.
+// scanPaginatedSessions performs repeated scans until `done` is true, verifying
+// prefix ordering invariants.
 export default async function scanPaginatedSessions() {
   let cursor = '';
   let seen = 0;
@@ -130,7 +142,7 @@ export default async function scanPaginatedSessions() {
     'scan:complete': (value) => value === TOTAL_SESSIONS
   });
 
-  // Simulate downstream processing time.
-  sleep(0.1);
+  // Simulate downstream processing time without ending the iteration immediately.
+  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 }
 

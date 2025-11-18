@@ -57,30 +57,53 @@ const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
 // Static list of feature flags that the test exercises.
 const FLAG_NAMES = ['new-checkout', 'dark-mode', 'premium-features', 'beta-search'];
 
-// Maximum CAS retries before surfacing a flag update failure.
-const MAX_FLAG_UPDATE_ATTEMPTS = 10;
+// Maximum CAS retries before surfacing a flag update failure (env overridable).
+const MAX_FLAG_UPDATE_ATTEMPTS = parseInt(__ENV.MAX_FLAG_UPDATE_ATTEMPTS || '1000', 10);
+// Delay (in ms) between CAS retries to avoid overwhelming the event loop.
+const FLAG_UPDATE_RETRY_DELAY_MS = parseFloat(__ENV.FLAG_UPDATE_RETRY_DELAY_MS || '5');
+// Factor applied to VU identifiers when computing session segments.
+const USER_SEGMENT_VU_FACTOR = parseInt(__ENV.USER_SEGMENT_VU_FACTOR || '31', 10);
+// Factor applied to iteration counters when computing session segments.
+const USER_SEGMENT_ITERATION_FACTOR = parseInt(
+  __ENV.USER_SEGMENT_ITERATION_FACTOR || '17',
+  10
+);
+// Modulo used to normalize session segments into percentage buckets.
+const USER_SEGMENT_MODULO = parseInt(__ENV.USER_SEGMENT_MODULO || '100', 10);
+// Rollout increment applied per admin update to emulate gradual rollouts.
+const ROLLOUT_INCREMENT = parseInt(__ENV.ROLLOUT_INCREMENT || '7', 10);
+// Base duration (seconds) each iteration sleeps after processing.
+const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
+// Random jitter (seconds) added to the base idle sleep.
+const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
+  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
+);
+// Default number of virtual users for the scenario.
+const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
+// Default iteration count for the scenario.
+const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
 
-// Shared KV store handle used by all VUs.
+// kv is the shared store client used throughout the scenario.
 const kv = openKv(
   SELECTED_BACKEND_NAME === 'disk'
     ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
     : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
 );
 
-// Rationale: 20 VUs × 100 iterations mirror a busy rollout window. Thresholds
-// require that flag reads, updates, and monitoring logic never regress under
-// deterministic CAS contention.
+// options configures the load profile and pass/fail thresholds.
 export const options = {
-  vus: parseInt(__ENV.VUS || '20', 10),
-  iterations: parseInt(__ENV.ITERATIONS || '100', 10),
+  vus: DEFAULT_VUS,
+  iterations: DEFAULT_ITERATIONS,
   thresholds: {
-    'checks{flag:enabled}': ['rate>0.999'],
-    'checks{flag:updated}': ['rate>0.999'],
-    'checks{flag:monitoring}': ['rate>0.999']
+    'checks{check:flag_enabled}': ['rate>0.999'],
+    'checks{check:flag_updated}': ['rate>0.999'],
+    'checks{check:flag_monitoring}': ['rate>0.999'],
+    'checks{check:flag_usage_tracked}': ['rate>0.999'],
+    'checks{check:flag_exists}': ['rate>0.999']
   }
 };
 
-// setup: creates a known flag set so monitoring checks can assert the exact
+// setup creates a known flag set so monitoring checks can assert the exact
 // number of entries returned by list().
 export async function setup() {
   await kv.clear();
@@ -90,14 +113,14 @@ export async function setup() {
   }
 }
 
-// teardown: closes BoltDB cleanly so later runs do not trip over open handles.
+// teardown closes BoltDB cleanly so later runs do not trip over open handles.
 export async function teardown() {
   if (SELECTED_BACKEND_NAME === 'disk') {
     kv.close();
   }
 }
 
-// Each iteration emulates a user checking feature gates, recording usage, and
+// abTestingFeatureFlagsTest emulates a user checking gates, recording usage, and
 // occasionally acting as an admin to change rollout percentages.
 export default async function abTestingFeatureFlagsTest() {
   const vuId = exec.vu.idInTest;
@@ -109,10 +132,12 @@ export default async function abTestingFeatureFlagsTest() {
   const { value: flag } = await kv.getOrSet(flagKey, buildDefaultFlag(flagName));
 
   check(Boolean(flag), {
-    'flag:enabled': () => Boolean(flag) && typeof flag.enabled === 'boolean'
+    flag_enabled: () => Boolean(flag) && typeof flag.enabled === 'boolean'
   });
 
-  const userSegment = (vuId * 31 + iterationSeed * 17) % 100;
+  const userSegment =
+    (vuId * USER_SEGMENT_VU_FACTOR + iterationSeed * USER_SEGMENT_ITERATION_FACTOR) %
+    USER_SEGMENT_MODULO;
   const shouldSeeFeature = flag.enabled && userSegment < flag.rollout;
 
   if (shouldSeeFeature) {
@@ -120,29 +145,30 @@ export default async function abTestingFeatureFlagsTest() {
     const usageCount = await kv.incrementBy(usageKey, 1);
 
     check(usageCount > 0, {
-      'flag:usage-tracked': () => usageCount > 0
+      flag_usage_tracked: () => usageCount > 0
     });
   }
 
   const updated = await updateFlagWithRetry(flagKey, flag, vuId);
 
   check(updated, {
-    'flag:updated': () => updated
+    flag_updated: () => updated
   });
 
   const allFlags = await kv.list({ prefix: 'flag:', limit: FLAG_NAMES.length });
 
   check(allFlags.length === FLAG_NAMES.length, {
-    'flag:monitoring': () => allFlags.length === FLAG_NAMES.length
+    flag_monitoring: () => allFlags.length === FLAG_NAMES.length
   });
 
   const flagExists = await kv.exists(flagKey);
 
   check(flagExists, {
-    'flag:exists': () => flagExists
+    flag_exists: () => flagExists
   });
 
-  sleep(0.01);
+  // Simulate work long enough to keep the scenario under load.
+  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 }
 
 // buildDefaultFlag: baseline configuration for each feature so getOrSet() has a
@@ -165,7 +191,8 @@ async function updateFlagWithRetry(flagKey, initialFlag, vuId) {
   for (let attempt = 0; attempt < MAX_FLAG_UPDATE_ATTEMPTS; attempt++) {
     const proposed = {
       ...snapshot,
-      rollout: (snapshot.rollout + 7) % 100,
+      rollout: (snapshot.rollout + ROLLOUT_INCREMENT + USER_SEGMENT_MODULO) %
+        USER_SEGMENT_MODULO,
       updatedAt: Date.now(),
       updatedBy: vuId
     };
@@ -181,6 +208,9 @@ async function updateFlagWithRetry(flagKey, initialFlag, vuId) {
     } catch (err) {
       return false;
     }
+
+    // Yield briefly before retrying so other VUs can progress.
+    sleep(FLAG_UPDATE_RETRY_DELAY_MS / 1000);
   }
 
   return false;

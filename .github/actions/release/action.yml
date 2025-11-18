@@ -90,7 +90,7 @@ runs:
       if: steps.bump.outputs.has_release != '1'
       shell: bash
       run: |
-        echo "No commits found since last tag — skipping release."
+        echo "No commits found since last tag - skipping release."
 
     # Configure Git user for automated tag creation.
     # Uses GitHub Actions bot identity for audit trail.

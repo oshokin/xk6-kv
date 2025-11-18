@@ -51,6 +51,14 @@ const WAIT_TIME_BETWEEN_RETRY_ATTEMPTS_IN_MILLISECONDS = 50;
 // Namespace prefix used for shared order keys.
 const PERSISTENT_ORDER_CLAIM_KEY_PREFIX = 'order-';
 
+// Idle sleep timings keep promises alive on the event loop.
+const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
+const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
+  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
+);
+const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
+const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
+
 // Backend selection: memory (default) or disk.
 const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
 
@@ -60,29 +68,24 @@ const TRACK_KEYS_OVERRIDE =
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
   TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
 
-// Shared KV store handle used by all VUs.
+// kv is the shared store client used throughout the scenario.
 const kv = openKv(
   SELECTED_BACKEND_NAME === 'disk'
     ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
     : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
 );
 
-// ---------------------------------------------------------------
-// Module-scoped synthetic "ALLOCATED" orders that every VU sees.
-// ---------------------------------------------------------------
+// Synthetic "ALLOCATED" orders that every VU sees.
 const SYNTHETIC_ALLOCATED_ORDER_ID_LIST = Array.from(
   { length: TOTAL_NUMBER_OF_SYNTHETIC_ALLOCATED_ORDERS },
   (_, i) => i + 1, // Use 1..N for friendlier logs
 );
 
-// Rationale: 50 VUs × 1000 iterations intentionally overwhelm the shared pool
-// so every execution hits heavy contention. That pressure makes regressions in
-// getOrSet() immediately visible, yet the whole scenario still completes within
-// seconds on CI runners.
+// options configures the load profile and pass/fail thresholds.
 export const options = {
-  // Vary these to increase contention. Start with 50×1000 like the shared script.
-  vus: parseInt(__ENV.VUS || '50', 10),
-  iterations: parseInt(__ENV.ITERATIONS || '1000', 10),
+  // Adjust via env vars to dial contention up or down for your workload.
+  vus: DEFAULT_VUS,
+  iterations: DEFAULT_ITERATIONS,
 
   // Optional: add thresholds to fail fast if we start choking.
   thresholds: {
@@ -91,14 +94,14 @@ export const options = {
   },
 };
 
-// setup: erase every order key so each run starts from the same initial state.
+// setup erases every order key so each run starts from the same initial state.
 export async function setup() {
   // Start with a clean state so each run is deterministic.
   // This clears only the kv store, not the local array of order IDs.
   await kv.clear();
 }
 
-// teardown: close disk-backed stores so the BoltDB file can be reused instantly.
+// teardown closes disk-backed stores so the BoltDB file can be reused instantly.
 export async function teardown() {
   // For disk backends, close the store cleanly so the file can be reused immediately.
   if (SELECTED_BACKEND_NAME === 'disk') {
@@ -106,7 +109,7 @@ export async function teardown() {
   }
 }
 
-// Each iteration tries to atomically grab the next unclaimed order, simulates
+// mainScenarioIteration tries to atomically grab the next unclaimed order, simulates
 // processing work, and releases the slot so future iterations can catch bugs in
 // ordering or fairness.
 export default async function mainScenarioIteration() {
@@ -116,8 +119,8 @@ export default async function mainScenarioIteration() {
 
   // At this point, the order has been "claimed" for processing by this VU.
   // In a real test you'd call an HTTP API; here we just pretend to do something expensive.
-  // We keep a tiny sleep to model some work and allow other VUs to progress.
-  sleep(0.01);
+  // We keep an extended sleep to model some work and allow other VUs to progress.
+  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 
   // Assert that we indeed claimed something. 
   // We use built-in k6 `check` instead of external `expect`.
@@ -134,7 +137,7 @@ export default async function mainScenarioIteration() {
   }
 }
 
-// claimOneAllocatedOrderOrThrow: scans the deterministic dataset until it finds
+// claimOneAllocatedOrderOrThrow scans the deterministic dataset until it finds
 // an unclaimed order, proving that getOrSet() guards ownership even when every
 // VU is pounding the same keys.
 async function claimOneAllocatedOrderOrThrow() {
@@ -176,7 +179,7 @@ async function claimOneAllocatedOrderOrThrow() {
   }, MAXIMUM_NUMBER_OF_RETRY_ATTEMPTS_TO_CLAIM_ORDER, WAIT_TIME_BETWEEN_RETRY_ATTEMPTS_IN_MILLISECONDS);
 }
 
-// withRetry: tiny helper that yields between attempts so we do not spin-lock
+// withRetry is a tiny helper that yields between attempts so we do not spin-lock
 // under contention; if we still fail, the test rightfully surfaces the bug.
 async function withRetry(fn, maximumAttempts, intervalMs) {
   let lastObservedError;

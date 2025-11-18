@@ -59,8 +59,8 @@ vars:
   # -------------------------------
 
   # E2E defaults (can be overridden on CLI).
-  VUS: "{{.VUS | default `20`}}"
-  ITERATIONS: "{{.ITERATIONS | default `100`}}"
+  VUS: "{{.VUS | default `40`}}"
+  ITERATIONS: "{{.ITERATIONS | default `400`}}"
 
   # Dynamically list all e2e test scenarios from e2e/*.js files (space-separated).
   E2E_SCENARIOS:

@@ -577,37 +577,57 @@ func (k *KV) databaseNotOpenError() error {
 	return NewError(DatabaseNotOpenError, "database is not open")
 }
 
-// runAsyncWithStore is a small template that:
-//
-//  1. Creates a Promise bound to the current VU,
-//  2. Checks that the store is available,
-//  3. Executes the given operation in a goroutine,
-//  4. Converts the Go result to a Sobek value using k.vu.Runtime().ToValue(...),
-//  5. Resolves/rejects the Promise.
+// runAsyncWithStore executes a blocking store operation on a worker goroutine
+// and bridges its result back to JavaScript by resolving a Sobek promise on the
+// VU's event loop. This indirection is required because:
+//   - Sobek promises (rt.NewPromise) are not goroutine-safe; resolve/reject must
+//     always run on the event loop thread.
+//   - k6 extensions are responsible for scheduling their callbacks via
+//     VU.RegisterCallback(), otherwise multiple goroutines will race inside the
+//     VM and panic.
+//   - We still want the expensive store work off the event loop so VUs stay
+//     responsive under heavy contention.
 func (k *KV) runAsyncWithStore(
 	operation func(store store.Store) (any, error),
 	toJS func(rt *sobek.Runtime, result any) sobek.Value,
 ) *sobek.Promise {
-	promise, resolve, reject := promises.New(k.vu)
+	// Capture the VU runtime and create a promise whose resolve/reject
+	// must run on the event loop thread (Sobek promises are not goroutine-safe).
+	rt := k.vu.Runtime()
+	promise, resolve, reject := rt.NewPromise()
+
+	// Grab the VU's RegisterCallback hook so we can enqueue work back onto
+	// the event loop after the store operation completes.
+	callback := k.vu.RegisterCallback()
+
+	runOnEventLoop := func(fn func() error) {
+		callback(fn)
+	}
 
 	go func() {
 		if k.store == nil {
-			reject(k.databaseNotOpenError())
+			runOnEventLoop(func() error {
+				return reject(k.databaseNotOpenError())
+			})
 			return
 		}
 
-		// Run the blocking store operation in this goroutine.
+		// Run the blocking storage call on a worker goroutine so the event
+		// loop remains responsive under contention.
 		goResult, err := operation(k.store)
 		if err != nil {
-			reject(err)
+			runOnEventLoop(func() error {
+				return reject(err)
+			})
 			return
 		}
 
-		// Convert to JS using the VU's Sobek runtime and resolve the promise.
-		jsRuntime := k.vu.Runtime()
-		jsValue := toJS(jsRuntime, goResult)
-
-		resolve(jsValue)
+		// Marshal the result back to JS by enqueueing a callback that converts
+		// the Go value and resolves the promise on the event loop thread.
+		runOnEventLoop(func() error {
+			jsValue := toJS(rt, goResult)
+			return resolve(jsValue)
+		})
 	}()
 
 	return promise

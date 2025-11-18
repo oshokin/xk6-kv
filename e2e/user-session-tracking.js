@@ -50,20 +50,28 @@ const TRACK_KEYS_OVERRIDE =
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
   TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
 
-// Shared KV store handle used by all VUs.
+// Session identifier randomization parameters.
+const SESSION_ID_RANDOM_RANGE = parseInt(__ENV.SESSION_ID_RANDOM_RANGE || '1000', 10);
+const CLEANUP_PROBABILITY = parseFloat(__ENV.CLEANUP_PROBABILITY || '0.1');
+const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
+const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
+  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
+);
+const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
+const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
+
+// kv is the shared store client used throughout the scenario.
 const kv = openKv(
   SELECTED_BACKEND_NAME === 'disk'
     ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
     : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
 );
 
-// Rationale: 20 VUs × 100 iterations represent a busy application hour without
-// overwhelming CI. Thresholds ensure session creation, activity updates, and
-// cleanup hooks never silently degrade.
+// options configures the load profile and pass/fail thresholds.
 export const options = {
-  // Vary these to increase contention. Start with 20×100 like the shared script.
-  vus: parseInt(__ENV.VUS || '20', 10),
-  iterations: parseInt(__ENV.ITERATIONS || '100', 10),
+  // Adjust via env vars to dial contention up or down for your workload.
+  vus: DEFAULT_VUS,
+  iterations: DEFAULT_ITERATIONS,
 
   // Optional: add thresholds to fail fast if we start choking.
   thresholds: {
@@ -74,13 +82,13 @@ export const options = {
   }
 };
 
-// setup: purge all sessions so we can assert deterministic counters per run.
+// setup purges all sessions so we can assert deterministic counters per run.
 export async function setup() {
   // Start with a clean state so each run is deterministic.
   await kv.clear();
 }
 
-// teardown: close disk stores so repeated test runs on the same file stay fast.
+// teardown closes disk stores so repeated test runs on the same file stay fast.
 export async function teardown() {
   // For disk backends, close the store cleanly so the file can be reused immediately.
   if (SELECTED_BACKEND_NAME === 'disk') {
@@ -88,10 +96,12 @@ export async function teardown() {
   }
 }
 
-// Each virtual user creates a session, tracks page views, performs existence
+// userSessionTrackingTest creates a session, tracks page views, performs existence
 // checks, and occasionally triggers cleanup to cover the full lifecycle.
 export default async function userSessionTrackingTest() {
-  const userId = `user:${exec.vu.idInTest}:${Math.floor(Math.random() * 1000)}`;
+  const userId = `user:${exec.vu.idInTest}:${Math.floor(
+    Math.random() * SESSION_ID_RANDOM_RANGE
+  )}`;
   const sessionId = `session:${userId}:${Date.now()}`;
 
   // Test 1: Create session (getOrSet).
@@ -123,13 +133,13 @@ export default async function userSessionTrackingTest() {
 
   // Test 5: Simulate session cleanup (deleteIfExists).
   // Only cleanup 10% of sessions to avoid race conditions.
-  if (Math.random() < 0.1) {
+  if (Math.random() < CLEANUP_PROBABILITY) {
     const deleted = await kv.deleteIfExists(sessionId);
     check(deleted, {
       'session:cleanup': () => deleted
     });
   }
 
-  // Simulate some work.
-  sleep(0.01);
+  // Simulate some work with jitter so each iteration stays active.
+  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 }

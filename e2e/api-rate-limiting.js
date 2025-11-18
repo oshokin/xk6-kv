@@ -53,20 +53,31 @@ const TRACK_KEYS_OVERRIDE =
 const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
   TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
 
-// Shared KV store handle used by all VUs.
+// Maximum number of requests allowed per time window.
+const RATE_LIMIT_PER_WINDOW = parseInt(__ENV.RATE_LIMIT_PER_WINDOW || '100', 10);
+// Duration of each rate limit window in milliseconds.
+const RATE_WINDOW_MS = parseInt(__ENV.RATE_WINDOW_MS || '60000', 10);
+// Base duration (seconds) each iteration sleeps after processing.
+const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
+// Random jitter (seconds) added to the base idle sleep.
+const IDLE_SLEEP_JITTER_SECONDS = parseFloat(__ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01');
+// Default number of VUs used in the scenario.
+const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
+// Default iteration count used in the scenario.
+const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
+
+// kv is the shared store client used throughout the scenario.
 const kv = openKv(
   SELECTED_BACKEND_NAME === 'disk'
     ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
     : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
 );
 
-// Rationale: 20 VUs × 100 iterations approximate a busy API minute. Thresholds
-// enforce that rate checks and reset logic stay rock solid without adding long
-// runtime to CI.
+// options configures the load profile and pass/fail thresholds.
 export const options = {
-  // Vary these to increase contention. Start with 20×100 like the shared script.
-  vus: parseInt(__ENV.VUS || '20', 10),
-  iterations: parseInt(__ENV.ITERATIONS || '100', 10),
+  // Adjust via env vars to dial contention up or down for your workload.
+  vus: DEFAULT_VUS,
+  iterations: DEFAULT_ITERATIONS,
 
   // Optional: add thresholds to fail fast if we start choking.
   thresholds: {
@@ -76,13 +87,13 @@ export const options = {
   }
 };
 
-// setup: clear every counter so the first request of each run behaves the same.
+// setup clears every counter so the first request of each run behaves the same.
 export async function setup() {
   // Start with a clean state so each run is deterministic.
   await kv.clear();
 }
 
-// teardown: close BoltDB cleanly so later runs do not trip over open handles.
+// teardown closes BoltDB cleanly so later runs do not trip over open handles.
 export async function teardown() {
   // For disk backends, close the store cleanly so the file can be reused immediately.
   if (SELECTED_BACKEND_NAME === 'disk') {
@@ -90,7 +101,7 @@ export async function teardown() {
   }
 }
 
-// Each iteration represents a single API call: increment usage, enforce the
+// apiRateLimitingTest represents a single API call: increment usage, enforce the
 // limit, and reset counters when the sliding window elapses.
 export default async function apiRateLimitingTest() {
   const userId = `user:${exec.vu.idInTest}`;
@@ -101,14 +112,14 @@ export default async function apiRateLimitingTest() {
   const requestCount = await kv.incrementBy(rateLimitKey, 1);
 
   // Test 2: Check if rate limit exceeded (100 requests per minute).
-  const rateLimitExceeded = requestCount > 100;
+  const rateLimitExceeded = requestCount > RATE_LIMIT_PER_WINDOW;
 
   check(!rateLimitExceeded, {
     'rate:limit-check': () => !rateLimitExceeded
   });
 
   // Test 3: Set reset time if this is the first request.
-  const resetTime = await kv.getOrSet(resetTimeKey, Date.now() + 60000);
+  const resetTime = await kv.getOrSet(resetTimeKey, Date.now() + RATE_WINDOW_MS);
 
   // Test 4: Check if we need to reset the counter.
   const currentTime = Date.now();
@@ -120,7 +131,7 @@ export default async function apiRateLimitingTest() {
 
     if (resetSuccess) {
       // Update reset time.
-      await kv.swap(resetTimeKey, currentTime + 60000);
+      await kv.swap(resetTimeKey, currentTime + RATE_WINDOW_MS);
 
       check(true, {
         'rate:reset': () => true
@@ -128,6 +139,6 @@ export default async function apiRateLimitingTest() {
     }
   }
 
-  // Simulate API call delay.
-  sleep(0.01);
+  // Simulate API call delay with jitter to keep promises alive on the event loop.
+  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 }
