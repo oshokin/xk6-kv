@@ -1,6 +1,7 @@
 package kv
 
 import (
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -115,6 +116,42 @@ func TestOpenKvRejectsConflictingOptions(t *testing.T) {
 
 	require.Panics(t, func() {
 		moduleInstance.OpenKv(diskBackendOptions)
+	})
+
+	t.Cleanup(func() {
+		if moduleInstance.kv != nil {
+			_ = moduleInstance.kv.Close()
+		}
+	})
+}
+
+func TestOpenKvAllowsEquivalentDiskPaths(t *testing.T) {
+	t.Parallel()
+
+	rootModule := New()
+	runtime := modulestest.NewRuntime(t)
+	moduleInstance := rootModule.NewModuleInstance(runtime.VU).(*ModuleInstance)
+
+	tempDir := t.TempDir()
+	absPath := filepath.Join(tempDir, "kv.db")
+	extraSegmentsPath := filepath.Join(absPath, "..", filepath.Base(absPath))
+
+	absOptions := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend": BackendDisk,
+		"path":    absPath,
+	})
+
+	relOptions := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend": BackendDisk,
+		"path":    extraSegmentsPath,
+	})
+
+	require.NotPanics(t, func() {
+		moduleInstance.OpenKv(absOptions)
+	})
+
+	require.NotPanics(t, func() {
+		moduleInstance.OpenKv(relOptions)
 	})
 
 	t.Cleanup(func() {

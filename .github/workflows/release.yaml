@@ -10,11 +10,6 @@ on:
   workflow_run:
     workflows: ["Extension Check"]
     types: [completed]
-    branches: [main]
-  # Trigger on tag pushes (e.g., git tag v1.4.1 && git push origin v1.4.1)
-  push:
-    tags:
-      - 'v*'
   # Allow manual release triggering when needed.
   workflow_dispatch:
 
@@ -26,16 +21,49 @@ jobs:
   # Single release job for both automatic (main push), tag push, and manual triggers.
   release:
     runs-on: ubuntu-latest
-    # Only run if the Extension Check workflow succeeded, or if triggered by tag push/manual dispatch.
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
+    # Only run if the Extension Check workflow succeeded for a push to main or a tag, or if run manually.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        (
+          github.event.workflow_run.head_branch == github.event.repository.default_branch ||
+          startsWith(github.event.workflow_run.ref, 'refs/tags/')
+        )
+      )
     steps:
       # Checkout the repository to access the local composite action.
       - name: Checkout code
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+      - name: Verify tag points to default branch
+        id: tag_guard
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          IS_TAG_PUSH: ${{ startsWith(github.event.workflow_run.ref, 'refs/tags/') && 'true' || 'false' }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [[ "${IS_TAG_PUSH}" != "true" ]]; then
+            echo "allow=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git fetch --depth=1 origin "${DEFAULT_BRANCH}"
+          if git merge-base --is-ancestor "${HEAD_SHA}" "origin/${DEFAULT_BRANCH}"; then
+            echo "Tag commit is on ${DEFAULT_BRANCH}; releasing."
+            echo "allow=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tag commit is not on ${DEFAULT_BRANCH}; skipping release."
+            echo "allow=false" >> "$GITHUB_OUTPUT"
+          fi
       # Use the reusable release composite action.
       - name: Execute release
+        if: github.event_name != 'workflow_run' || steps.tag_guard.outputs.allow == 'true'
         uses: ./.github/actions/release
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

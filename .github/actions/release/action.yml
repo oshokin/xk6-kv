@@ -34,7 +34,7 @@ runs:
       uses: actions/checkout@v5
       with:
         fetch-depth: 0 # Fetch all tags and history for semantic versioning.
-        ref: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.ref || github.ref }}
+        ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.ref) || github.ref }}
 
     # Set up Go environment for building k6 binaries.
     - name: Set up Go

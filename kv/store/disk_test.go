@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -25,7 +26,8 @@ func newTestDiskStore(t *testing.T, trackKeys bool, path string, autoOpen bool) 
 		diskPath = filepath.Join(t.TempDir(), DefaultDiskStorePath)
 	}
 
-	store := NewDiskStore(trackKeys, diskPath)
+	store, err := NewDiskStore(trackKeys, diskPath)
+	require.NoError(t, err, "NewDiskStore() must succeed for test path %q", diskPath)
 
 	if autoOpen {
 		require.NoError(t, store.Open())
@@ -43,18 +45,22 @@ func newTestDiskStore(t *testing.T, trackKeys bool, path string, autoOpen bool) 
 func TestNewDiskStore(t *testing.T) {
 	t.Parallel()
 
-	store := NewDiskStore(true, "")
+	store, err := NewDiskStore(true, "")
 
+	require.NoError(t, err, "NewDiskStore() must not fail with empty path")
 	require.NotNil(t, store, "NewDiskStore() must not return nil")
 
-	assert.Equal(t, DefaultDiskStorePath, store.path, "unexpected default path")
+	absDefault, pathErr := filepath.Abs(DefaultDiskStorePath)
+
+	require.NoError(t, pathErr, "failed to resolve default disk path")
+	assert.Equal(t, absDefault, store.path, "unexpected default path")
 	require.NotNil(t, store.handle, "handle placeholder must be non-nil before open")
 
 	assert.False(t, store.opened.Load(), "store must not be marked opened initially")
 	assert.EqualValues(t, 0, store.refCount.Load(), "initial refCount must be zero")
 }
 
-// TestNewDiskStore_PathHandling ensures callers can override the disk path and that invalid inputs fall back to defaults.
+// TestNewDiskStore_PathHandling ensures callers can override the disk path and that validation behaves as expected.
 func TestNewDiskStore_PathHandling(t *testing.T) {
 	t.Parallel()
 
@@ -70,21 +76,22 @@ func TestNewDiskStore_PathHandling(t *testing.T) {
 	t.Run("empty path", func(t *testing.T) {
 		t.Parallel()
 
-		store := NewDiskStore(true, "")
+		store, err := NewDiskStore(true, "")
+		require.NoError(t, err, "NewDiskStore() must not fail when path is empty")
 		require.NotNil(t, store, "NewDiskStore() must not return nil")
-		assert.Equal(t, DefaultDiskStorePath, store.path, "empty path must fall back to default")
+
+		absDefault, pathErr := filepath.Abs(DefaultDiskStorePath)
+		require.NoError(t, pathErr, "failed to resolve default disk path")
+		assert.Equal(t, absDefault, store.path, "empty path must fall back to default")
 	})
 
 	t.Run("directory path", func(t *testing.T) {
 		t.Parallel()
 
 		dir := t.TempDir()
-		store := newTestDiskStore(t, true, dir, false)
-		require.NotNil(t, store, "NewDiskStore() must not return nil")
-
-		err := store.Open()
-		require.ErrorContains(t, err, dir, "opening a directory path must surface the original error")
-		assert.Equal(t, dir, store.path, "directory path must remain unchanged (no fallback to default)")
+		store, err := NewDiskStore(true, dir)
+		require.ErrorContains(t, err, "is a directory", "directories must be rejected during validation")
+		assert.Nil(t, store, "store must not be created when path is a directory")
 	})
 
 	t.Run("missing parent directory", func(t *testing.T) {
@@ -97,8 +104,13 @@ func TestNewDiskStore_PathHandling(t *testing.T) {
 		require.NotNil(t, store, "NewDiskStore() must not return nil")
 
 		err := store.Open()
-		require.ErrorContains(t, err, missingDirectory, "missing parent directory must propagate original error")
+		require.NoError(t, err, "Open() must create missing parent directories")
 		assert.Equal(t, missingDirectory, store.path, "path must remain unchanged (no fallback to default)")
+
+		parentDir := filepath.Dir(missingDirectory)
+		info, statErr := os.Stat(parentDir)
+		require.NoError(t, statErr, "parent directory must exist after Open()")
+		assert.True(t, info.IsDir(), "parent directory must be a directory")
 	})
 }
 

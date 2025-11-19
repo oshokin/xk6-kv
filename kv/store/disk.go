@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -52,17 +53,16 @@ const (
 // NewDiskStore constructs a DiskStore using the provided filesystem path and DefaultKvBucket.
 // When path is empty, DefaultDiskStorePath is used to preserve backwards compatibility.
 // If trackKeys is true, an in-memory index is initialized to accelerate RandomKey().
-func NewDiskStore(trackKeys bool, path string) *DiskStore {
+func NewDiskStore(trackKeys bool, path string) (*DiskStore, error) {
 	var idx *OSTree
 	if trackKeys {
 		idx = NewOSTree()
 	}
 
-	if path == "" {
-		path = DefaultDiskStorePath
+	diskPath, err := ResolveDiskPath(path)
+	if err != nil {
+		return nil, err
 	}
-
-	diskPath := resolveDiskPath(path)
 
 	return &DiskStore{
 		path:      diskPath,
@@ -75,6 +75,41 @@ func NewDiskStore(trackKeys bool, path string) *DiskStore {
 		keysList:  []string{},
 		keysLock:  sync.RWMutex{},
 		ost:       idx,
+	}, nil
+}
+
+// ResolveDiskPath normalizes user-provided paths and applies fast-fail defaults.
+// Empty strings revert to the default DB file path.
+func ResolveDiskPath(dbPath string) (string, error) {
+	trimmedPath := strings.TrimSpace(dbPath)
+	if trimmedPath == "" {
+		defaultPath, err := filepath.Abs(DefaultDiskStorePath)
+		if err != nil {
+			return "", fmt.Errorf("unable to resolve default disk path %q: %w", DefaultDiskStorePath, err)
+		}
+
+		return defaultPath, nil
+	}
+
+	cleanedPath := filepath.Clean(trimmedPath)
+
+	absPath, err := filepath.Abs(cleanedPath)
+	if err != nil {
+		return "", fmt.Errorf("unable to resolve disk path %q: %w", cleanedPath, err)
+	}
+
+	info, err := os.Stat(absPath)
+	switch {
+	case err == nil:
+		if info.IsDir() {
+			return absPath, fmt.Errorf("disk store path %q is a directory", absPath)
+		}
+
+		return absPath, nil
+	case errors.Is(err, os.ErrNotExist):
+		return absPath, nil
+	default:
+		return absPath, fmt.Errorf("disk store path %q validation failed: %w", absPath, err)
 	}
 }
 
@@ -89,6 +124,13 @@ func (s *DiskStore) Open() error {
 		s.refCount.Add(1)
 
 		return nil
+	}
+
+	// Ensure the parent directory exists in case it was removed between configuration
+	// time and the actual open call.
+	dirPath := filepath.Dir(s.path)
+	if err := os.MkdirAll(dirPath, 0o750); err != nil {
+		return fmt.Errorf("failed to create directory %q for disk store: %w", dirPath, err)
 	}
 
 	// Open the database file.
@@ -1116,24 +1158,6 @@ func (s *DiskStore) rebuildKeyListLocked() error {
 	}
 
 	return nil
-}
-
-// resolveDiskPath normalizes user-provided paths and applies fast-fail defaults.
-// Empty strings or directory-like inputs revert to the default DB file path.
-func resolveDiskPath(candidate string) string {
-	trimmed := strings.TrimSpace(candidate)
-	if trimmed == "" {
-		return DefaultDiskStorePath
-	}
-
-	cleaned := filepath.Clean(trimmed)
-
-	// Treat directory-like inputs as requests to use the default database file.
-	if strings.HasSuffix(trimmed, "/") || strings.HasSuffix(trimmed, "\\") {
-		return DefaultDiskStorePath
-	}
-
-	return cleaned
 }
 
 // cloneBytes returns a copy of the given byte slice.

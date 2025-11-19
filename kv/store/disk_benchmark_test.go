@@ -20,7 +20,8 @@ func newBenchmarkDiskStore(b *testing.B, trackKeys bool, namePattern string) *Di
 
 	_ = tempFile.Close()
 
-	store := NewDiskStore(trackKeys, tempFile.Name())
+	store, err := NewDiskStore(trackKeys, tempFile.Name())
+	require.NoError(b, err, "NewDiskStore() must succeed for benchmark path")
 
 	require.NoError(b, store.Open())
 

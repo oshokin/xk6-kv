@@ -129,7 +129,12 @@ func (rm *RootModule) createBaseStore(options Options) (store.Store, error) {
 	case BackendMemory:
 		return store.NewMemoryStore(options.TrackKeys), nil
 	case BackendDisk:
-		return store.NewDiskStore(options.TrackKeys, options.Path), nil
+		diskStore, err := store.NewDiskStore(options.TrackKeys, options.Path)
+		if err != nil {
+			return nil, err
+		}
+
+		return diskStore, nil
 	default:
 		return nil, fmt.Errorf("unsupported backend: %s", options.Backend)
 	}
@@ -262,6 +267,15 @@ func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
 			"invalid serialization: %q; valid values are: %q, %q",
 			opts.Serialization, SerializationJSON, SerializationString,
 		)
+	}
+
+	if opts.Backend == BackendDisk {
+		canonicalPath, err := store.ResolveDiskPath(opts.Path)
+		if err != nil {
+			return opts, err
+		}
+
+		opts.Path = canonicalPath
 	}
 
 	return opts, nil

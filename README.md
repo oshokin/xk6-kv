@@ -23,6 +23,7 @@ A k6 extension providing a persistent key-value store to share state across Virt
 - 🎲 **Random Key Selection**: Uniform sampling with optional prefix filtering
 - 🔍 **Key Tracking**: Optional O(1) random key access via in-memory indexing
 - 🏷️ **Prefix Support**: Filter operations by key prefixes
+- 📦 **Stable Bolt Bucket**: Disk backend always uses the `k6` bucket (**original upstream bug tied it to the DB path and could orphan data - now fixed**)
 - 🧭 **Cursor Scanning**: Stream large datasets via `scan()` with continuation tokens
 - 📝 **Serialization**: JSON or string serialization
 - 📘 **TypeScript Support**: Full type declarations for IntelliSense and type safety

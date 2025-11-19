@@ -120,7 +120,7 @@ linters:
       forbid:
         # Forbid direct print statements - use proper logging instead.
         - pattern: ^(fmt\\.Print(|f|ln)|print|println)$
-        # Forbid everything in os, except os.Signal and os.SyscallError.
+        # Forbid everything in os, except items explicitly excluded via rules below.
         - pattern: ^os\.(.*)$(# Using anything except Signal and SyscallError from the os package is forbidden )?
         # Forbid everything in syscall except the uppercase constants.
         - pattern: ^syscall\.[^A-Z_]+$(# Using anything except constants from the syscall package is forbidden )?
@@ -245,6 +245,16 @@ linters:
       - linters:
           - forbidigo
         text: use of `os\.(SyscallError|Signal|Interrupt)` forbidden
+      # Allow specific filesystem helpers from os.
+      - linters:
+          - forbidigo
+        text: use of `os\.Stat` forbidden
+      - linters:
+          - forbidigo
+        text: use of `os\.ErrNotExist` forbidden
+      - linters:
+          - forbidigo
+        text: use of `os\.MkdirAll` forbidden
 
       # Ignore godot linter in compiler directives.
       - linters: [godot]
