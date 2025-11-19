@@ -143,6 +143,16 @@ func TestOpenKvAllowsEquivalentDiskPaths(t *testing.T) {
 	moduleInstance := rootModule.NewModuleInstance(runtime.VU).(*ModuleInstance)
 
 	tempDir := t.TempDir()
+
+	// Ensure root module store closes before temp dir cleanup.
+	t.Cleanup(func() {
+		cleanupRootModule(t, rootModule)
+
+		if moduleInstance.kv != nil {
+			_ = moduleInstance.kv.Close()
+		}
+	})
+
 	absPath := filepath.Join(tempDir, "kv.db")
 	extraSegmentsPath := filepath.Join(absPath, "..", filepath.Base(absPath))
 
@@ -162,12 +172,6 @@ func TestOpenKvAllowsEquivalentDiskPaths(t *testing.T) {
 
 	require.NotPanics(t, func() {
 		moduleInstance.OpenKv(relOptions)
-	})
-
-	t.Cleanup(func() {
-		if moduleInstance.kv != nil {
-			_ = moduleInstance.kv.Close()
-		}
 	})
 }
 
