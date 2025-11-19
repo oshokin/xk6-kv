@@ -609,6 +609,7 @@ func (k *KV) runAsyncWithStore(
 			runOnEventLoop(func() error {
 				return reject(k.databaseNotOpenError())
 			})
+
 			return
 		}
 
@@ -619,6 +620,7 @@ func (k *KV) runAsyncWithStore(
 			runOnEventLoop(func() error {
 				return reject(err)
 			})
+
 			return
 		}
 
