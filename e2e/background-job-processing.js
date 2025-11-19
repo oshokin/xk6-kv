@@ -1,6 +1,6 @@
-import { check, sleep } from 'k6';
+import { check } from 'k6';
 import exec from 'k6/execution';
-import { openKv } from 'k6/x/kv';
+import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: BACKGROUND JOB PROCESSING SYSTEM
@@ -45,53 +45,28 @@ import { openKv } from 'k6/x/kv';
 // - Must handle job failures gracefully
 // - Low latency for job claiming (fast worker assignment)
 
-// Selected backend (memory or disk) used by the queue.
-const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
-
-// Enables in-memory key tracking when the backend is memory.
-const TRACK_KEYS_OVERRIDE =
-  typeof __ENV.KV_TRACK_KEYS === 'string' ? __ENV.KV_TRACK_KEYS.toLowerCase() : '';
-const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
-  TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
-
-// Prefix applied to every job slot stored in KV.
+// Key prefix for all job records in the queue.
 const JOB_KEY_PREFIX = 'job:';
 
-// Number of deterministic job slots maintained in the queue (defaults to 10× VUs).
+// Total number of job slots in the queue (represents available jobs to process).
 const JOB_SLOT_COUNT = parseInt(__ENV.JOB_SLOTS || '400', 10);
 
-// Maximum attempts when trying to claim a job via CAS (can be overridden via env).
+// Maximum compareAndSwap retry attempts when claiming a job before giving up.
 const MAX_CLAIM_ATTEMPTS = parseInt(__ENV.MAX_CLAIM_ATTEMPTS || '200', 10);
 
-// Sleep duration (seconds) between CAS retries when claiming jobs.
-const CLAIM_RETRY_SLEEP_SECONDS = parseFloat(__ENV.CLAIM_RETRY_SLEEP_SECONDS || '0.002');
-
-// Width (digits) of job key suffix for deterministic padding.
+// Number of digits used for padding job key suffixes (e.g., job:0001, job:0002).
 const JOB_KEY_PAD_WIDTH = parseInt(__ENV.JOB_KEY_PAD_WIDTH || '4', 10);
-// Limit used when sampling queue state for monitoring.
+
+// Number of jobs to sample when monitoring queue health via list().
 const MONITORING_LIST_LIMIT = parseInt(__ENV.MONITORING_LIST_LIMIT || '5', 10);
-// Base duration (seconds) each iteration sleeps after processing.
-const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
-// Random jitter (seconds) added to the base idle sleep.
-const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
-  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
-);
-// Default number of VUs used by the scenario.
-const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
-// Default iteration count used by the scenario.
-const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
 
 // kv is the shared store client used throughout the scenario.
-const kv = openKv(
-  SELECTED_BACKEND_NAME === 'disk'
-    ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-    : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-);
+const kv = createKv();
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
-  vus: DEFAULT_VUS,
-  iterations: DEFAULT_ITERATIONS,
+  vus: VUS,
+  iterations: ITERATIONS,
   thresholds: {
     'checks{job:claimed}': ['rate>0.999'],
     'checks{job:processed}': ['rate>0.999'],
@@ -109,33 +84,29 @@ export async function setup() {
   }
 }
 
-// teardown closes BoltDB cleanly so later runs do not trip over open handles.
-export async function teardown() {
-  if (SELECTED_BACKEND_NAME === 'disk') {
-    kv.close();
-  }
-}
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
 // backgroundJobProcessingTest claims slots, simulates work, recycles the job, and
 // emits health metrics-touching every atomic helper the queue exposes.
 export default async function backgroundJobProcessingTest() {
   const vuId = exec.vu.idInTest;
 
+  // Claim a job from the queue.
   const claim = await claimJobSlot(vuId);
 
   check(Boolean(claim), {
     'job:claimed': () => Boolean(claim)
   });
 
-  // Simulate work long enough to keep the scenario under load.
-  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
-
+  // Recycle the job back to the queue for the next worker.
   const processed = await recycleJobSlot(claim.jobKey, claim.jobSnapshot);
 
   check(processed, {
     'job:processed': () => processed
   });
 
+  // Monitor queue health by sampling available jobs.
   const queueSample = await kv.list({
     prefix: JOB_KEY_PREFIX,
     limit: MONITORING_LIST_LIMIT
@@ -194,8 +165,6 @@ async function claimJobSlot(vuId) {
         return { jobKey, jobSnapshot: claimedSnapshot };
       }
     }
-
-    sleep(CLAIM_RETRY_SLEEP_SECONDS);
   }
 
   throw new Error(`Unable to claim any job slot after ${MAX_CLAIM_ATTEMPTS} attempts`);

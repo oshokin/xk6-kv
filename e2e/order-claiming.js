@@ -1,6 +1,5 @@
-import { check, sleep } from 'k6';
-import exec from 'k6/execution';
-import { openKv } from 'k6/x/kv';
+import { check } from 'k6';
+import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: E-COMMERCE ORDER CLAIMING SYSTEM
@@ -38,162 +37,74 @@ import { openKv } from 'k6/x/kv';
 // - Critical for business operations (revenue depends on successful claims)
 // - Must handle thousands of concurrent order claims per second
 
-// Synthetic dataset size (number of orders available per run).
-const TOTAL_NUMBER_OF_SYNTHETIC_ALLOCATED_ORDERS =
-  (__ENV.TOTAL_FAKE_ORDERS && parseInt(__ENV.TOTAL_FAKE_ORDERS, 10)) || 1000;
+// Total number of orders in the pool available for claiming.
+const ORDER_POOL_SIZE = parseInt(__ENV.ORDER_POOL_SIZE || '1000', 10);
 
-// Retry budget for claiming orders under contention.
-const MAXIMUM_NUMBER_OF_RETRY_ATTEMPTS_TO_CLAIM_ORDER = 5;
+// Maximum retry attempts when trying to claim an order before giving up.
+const MAX_CLAIM_RETRIES = parseInt(__ENV.MAX_CLAIM_RETRIES || '5', 10);
 
-// Backoff duration (ms) between retries when claiming orders.
-const WAIT_TIME_BETWEEN_RETRY_ATTEMPTS_IN_MILLISECONDS = 50;
-
-// Namespace prefix used for shared order keys.
-const PERSISTENT_ORDER_CLAIM_KEY_PREFIX = 'order-';
-
-// Idle sleep timings keep promises alive on the event loop.
-const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
-const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
-  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
-);
-const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
-const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
-
-// Backend selection: memory (default) or disk.
-const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
-
-// Enables in-memory key tracking when the backend is memory.
-const TRACK_KEYS_OVERRIDE =
-  typeof __ENV.KV_TRACK_KEYS === 'string' ? __ENV.KV_TRACK_KEYS.toLowerCase() : '';
-const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
-  TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
+// Key prefix for all order records.
+const ORDER_KEY_PREFIX = 'order-';
 
 // kv is the shared store client used throughout the scenario.
-const kv = openKv(
-  SELECTED_BACKEND_NAME === 'disk'
-    ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-    : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-);
+const kv = createKv();
 
-// Synthetic "ALLOCATED" orders that every VU sees.
-const SYNTHETIC_ALLOCATED_ORDER_ID_LIST = Array.from(
-  { length: TOTAL_NUMBER_OF_SYNTHETIC_ALLOCATED_ORDERS },
-  (_, i) => i + 1, // Use 1..N for friendlier logs
-);
+// Pre-generated list of order IDs available for claiming.
+const ORDER_IDS = Array.from({ length: ORDER_POOL_SIZE }, (_, i) => i + 1);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
-  // Adjust via env vars to dial contention up or down for your workload.
-  vus: DEFAULT_VUS,
-  iterations: DEFAULT_ITERATIONS,
-
-  // Optional: add thresholds to fail fast if we start choking.
+  vus: VUS,
+  iterations: ITERATIONS,
   thresholds: {
-    // Require that at least 95% of iterations claim an order successfully.
-    'checks{type:order-claimed}': ['rate>0.95'],
-  },
+    'checks{type:order-claimed}': ['rate>0.95']
+  }
 };
 
 // setup erases every order key so each run starts from the same initial state.
-export async function setup() {
-  // Start with a clean state so each run is deterministic.
-  // This clears only the kv store, not the local array of order IDs.
-  await kv.clear();
-}
+export const setup = createSetup(kv);
 
-// teardown closes disk-backed stores so the BoltDB file can be reused instantly.
-export async function teardown() {
-  // For disk backends, close the store cleanly so the file can be reused immediately.
-  if (SELECTED_BACKEND_NAME === 'disk') {
-    kv.close();
-  }
-}
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
-// mainScenarioIteration tries to atomically grab the next unclaimed order, simulates
-// processing work, and releases the slot so future iterations can catch bugs in
-// ordering or fairness.
-export default async function mainScenarioIteration() {
-  // Try to pick a single "ALLOCATED" order and atomically claim it via kv.getOrSet(...).
-  // This is the concurrency hotspot we want to verify under load.
-  const claimedOrder = await claimOneAllocatedOrderOrThrow();
+// orderClaimingTest atomically claims an order, verifies the claim, then releases
+// it so future iterations can re-claim (simulates continuous workload).
+export default async function orderClaimingTest() {
+  // Atomically claim an order using getOrSet().
+  const claimedOrder = await claimOrder();
 
-  // At this point, the order has been "claimed" for processing by this VU.
-  // In a real test you'd call an HTTP API; here we just pretend to do something expensive.
-  // We keep an extended sleep to model some work and allow other VUs to progress.
-  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
-
-  // Assert that we indeed claimed something. 
-  // We use built-in k6 `check` instead of external `expect`.
+  // Verify we claimed an order.
   check(true, {
-    'claimed order id is present': () => claimedOrder.id !== undefined,
+    'claimed order id is present': () => claimedOrder.id !== undefined
   }, { type: 'order-claimed' });
 
-  // Release the slot so future iterations can re-claim the same order.
+  // Release the order so it can be claimed again.
   await kv.delete(claimedOrder.key);
-
-  // Optional noisy log - turn on with LOG_CLAIMS=true.
-  if (__ENV.LOG_CLAIMS === 'true') {
-    console.log(`[VU ${exec.vu.idInTest}] processing order id: ${claimedOrderId}`);
-  }
 }
 
-// claimOneAllocatedOrderOrThrow scans the deterministic dataset until it finds
-// an unclaimed order, proving that getOrSet() guards ownership even when every
-// VU is pounding the same keys.
-async function claimOneAllocatedOrderOrThrow() {
-  // Loop over the list of order IDs and
-  // try to atomically "claim" the very first one whose key is absent.
-  // That is: kv.getOrSet("order-<id>", "processed") returns {loaded:false}.
+// claimOrder scans the order pool until it finds an unclaimed order, proving that
+// getOrSet() guards ownership even when every VU competes for the same keys.
+async function claimOrder() {
+  for (let attempt = 0; attempt < MAX_CLAIM_RETRIES; attempt++) {
+    // Scan through all orders looking for an unclaimed one.
+    for (let i = 0; i < ORDER_IDS.length; i++) {
+      const orderId = ORDER_IDS[i];
+      const orderKey = `${ORDER_KEY_PREFIX}${orderId}`;
 
-  return withRetry(async () => {
-    let orderIdWeHaveClaimed;
-
-    // Iterate over the SYNTHETIC "ALLOCATED" orders.
-    for (let i = 0; i < SYNTHETIC_ALLOCATED_ORDER_ID_LIST.length; i++) {
-      const currentIdCandidate =
-        SYNTHETIC_ALLOCATED_ORDER_ID_LIST[i % SYNTHETIC_ALLOCATED_ORDER_ID_LIST.length];
-
-      // The heart of the test: if the key is absent, this call will set it and return loaded=false,
-      // giving us exclusive "claim" of this order ID across all concurrent VUs.
-      const { loaded } = await kv.getOrSet(
-        `${PERSISTENT_ORDER_CLAIM_KEY_PREFIX}${currentIdCandidate}`,
-        'processed'
-      );
+      // Try to claim: if key is absent, getOrSet() will set it and return loaded=false.
+      const { loaded } = await kv.getOrSet(orderKey, 'processed');
 
       if (!loaded) {
-        orderIdWeHaveClaimed = currentIdCandidate;
-        break;
+        // Successfully claimed this order!
+        return { id: orderId, key: orderKey };
       }
     }
 
-    if (!orderIdWeHaveClaimed) {
-      throw new Error('No unprocessed orders found (all claimed already).');
-    }
-
-    const orderKey = `${PERSISTENT_ORDER_CLAIM_KEY_PREFIX}${orderIdWeHaveClaimed}`;
-
-    return {
-      id: orderIdWeHaveClaimed,
-      key: orderKey
-    };
-  }, MAXIMUM_NUMBER_OF_RETRY_ATTEMPTS_TO_CLAIM_ORDER, WAIT_TIME_BETWEEN_RETRY_ATTEMPTS_IN_MILLISECONDS);
-}
-
-// withRetry is a tiny helper that yields between attempts so we do not spin-lock
-// under contention; if we still fail, the test rightfully surfaces the bug.
-async function withRetry(fn, maximumAttempts, intervalMs) {
-  let lastObservedError;
-  for (let attemptNumber = 0; attemptNumber < maximumAttempts; attemptNumber++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastObservedError = err;
-
-      // Yield a tiny bit to avoid tight spin loops under contention.
-      if (attemptNumber < maximumAttempts - 1) {
-        sleep(intervalMs / 1000);
-      }
+    // All orders are currently claimed, retry if we haven't exhausted retries.
+    if (attempt < MAX_CLAIM_RETRIES - 1) {
+      // Could add a small delay here, but k6 handles this naturally.
     }
   }
-  throw lastObservedError;
+
+  throw new Error(`Failed to claim any order after ${MAX_CLAIM_RETRIES} attempts (all ${ORDER_IDS.length} orders are claimed)`);
 }

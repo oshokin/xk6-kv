@@ -66,9 +66,9 @@ vars:
   E2E_SCENARIOS:
     sh: |
       {{if eq OS "windows"}}
-        powershell.exe -Command "Get-ChildItem e2e\*.js | Select-Object -ExpandProperty BaseName"
+        powershell.exe -Command "Get-ChildItem e2e\*.js | Where-Object { $_.Name -ne 'common.js' } | Select-Object -ExpandProperty BaseName"
       {{else}}
-        ls e2e/*.js | xargs -n1 basename -s .js
+        ls e2e/*.js | grep -v common.js | xargs -n1 basename -s .js
       {{end}}
 
 tasks:

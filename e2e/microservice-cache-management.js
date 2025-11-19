@@ -1,6 +1,6 @@
-import { check, sleep } from 'k6';
+import { check } from 'k6';
 import exec from 'k6/execution';
-import { openKv } from 'k6/x/kv';
+import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: MICROSERVICE CACHE MANAGEMENT SYSTEM
@@ -45,62 +45,28 @@ import { openKv } from 'k6/x/kv';
 // - Must handle thousands of concurrent cache operations
 // - Low latency impact (cache operations should be fast)
 
-// Selected backend (memory or disk) used for cache data.
-const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
-
-// Enables in-memory key tracking when the backend is memory.
-const TRACK_KEYS_OVERRIDE =
-  typeof __ENV.KV_TRACK_KEYS === 'string' ? __ENV.KV_TRACK_KEYS.toLowerCase() : '';
-const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
-  TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
-
 // Total number of products seeded into the cache.
 const PRODUCT_COUNT = parseInt(__ENV.PRODUCT_COUNT || '20', 10);
 
-// Maximum CAS retries when bumping product versions.
-const VERSION_RETRY_ATTEMPTS = parseInt(__ENV.VERSION_RETRY_ATTEMPTS || '10', 10);
-// Price multiplier applied to initial seed data to avoid monotony.
-const PRICE_MULTIPLIER = parseInt(__ENV.PRICE_MULTIPLIER || '137', 10);
-// Price modulo used when seeding catalog entries.
-const PRICE_MODULO = parseInt(__ENV.PRICE_MODULO || '1000', 10);
-// Price jitter range applied during runtime updates.
-const PRICE_JITTER_MODULO = parseInt(__ENV.PRICE_JITTER_MODULO || '1000', 10);
-// Base sleep (seconds) between compareAndDelete retries.
-const INVALIDATION_RETRY_SLEEP_SECONDS = parseFloat(
-  __ENV.INVALIDATION_RETRY_SLEEP_SECONDS || '0.001'
-);
-// Random jitter (seconds) added to invalidation retry sleep.
-const INVALIDATION_RETRY_JITTER_SECONDS = parseFloat(
-  __ENV.INVALIDATION_RETRY_JITTER_SECONDS || '0.001'
-);
-// Base duration (seconds) each iteration sleeps after processing.
-const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
-// Random jitter (seconds) added to the base idle sleep.
-const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
-  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
-);
-// Default number of VUs used by the scenario.
-const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
-// Default iteration count used by the scenario.
-const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
-// Limit used when sampling cache entries for health checks.
-const CACHE_HEALTH_LIST_LIMIT = parseInt(__ENV.CACHE_HEALTH_LIST_LIMIT || '3', 10);
-// Prefix applied to every cache key.
-const CACHE_PREFIX = __ENV.CACHE_PREFIX || 'product:';
-// Prefix used when formatting version identifiers.
-const VERSION_PREFIX = __ENV.VERSION_PREFIX || 'v';
+// Maximum CAS retry attempts when updating product versions.
+const MAX_VERSION_CAS_RETRIES = parseInt(__ENV.MAX_VERSION_CAS_RETRIES || '1000', 10);
+
+// Number of cache entries sampled during health checks.
+const HEALTH_CHECK_SAMPLE_SIZE = parseInt(__ENV.HEALTH_CHECK_SAMPLE_SIZE || '3', 10);
+
+// Key prefix for all product cache entries.
+const CACHE_PREFIX = 'product:';
+
+// Prefix for version identifiers.
+const VERSION_PREFIX = 'v';
 
 // kv is the shared store client used throughout the scenario.
-const kv = openKv(
-  SELECTED_BACKEND_NAME === 'disk'
-    ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-    : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-);
+const kv = createKv();
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
-  vus: DEFAULT_VUS,
-  iterations: DEFAULT_ITERATIONS,
+  vus: VUS,
+  iterations: ITERATIONS,
   thresholds: {
     'checks{check:cache_updated}': ['rate>0.999'],
     'checks{check:cache_invalidated}': ['rate>0.999'],
@@ -124,56 +90,61 @@ export async function setup() {
   }
 }
 
-// teardown closes BoltDB cleanly so later runs do not trip over open handles.
-export async function teardown() {
-  if (SELECTED_BACKEND_NAME === 'disk') {
-    kv.close();
-  }
-}
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
 // microserviceCacheManagementTest deterministically selects a product, updates its
 // cache entry, bumps the version via CAS, invalidates related data, and rebuilds
 // the dependency.
 export default async function microserviceCacheManagementTest() {
   const vuId = exec.vu.idInTest;
-  const iterationSeed = exec.scenario.iterationInTest;
-  const productIndex = (iterationSeed % PRODUCT_COUNT) + 1;
+  const iteration = exec.scenario.iterationInTest;
+
+  // Deterministic product selection (round-robin across products).
+  const productIndex = (iteration % PRODUCT_COUNT) + 1;
   const productId = `${CACHE_PREFIX}${productIndex}`;
   const dataKey = `${productId}:data`;
   const versionKey = `${productId}:version`;
   const relatedKey = `${productId}:related`;
 
+  // Get current cached data.
   const currentData = await kv.get(dataKey);
 
+  // Update product data (simulating price change).
   const newData = {
     ...currentData,
-    price: (currentData.price + iterationSeed) % PRICE_JITTER_MODULO,
+    price: currentData.price + 1, // Simple increment instead of magic formula.
     version: `${VERSION_PREFIX}${Date.now()}`,
     updatedAt: Date.now(),
     updatedBy: vuId
   };
 
+  // Atomically swap cache entry.
   const { loaded } = await kv.swap(dataKey, newData);
 
   check(loaded, {
     cache_updated: () => loaded
   });
 
+  // Bump version number via CAS.
   const bumpedVersion = await compareAndSwapVersion(versionKey);
 
   check(Boolean(bumpedVersion), {
     cache_version: () => Boolean(bumpedVersion)
   });
 
+  // Invalidate related cache (edge cache, aggregations, etc.).
   const invalidated = await invalidateRelatedCache(relatedKey);
 
   check(invalidated, {
     cache_invalidated: () => invalidated
   });
 
+  // Rebuild related cache with new version.
   await kv.set(relatedKey, buildRelatedState(productId, bumpedVersion || newData.version));
 
-  const cacheEntries = await kv.list({ prefix: CACHE_PREFIX, limit: CACHE_HEALTH_LIST_LIMIT });
+  // Sample cache health.
+  const cacheEntries = await kv.list({ prefix: CACHE_PREFIX, limit: HEALTH_CHECK_SAMPLE_SIZE });
 
   for (const entry of cacheEntries) {
     if (entry.key.endsWith(':data')) {
@@ -183,18 +154,14 @@ export default async function microserviceCacheManagementTest() {
       });
     }
   }
-
-  // Simulate work long enough to keep the scenario under load.
-  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 }
 
-// buildProductData produces deterministic product payloads so diffing caches
-// is straightforward when debugging.
+// buildProductData produces deterministic product payloads for testing.
 function buildProductData(id, version) {
   return {
     id,
     name: `Product ${id}`,
-    price: (id * PRICE_MULTIPLIER) % PRICE_MODULO,
+    price: id * 100, // Simple price formula: $100, $200, $300, etc.
     version,
     cachedAt: Date.now()
   };
@@ -213,7 +180,7 @@ function buildRelatedState(productId, version) {
 // compareAndSwapVersion retries CAS until the version bump succeeds, ensuring
 // we actually validate concurrency primitives instead of bailing silently.
 async function compareAndSwapVersion(versionKey) {
-  for (let attempt = 0; attempt < VERSION_RETRY_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < MAX_VERSION_CAS_RETRIES; attempt++) {
     let currentVersion;
 
     try {
@@ -235,7 +202,7 @@ async function compareAndSwapVersion(versionKey) {
 
 // invalidateRelatedCache retries compareAndDelete to tolerate competing writers.
 async function invalidateRelatedCache(relatedKey) {
-  for (let attempt = 0; attempt < VERSION_RETRY_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < MAX_VERSION_CAS_RETRIES; attempt++) {
     let snapshot;
 
     try {
@@ -249,12 +216,6 @@ async function invalidateRelatedCache(relatedKey) {
     if (deleted) {
       return true;
     }
-
-    // Yield slightly before retrying so other writers can finish.
-    sleep(
-      INVALIDATION_RETRY_SLEEP_SECONDS +
-        Math.random() * INVALIDATION_RETRY_JITTER_SECONDS
-    );
   }
 
   return false;

@@ -1,6 +1,6 @@
-import { check, sleep } from 'k6';
+import { check } from 'k6';
 import exec from 'k6/execution';
-import { openKv } from 'k6/x/kv';
+import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: A/B TESTING & FEATURE FLAGS SYSTEM
@@ -45,55 +45,22 @@ import { openKv } from 'k6/x/kv';
 // - Must handle thousands of concurrent feature checks
 // - Low latency impact (feature checks should be fast)
 
-// Selected backend (memory or disk) for the scenario.
-const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
-
-// Enables in-memory key tracking when the backend is memory.
-const TRACK_KEYS_OVERRIDE =
-  typeof __ENV.KV_TRACK_KEYS === 'string' ? __ENV.KV_TRACK_KEYS.toLowerCase() : '';
-const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
-  TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
-
-// Static list of feature flags that the test exercises.
+// Feature flags being tested in this scenario.
 const FLAG_NAMES = ['new-checkout', 'dark-mode', 'premium-features', 'beta-search'];
 
-// Maximum CAS retries before surfacing a flag update failure (env overridable).
-const MAX_FLAG_UPDATE_ATTEMPTS = parseInt(__ENV.MAX_FLAG_UPDATE_ATTEMPTS || '1000', 10);
-// Delay (in ms) between CAS retries to avoid overwhelming the event loop.
-const FLAG_UPDATE_RETRY_DELAY_MS = parseFloat(__ENV.FLAG_UPDATE_RETRY_DELAY_MS || '5');
-// Factor applied to VU identifiers when computing session segments.
-const USER_SEGMENT_VU_FACTOR = parseInt(__ENV.USER_SEGMENT_VU_FACTOR || '31', 10);
-// Factor applied to iteration counters when computing session segments.
-const USER_SEGMENT_ITERATION_FACTOR = parseInt(
-  __ENV.USER_SEGMENT_ITERATION_FACTOR || '17',
-  10
-);
-// Modulo used to normalize session segments into percentage buckets.
-const USER_SEGMENT_MODULO = parseInt(__ENV.USER_SEGMENT_MODULO || '100', 10);
-// Rollout increment applied per admin update to emulate gradual rollouts.
-const ROLLOUT_INCREMENT = parseInt(__ENV.ROLLOUT_INCREMENT || '7', 10);
-// Base duration (seconds) each iteration sleeps after processing.
-const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
-// Random jitter (seconds) added to the base idle sleep.
-const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
-  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
-);
-// Default number of virtual users for the scenario.
-const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
-// Default iteration count for the scenario.
-const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
+// Maximum compareAndSwap retry attempts under heavy contention before giving up.
+const MAX_CAS_RETRIES = parseInt(__ENV.MAX_CAS_RETRIES || '1000', 10);
+
+// Number of user buckets for A/B test rollout (0-99 = 100 buckets for percentage-based rollouts).
+const BUCKET_COUNT = 100;
 
 // kv is the shared store client used throughout the scenario.
-const kv = openKv(
-  SELECTED_BACKEND_NAME === 'disk'
-    ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-    : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-);
+const kv = createKv();
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
-  vus: DEFAULT_VUS,
-  iterations: DEFAULT_ITERATIONS,
+  vus: VUS,
+  iterations: ITERATIONS,
   thresholds: {
     'checks{check:flag_enabled}': ['rate>0.999'],
     'checks{check:flag_updated}': ['rate>0.999'],
@@ -113,33 +80,32 @@ export async function setup() {
   }
 }
 
-// teardown closes BoltDB cleanly so later runs do not trip over open handles.
-export async function teardown() {
-  if (SELECTED_BACKEND_NAME === 'disk') {
-    kv.close();
-  }
-}
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
 // abTestingFeatureFlagsTest emulates a user checking gates, recording usage, and
 // occasionally acting as an admin to change rollout percentages.
 export default async function abTestingFeatureFlagsTest() {
   const vuId = exec.vu.idInTest;
-  const iterationSeed = exec.scenario.iterationInTest;
-  const flagName = FLAG_NAMES[iterationSeed % FLAG_NAMES.length];
-  const flagKey = `flag:${flagName}`;
-  const userId = `user:${vuId}:${iterationSeed}`;
+  const iteration = exec.scenario.iterationInTest;
 
+  // Deterministic flag selection.
+  const flagName = FLAG_NAMES[iteration % FLAG_NAMES.length];
+  const flagKey = `flag:${flagName}`;
+  const userId = `user:${vuId}:${iteration}`;
+
+  // Get or initialize flag.
   const { value: flag } = await kv.getOrSet(flagKey, buildDefaultFlag(flagName));
 
   check(Boolean(flag), {
     flag_enabled: () => Boolean(flag) && typeof flag.enabled === 'boolean'
   });
 
-  const userSegment =
-    (vuId * USER_SEGMENT_VU_FACTOR + iterationSeed * USER_SEGMENT_ITERATION_FACTOR) %
-    USER_SEGMENT_MODULO;
-  const shouldSeeFeature = flag.enabled && userSegment < flag.rollout;
+  // Determine if user is in rollout bucket (simple hash-based bucketing).
+  const userBucket = (vuId + iteration) % BUCKET_COUNT;
+  const shouldSeeFeature = flag.enabled && userBucket < flag.rollout;
 
+  // Track usage if user sees the feature.
   if (shouldSeeFeature) {
     const usageKey = `usage:${flagName}:${userId}`;
     const usageCount = await kv.incrementBy(usageKey, 1);
@@ -149,30 +115,30 @@ export default async function abTestingFeatureFlagsTest() {
     });
   }
 
-  const updated = await updateFlagWithRetry(flagKey, flag, vuId);
+  // Simulate admin updating rollout percentage (stress test CAS).
+  const updated = await updateFlagRollout(flagKey, flag, vuId);
 
   check(updated, {
     flag_updated: () => updated
   });
 
+  // Monitor all flags.
   const allFlags = await kv.list({ prefix: 'flag:', limit: FLAG_NAMES.length });
 
   check(allFlags.length === FLAG_NAMES.length, {
     flag_monitoring: () => allFlags.length === FLAG_NAMES.length
   });
 
+  // Verify flag existence.
   const flagExists = await kv.exists(flagKey);
 
   check(flagExists, {
     flag_exists: () => flagExists
   });
-
-  // Simulate work long enough to keep the scenario under load.
-  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 }
 
-// buildDefaultFlag: baseline configuration for each feature so getOrSet() has a
-// deterministic payload to insert on first use.
+// buildDefaultFlag constructs a baseline configuration for each feature 
+// so getOrSet() has a deterministic payload to insert on first use.
 function buildDefaultFlag(name) {
   return {
     name,
@@ -183,16 +149,16 @@ function buildDefaultFlag(name) {
   };
 }
 
-// updateFlagWithRetry: CAS loop that keeps trying until it successfully applies
+// updateFlagRollout is a CAS loop that keeps trying until it successfully applies
 // an update, ensuring compareAndSwap() is truly tested under contention.
-async function updateFlagWithRetry(flagKey, initialFlag, vuId) {
+async function updateFlagRollout(flagKey, initialFlag, vuId) {
   let snapshot = initialFlag;
 
-  for (let attempt = 0; attempt < MAX_FLAG_UPDATE_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
+    // Increment rollout by 1, wrapping at 100. 
     const proposed = {
       ...snapshot,
-      rollout: (snapshot.rollout + ROLLOUT_INCREMENT + USER_SEGMENT_MODULO) %
-        USER_SEGMENT_MODULO,
+      rollout: (snapshot.rollout + 1) % BUCKET_COUNT,
       updatedAt: Date.now(),
       updatedBy: vuId
     };
@@ -203,14 +169,12 @@ async function updateFlagWithRetry(flagKey, initialFlag, vuId) {
       return true;
     }
 
+    // CAS failed, re-read current state.
     try {
       snapshot = await kv.get(flagKey);
     } catch (err) {
       return false;
     }
-
-    // Yield briefly before retrying so other VUs can progress.
-    sleep(FLAG_UPDATE_RETRY_DELAY_MS / 1000);
   }
 
   return false;

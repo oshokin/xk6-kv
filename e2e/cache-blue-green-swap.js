@@ -1,6 +1,6 @@
-import { check, sleep } from 'k6';
+import { check } from 'k6';
 import exec from 'k6/execution';
-import { openKv } from 'k6/x/kv';
+import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: BLUE/GREEN CACHE INVALIDATION
@@ -25,43 +25,22 @@ import { openKv } from 'k6/x/kv';
 // - Each iteration deletes the config key and immediately launches dozens of
 //   swap() calls via Promise.all. Only one response should report loaded=false.
 
-// Selected backend (memory or disk) used for cache storage.
-const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
-// Enables in-memory key tracking when the backend is memory.
-const TRACK_KEYS_OVERRIDE =
-  typeof __ENV.KV_TRACK_KEYS === 'string' ? __ENV.KV_TRACK_KEYS.toLowerCase() : '';
-const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
-  TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
+// Base cache key name (each VU gets its own namespaced shard).
+const CACHE_KEY = __ENV.CACHE_KEY || 'cache:global-config';
 
-// CONFIG_KEY_BASE is the logical cache slot; each VU namespaces it with its id to
-// keep iterations isolated while still hammering swap() via Promise.all.
-const CONFIG_KEY_BASE = __ENV.CONFIG_KEY || 'cache:global-config';
-// BUILDERS_PER_BATCH dictates how many swap() calls we launch concurrently.
-const BUILDERS_PER_BATCH = parseInt(__ENV.CONFIG_BUILDERS || '24', 10);
-// Number of regions used when synthesizing config payloads.
-const REGION_SHARDS = parseInt(__ENV.REGION_SHARDS || '5', 10);
-// Base duration (seconds) each iteration sleeps after processing.
-const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
-// Random jitter (seconds) added to the base idle sleep.
-const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
-  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
-);
-// Default number of VUs used by the scenario.
-const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
-// Default iteration count used by the scenario.
-const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
+// Number of concurrent swap() operations to fire in parallel (tests Promise.all contention).
+const CONCURRENT_SWAPS = parseInt(__ENV.CONCURRENT_SWAPS || '24', 10);
+
+// Number of region shards for synthetic config generation.
+const REGION_COUNT = parseInt(__ENV.REGION_COUNT || '5', 10);
 
 // kv is the shared store client used throughout the scenario.
-const kv = openKv(
-  SELECTED_BACKEND_NAME === 'disk'
-    ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-    : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-);
+const kv = createKv();
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
-  vus: DEFAULT_VUS,
-  iterations: DEFAULT_ITERATIONS,
+  vus: VUS,
+  iterations: ITERATIONS,
   thresholds: {
     'checks{swap:cold-start}': ['rate>0.999'],
     'checks{swap:hot-updates}': ['rate>0.999']
@@ -69,16 +48,10 @@ export const options = {
 };
 
 // setup clears the cache slot so every batch starts cleanly.
-export async function setup() {
-  await kv.clear();
-}
+export const setup = createSetup(kv);
 
-// teardown closes disk stores when the scenario completes.
-export async function teardown() {
-  if (SELECTED_BACKEND_NAME === 'disk') {
-    kv.close();
-  }
-}
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
 // buildConfigPayload crafts a synthetic config blob for the current iterator.
 function buildConfigPayload(iteration, idx) {
@@ -87,7 +60,7 @@ function buildConfigPayload(iteration, idx) {
     builtBy: exec.vu.idInInstance,
     checksum: `${iteration}-${idx}-${Date.now()}`,
     metadata: {
-      region: `region-${idx % REGION_SHARDS}`,
+      region: `region-${idx % REGION_COUNT}`,
       traffic: Math.random()
     }
   };
@@ -98,25 +71,29 @@ function buildConfigPayload(iteration, idx) {
 // hot updates.
 export default async function cacheBlueGreenSwap() {
   const iteration = exec.scenario.iterationInTest;
-  const shardKey = `${CONFIG_KEY_BASE}:${exec.vu.idInInstance}`;
+  const shardKey = `${CACHE_KEY}:${exec.vu.idInInstance}`;
 
   // Start each shard fresh so exactly one builder sees loaded=false.
   await kv.delete(shardKey);
 
-  const payloads = Array.from({ length: BUILDERS_PER_BATCH }, (_, idx) =>
+  // Generate payloads for all concurrent swaps.
+  const payloads = Array.from({ length: CONCURRENT_SWAPS }, (_, idx) =>
     buildConfigPayload(iteration, idx)
   );
 
+  // Fire all swaps concurrently via Promise.all.
   const results = await Promise.all(payloads.map((payload) => kv.swap(shardKey, payload)));
 
+  // Exactly one swap should be a cold start (key didn't exist).
   const coldStarts = results.filter((result) => result.loaded === false);
   const hotSwaps = results.filter((result) => result.loaded === true);
 
   check(true, {
     'swap:cold-start': () => coldStarts.length === 1,
-    'swap:hot-updates': () => hotSwaps.length === BUILDERS_PER_BATCH - 1
+    'swap:hot-updates': () => hotSwaps.length === CONCURRENT_SWAPS - 1
   });
 
+  // Verify the final config is readable.
   let latestConfig = null;
   try {
     latestConfig = await kv.get(shardKey);
@@ -128,8 +105,4 @@ export default async function cacheBlueGreenSwap() {
     'swap:latest-readable': () =>
       latestConfig != null && typeof latestConfig.version === 'string'
   });
-
-  // Simulate work long enough to keep the scenario under load.
-  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 }
-

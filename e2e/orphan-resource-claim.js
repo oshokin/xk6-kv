@@ -1,6 +1,6 @@
-import { check, sleep } from 'k6';
+import { check } from 'k6';
 import exec from 'k6/execution';
-import { openKv } from 'k6/x/kv';
+import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: ORPHANED RESOURCE CLAIMING
@@ -20,87 +20,86 @@ import { openKv } from 'k6/x/kv';
 // - deleteIfExists(): claim the job once.
 // - exists(): watch the key transition for monitoring.
 
-// Selected backend (memory or disk) used for orphan resource state.
-const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
-// Enables in-memory key tracking when the backend is memory.
-const TRACK_KEYS_OVERRIDE =
-  typeof __ENV.KV_TRACK_KEYS === 'string' ? __ENV.KV_TRACK_KEYS.toLowerCase() : '';
-const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
-  TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
-
-// RESOURCE_PREFIX namespaces the synthetic jobs.
+// Prefix for orphaned resource keys.
 const RESOURCE_PREFIX = __ENV.RESOURCE_PREFIX || 'orphan:';
-// CLAIMERS_PER_BATCH controls number of deleteIfExists contenders.
-const CLAIMERS_PER_BATCH = parseInt(__ENV.CLAIMERS_PER_BATCH || '12', 10);
-// WATCHERS_PER_BATCH determines how many exists() polls occur in parallel.
-const WATCHERS_PER_BATCH = parseInt(__ENV.WATCHERS_PER_BATCH || '18', 10);
-// Base duration (seconds) each iteration sleeps after processing.
-const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
-// Random jitter (seconds) added to the base idle sleep.
-const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
-  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
-);
-// Default number of VUs used by the scenario.
-const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
-// Default iteration count used by the scenario.
-const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
+
+// Number of orphaned resources in the initial pool.
+const RESOURCE_POOL_SIZE = parseInt(__ENV.RESOURCE_POOL_SIZE || '1000', 10);
+
+// Number of concurrent workers attempting to claim each resource via deleteIfExists().
+const CONCURRENT_CLAIMERS = parseInt(__ENV.CONCURRENT_CLAIMERS || '12', 10);
+
+// Number of concurrent observers polling exists() to monitor state transitions.
+const CONCURRENT_WATCHERS = parseInt(__ENV.CONCURRENT_WATCHERS || '18', 10);
 
 // kv is the shared store client used throughout the scenario.
-const kv = openKv(
-  SELECTED_BACKEND_NAME === 'disk'
-    ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-    : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-);
-
-// Number of distinct orphan keys that cycle through the race.
-const RESOURCE_RING_SIZE = parseInt(__ENV.RESOURCE_RING_SIZE || '400', 10);
+const kv = createKv();
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
-  vus: DEFAULT_VUS,
-  iterations: DEFAULT_ITERATIONS,
+  vus: VUS,
+  iterations: ITERATIONS,
   thresholds: {
     'checks{claim:single-winner}': ['rate>0.999'],
     'checks{claim:fully-removed}': ['rate>0.999']
   }
 };
 
-// setup wipes older resources before the claiming races start.
+// setup seeds the pool of orphaned resources that workers will compete to claim.
 export async function setup() {
   await kv.clear();
-}
 
-// teardown closes disk stores post-run.
-export async function teardown() {
-  if (SELECTED_BACKEND_NAME === 'disk') {
-    kv.close();
+  // Seed orphaned resources for workers to claim.
+  for (let i = 0; i < RESOURCE_POOL_SIZE; i++) {
+    const resourceKey = `${RESOURCE_PREFIX}${i}`;
+    await kv.set(resourceKey, {
+      id: resourceKey,
+      createdAt: Date.now(),
+      stale: true
+    });
   }
 }
 
-// orphanResourceClaim seeds a job, races watchers vs. claimers via Promise.all,
-// and verifies exactly one worker deleted the resource.
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
+
+// orphanResourceClaim simulates workers racing to claim orphaned resources from a pool.
+// Multiple claimers try deleteIfExists() concurrently while observers monitor with exists().
 export default async function orphanResourceClaim() {
   const iteration = exec.scenario.iterationInTest;
-  const resourceKey = `${RESOURCE_PREFIX}${iteration % RESOURCE_RING_SIZE}`;
 
-  await kv.set(resourceKey, {
-    id: resourceKey,
-    createdAt: Date.now(),
-    payload: `workload-${exec.vu.idInInstance}`
-  });
+  // Pick a resource from the pool (wraps around).
+  const resourceKey = `${RESOURCE_PREFIX}${iteration % RESOURCE_POOL_SIZE}`;
 
-  const watchersBeforeCount = Math.ceil(WATCHERS_PER_BATCH / 2);
-  const watchersAfterCount = WATCHERS_PER_BATCH - watchersBeforeCount;
+  // Try to read the resource first to verify it exists.
+  let resourceSnapshot;
+  try {
+    resourceSnapshot = await kv.get(resourceKey);
+  } catch (err) {
+    // Resource already claimed by another worker.
+    resourceSnapshot = null;
+  }
 
+  // Skip if already claimed.
+  if (!resourceSnapshot) {
+    return;
+  }
+
+  // Split watchers: half before delete, half after.
+  const watchersBeforeCount = Math.ceil(CONCURRENT_WATCHERS / 2);
+  const watchersAfterCount = CONCURRENT_WATCHERS - watchersBeforeCount;
+
+  // Race: observers check existence while claimers try to delete.
   const midStage = await Promise.all([
     ...Array.from({ length: watchersBeforeCount }, () =>
       kv.exists(resourceKey).then((ok) => ({ type: 'watch-before', ok }))
     ),
-    ...Array.from({ length: CLAIMERS_PER_BATCH }, () =>
+    ...Array.from({ length: CONCURRENT_CLAIMERS }, () =>
       kv.deleteIfExists(resourceKey).then((ok) => ({ type: 'claim', ok }))
     )
   ]);
 
+  // Additional observers after the deletion race.
   const afterStage = await Promise.all(
     Array.from({ length: watchersAfterCount }, () =>
       kv.exists(resourceKey).then((ok) => ({ type: 'watch-after', ok }))
@@ -109,6 +108,7 @@ export default async function orphanResourceClaim() {
 
   const outcomes = [...midStage, ...afterStage];
 
+  // Count successful claims and watcher observations.
   const claimWins = outcomes.filter((result) => result.type === 'claim' && result.ok).length;
   const watchersBeforeTrue = outcomes.filter(
     (result) => result.type === 'watch-before' && result.ok
@@ -117,6 +117,7 @@ export default async function orphanResourceClaim() {
     (result) => result.type === 'watch-after' && result.ok
   ).length;
 
+  // Final verification: resource should be gone.
   const existsAfter = await kv.exists(resourceKey);
 
   check(true, {
@@ -125,8 +126,4 @@ export default async function orphanResourceClaim() {
     'claim:observers-saw-transition': () =>
       watchersBeforeTrue > 0 || watchersAfterTrue < watchersAfterCount
   });
-
-  // Simulate work long enough to keep the scenario under load.
-  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 }
-

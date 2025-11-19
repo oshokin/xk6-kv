@@ -1,6 +1,6 @@
-import { check, sleep } from 'k6';
+import { check } from 'k6';
 import exec from 'k6/execution';
-import { openKv } from 'k6/x/kv';
+import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: SESSION GARBAGE COLLECTION
@@ -20,44 +20,25 @@ import { openKv } from 'k6/x/kv';
 // - compareAndDelete(): remove only if the payload matches.
 // - exists(): verify the cleanup stuck.
 
-// Selected backend (memory or disk) used for the GC drill.
-const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
-// Enables in-memory key tracking when the backend is memory.
-const TRACK_KEYS_OVERRIDE =
-  typeof __ENV.KV_TRACK_KEYS === 'string' ? __ENV.KV_TRACK_KEYS.toLowerCase() : '';
-const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
-  TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
-
-// Prefix applied to seeded session keys.
+// Prefix for session keys being garbage collected.
 const SESSION_PREFIX = __ENV.SESSION_PREFIX || 'gc-session:';
-// Number of cleaners racing for each session key.
-const CLEANERS_PER_BATCH = parseInt(__ENV.CLEANERS_PER_BATCH || '20', 10);
-// Size of the session key ring used to rotate workload.
-const SESSION_KEY_RING = parseInt(__ENV.SESSION_KEY_RING || '500', 10);
-// TTL buffer (ms) recorded within each session payload.
-const SESSION_TTL_BUFFER_MS = parseInt(__ENV.SESSION_TTL_BUFFER_MS || '30000', 10);
-// Base duration (seconds) each iteration sleeps after processing.
-const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.015');
-// Random jitter (seconds) added to the base idle sleep.
-const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
-  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
-);
-// Default number of VUs used by the scenario.
-const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
-// Default iteration count used by the scenario.
-const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
+
+// Number of concurrent workers attempting to delete the same session via compareAndDelete().
+const CONCURRENT_CLEANERS = parseInt(__ENV.CONCURRENT_CLEANERS || '20', 10);
+
+// Size of the session key ring used to rotate cleanup workload.
+const SESSION_KEY_POOL_SIZE = parseInt(__ENV.SESSION_KEY_POOL_SIZE || '500', 10);
+
+// Session TTL in milliseconds (used in session payload metadata).
+const SESSION_TTL_MS = parseInt(__ENV.SESSION_TTL_MS || '30000', 10);
 
 // kv is the shared store client used throughout the scenario.
-const kv = openKv(
-  SELECTED_BACKEND_NAME === 'disk'
-    ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-    : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-);
+const kv = createKv();
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
-  vus: DEFAULT_VUS,
-  iterations: DEFAULT_ITERATIONS,
+  vus: VUS,
+  iterations: ITERATIONS,
   thresholds: {
     'checks{compareDelete:single-winner}': ['rate>0.999'],
     'checks{compareDelete:gone}': ['rate>0.999']
@@ -65,44 +46,37 @@ export const options = {
 };
 
 // setup clears old sessions before the GC storm.
-export async function setup() {
-  await kv.clear();
-}
+export const setup = createSetup(kv);
 
-// teardown closes disk-backed stores after the scenario.
-export async function teardown() {
-  if (SELECTED_BACKEND_NAME === 'disk') {
-    kv.close();
-  }
-}
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
 // sessionGcCompareDelete seeds a session, runs Promise.all compareAndDelete calls,
 // and verifies that exactly one worker succeeded and the session vanished.
 export default async function sessionGcCompareDelete() {
   const iteration = exec.scenario.iterationInTest;
-  const sessionKey = `${SESSION_PREFIX}${iteration % SESSION_KEY_RING}`;
+  const sessionKey = `${SESSION_PREFIX}${iteration % SESSION_KEY_POOL_SIZE}`;
   const sessionPayload = {
     sessionId: sessionKey,
     owner: `user-${exec.vu.idInInstance}`,
-    expiresAt: Date.now() + SESSION_TTL_BUFFER_MS
+    expiresAt: Date.now() + SESSION_TTL_MS
   };
 
+  // Create the session.
   await kv.set(sessionKey, sessionPayload);
 
+  // Race: multiple workers try to delete the same session simultaneously.
   const deleteResults = await Promise.all(
-    Array.from({ length: CLEANERS_PER_BATCH }, () => kv.compareAndDelete(sessionKey, sessionPayload))
+    Array.from({ length: CONCURRENT_CLEANERS }, () =>
+      kv.compareAndDelete(sessionKey, sessionPayload)
+    )
   );
 
   const successes = deleteResults.filter(Boolean).length;
-
   const stillExists = await kv.exists(sessionKey);
 
   check(true, {
     'compareDelete:single-winner': () => successes === 1,
     'compareDelete:gone': () => !stillExists
   });
-
-  // Simulate work long enough to keep the scenario under load.
-  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 }
-

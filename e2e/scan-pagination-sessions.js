@@ -1,6 +1,6 @@
-import { check, sleep } from 'k6';
+import { check } from 'k6';
 import exec from 'k6/execution';
-import { openKv } from 'k6/x/kv';
+import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: PAGINATED SESSION ANALYTICS
@@ -34,49 +34,31 @@ import { openKv } from 'k6/x/kv';
 // - Read-heavy, cursor-based workloads.
 // - Sensitive to ordering regressions and missed prefixes.
 
-// Selected backend (memory or disk) used by the scenario.
-const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
-
-// Enables in-memory key tracking when the backend is memory.
-const TRACK_KEYS_OVERRIDE =
-  typeof __ENV.KV_TRACK_KEYS === 'string' ? __ENV.KV_TRACK_KEYS.toLowerCase() : '';
-const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
-  TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
-
-// kv is the shared store client used throughout the scenario.
-const kv = openKv(
-  SELECTED_BACKEND_NAME === 'disk'
-    ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-    : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-);
-
 // Session key prefix used for seeding and scanning.
 const SESSION_PREFIX = __ENV.SESSION_PREFIX || 'session:';
 
-// Total number of sessions seeded during setup.
+// Total number of session records seeded during setup.
 const TOTAL_SESSIONS = parseInt(__ENV.TOTAL_SESSIONS || '500', 10);
 
-// Maximum number of entries returned per scan page.
+// Maximum entries returned per scan page.
 const PAGE_SIZE = parseInt(__ENV.PAGE_SIZE || '50', 10);
 
-// TTL metadata stored with each session record.
-const SESSION_TTL_SECONDS = parseInt(__ENV.SESSION_TTL_SECONDS || '300', 10);
-const SESSION_KEY_PAD_WIDTH = parseInt(__ENV.SESSION_KEY_PAD_WIDTH || '6', 10);
-const SESSION_USER_BUCKET_DIVISOR = parseInt(
-  __ENV.SESSION_USER_BUCKET_DIVISOR || '5',
-  10
-);
-const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
-const IDLE_SLEEP_JITTER_SECONDS = parseFloat(
-  __ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01'
-);
-const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
-const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
+// Session time-to-live in seconds (metadata stored with each session).
+const SESSION_TTL_SECONDS = 300;
+
+// Width of zero-padded session IDs (e.g., 6 = session:000042).
+const SESSION_KEY_PAD_WIDTH = 6;
+
+// Number of sessions per user bucket for data distribution.
+const SESSIONS_PER_USER = 5;
+
+// kv is the shared store client used throughout the scenario.
+const kv = createKv();
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
-  vus: DEFAULT_VUS,
-  iterations: DEFAULT_ITERATIONS,
+  vus: VUS,
+  iterations: ITERATIONS,
   thresholds: {
     'checks{scan:complete}': ['rate>0.98'],
     'checks{scan:has-data}': ['rate>0.98']
@@ -93,7 +75,7 @@ export async function setup() {
 
     await kv.set(key, {
       sessionId: paddedIndex,
-      userId: `user-${Math.floor(i / SESSION_USER_BUCKET_DIVISOR)}`,
+      userId: `user-${Math.floor(i / SESSIONS_PER_USER)}`,
       createdAt: Date.now(),
       ttlSeconds: SESSION_TTL_SECONDS,
       lastSeenByWorker: null
@@ -101,12 +83,8 @@ export async function setup() {
   }
 }
 
-// teardown closes BoltDB cleanly so later runs do not trip over open handles.
-export async function teardown() {
-  if (SELECTED_BACKEND_NAME === 'disk') {
-    kv.close();
-  }
-}
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
 // scanPaginatedSessions performs repeated scans until `done` is true, verifying
 // prefix ordering invariants.
@@ -114,6 +92,7 @@ export default async function scanPaginatedSessions() {
   let cursor = '';
   let seen = 0;
 
+  // Paginate through all sessions using cursor continuation.
   while (true) {
     const { entries, cursor: nextCursor, done } = await kv.scan({
       prefix: SESSION_PREFIX,
@@ -137,12 +116,9 @@ export default async function scanPaginatedSessions() {
     }
   }
 
+  // Verify all sessions were scanned exactly once.
   check(seen, {
     'scan:has-data': (value) => value > 0,
     'scan:complete': (value) => value === TOTAL_SESSIONS
   });
-
-  // Simulate downstream processing time without ending the iteration immediately.
-  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 }
-

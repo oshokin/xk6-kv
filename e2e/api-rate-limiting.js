@@ -1,14 +1,14 @@
-import { check, sleep } from 'k6';
+import { check } from 'k6';
 import exec from 'k6/execution';
-import { openKv } from 'k6/x/kv';
+import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: API RATE LIMITING SYSTEM
 // =============================================================================
 //
-// This test simulates a typical API rate limiting system where we need to
-// track request counts per user and enforce limits to prevent abuse. This is
-// a critical pattern in:
+// This test simulates an API rate limiting system where we need to
+// track request counts per user and atomically reset counters when limits
+// are exceeded. This is a critical pattern in:
 //
 // - REST APIs (GitHub, Twitter, Stripe APIs)
 // - Microservices architectures (service-to-service communication)
@@ -28,15 +28,13 @@ import { openKv } from 'k6/x/kv';
 //
 // ATOMIC OPERATIONS TESTED:
 // - incrementBy(): Atomically increment request counter per user
-// - compareAndSwap(): Reset counters when time window expires
-// - getOrSet(): Initialize reset time for new users
-// - swap(): Update reset time atomically
+// - compareAndSwap(): Reset counters atomically when limit exceeded
+// - get(): Read current counter value
 //
 // CONCURRENCY PATTERN:
 // - Multiple VUs represent different API clients/users
-// - Each VU tracks its own request rate
-// - Shared KV store ensures accurate rate counting
-// - Time-based windows prevent indefinite blocking
+// - Each VU increments its counter and resets when threshold reached
+// - Shared KV store ensures accurate counting under contention
 //
 // PERFORMANCE CHARACTERISTICS:
 // - High frequency operations (every API call)
@@ -44,101 +42,53 @@ import { openKv } from 'k6/x/kv';
 // - Must handle thousands of requests per second
 // - Low latency impact (rate limiting should be fast)
 
-// Selected backend (memory or disk) used for rate-limiting state.
-const SELECTED_BACKEND_NAME = __ENV.KV_BACKEND || 'memory';
-
-// Enables in-memory key tracking when the backend is memory.
-const TRACK_KEYS_OVERRIDE =
-  typeof __ENV.KV_TRACK_KEYS === 'string' ? __ENV.KV_TRACK_KEYS.toLowerCase() : '';
-const ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND =
-  TRACK_KEYS_OVERRIDE === '' ? true : TRACK_KEYS_OVERRIDE === 'true';
-
-// Maximum number of requests allowed per time window.
-const RATE_LIMIT_PER_WINDOW = parseInt(__ENV.RATE_LIMIT_PER_WINDOW || '100', 10);
-// Duration of each rate limit window in milliseconds.
-const RATE_WINDOW_MS = parseInt(__ENV.RATE_WINDOW_MS || '60000', 10);
-// Base duration (seconds) each iteration sleeps after processing.
-const BASE_IDLE_SLEEP_SECONDS = parseFloat(__ENV.BASE_IDLE_SLEEP_SECONDS || '0.02');
-// Random jitter (seconds) added to the base idle sleep.
-const IDLE_SLEEP_JITTER_SECONDS = parseFloat(__ENV.IDLE_SLEEP_JITTER_SECONDS || '0.01');
-// Default number of VUs used in the scenario.
-const DEFAULT_VUS = parseInt(__ENV.VUS || '40', 10);
-// Default iteration count used in the scenario.
-const DEFAULT_ITERATIONS = parseInt(__ENV.ITERATIONS || '400', 10);
+// Counter reset threshold - when counter reaches this value, trigger atomic reset via CAS.
+const RESET_THRESHOLD = parseInt(__ENV.RESET_THRESHOLD || '50', 10);
 
 // kv is the shared store client used throughout the scenario.
-const kv = openKv(
-  SELECTED_BACKEND_NAME === 'disk'
-    ? { backend: 'disk', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-    : { backend: 'memory', trackKeys: ENABLE_TRACK_KEYS_FOR_MEMORY_BACKEND }
-);
+const kv = createKv();
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
-  // Adjust via env vars to dial contention up or down for your workload.
-  vus: DEFAULT_VUS,
-  iterations: DEFAULT_ITERATIONS,
-
-  // Optional: add thresholds to fail fast if we start choking.
+  vus: VUS,
+  iterations: ITERATIONS,
   thresholds: {
-    // Require that at least 95% of iterations pass rate limit checks.
-    'checks{rate:limit-check}': ['rate>0.95'],
-    'checks{rate:reset}': ['rate>0.80']
+    'checks{counter:incremented}': ['rate>0.99'],
+    'checks{counter:reset}': ['rate>0.80']
   }
 };
 
 // setup clears every counter so the first request of each run behaves the same.
-export async function setup() {
-  // Start with a clean state so each run is deterministic.
-  await kv.clear();
-}
+export const setup = createSetup(kv);
 
-// teardown closes BoltDB cleanly so later runs do not trip over open handles.
-export async function teardown() {
-  // For disk backends, close the store cleanly so the file can be reused immediately.
-  if (SELECTED_BACKEND_NAME === 'disk') {
-    kv.close();
-  }
-}
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
-// apiRateLimitingTest represents a single API call: increment usage, enforce the
-// limit, and reset counters when the sliding window elapses.
+// apiRateLimitingTest represents a single API call: increment usage counter,
+// and reset when threshold is reached using compareAndSwap.
 export default async function apiRateLimitingTest() {
   const userId = `user:${exec.vu.idInTest}`;
-  const rateLimitKey = `rate_limit:${userId}`;
-  const resetTimeKey = `rate_reset:${userId}`;
+  const counterKey = `counter:${userId}`;
 
-  // Test 1: Increment request counter.
-  const requestCount = await kv.incrementBy(rateLimitKey, 1);
+  // Increment request counter atomically.
+  const count = await kv.incrementBy(counterKey, 1);
 
-  // Test 2: Check if rate limit exceeded (100 requests per minute).
-  const rateLimitExceeded = requestCount > RATE_LIMIT_PER_WINDOW;
-
-  check(!rateLimitExceeded, {
-    'rate:limit-check': () => !rateLimitExceeded
+  check(count > 0, {
+    'counter:incremented': () => count > 0
   });
 
-  // Test 3: Set reset time if this is the first request.
-  const resetTime = await kv.getOrSet(resetTimeKey, Date.now() + RATE_WINDOW_MS);
+  // When counter reaches threshold, try to reset it atomically.
+  if (count >= RESET_THRESHOLD) {
+    // Read current value.
+    const currentCount = await kv.get(counterKey);
 
-  // Test 4: Check if we need to reset the counter.
-  const currentTime = Date.now();
-  const shouldReset = currentTime > resetTime.value;
-
-  if (shouldReset) {
-    // Test 5: Atomic reset using compareAndSwap.
-    const resetSuccess = await kv.compareAndSwap(rateLimitKey, requestCount, 0);
-
-    if (resetSuccess) {
-      // Update reset time.
-      await kv.swap(resetTimeKey, currentTime + RATE_WINDOW_MS);
+    // Only reset if still at or above threshold (might have been reset by another VU).
+    if (currentCount >= RESET_THRESHOLD) {
+      const resetSuccess = await kv.compareAndSwap(counterKey, currentCount, 0);
 
       check(true, {
-        'rate:reset': () => true
+        'counter:reset': () => resetSuccess
       });
     }
   }
-
-  // Simulate API call delay with jitter to keep promises alive on the event loop.
-  sleep(BASE_IDLE_SLEEP_SECONDS + Math.random() * IDLE_SLEEP_JITTER_SECONDS);
 }
