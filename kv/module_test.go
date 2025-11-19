@@ -13,7 +13,7 @@ import (
 func TestOpenKvConcurrentInitializationSharesStore(t *testing.T) {
 	t.Parallel()
 
-	rootModule := New()
+	rootModule := newTestRootModule(t)
 
 	primaryRuntime := modulestest.NewRuntime(t)
 	secondaryRuntime := modulestest.NewRuntime(t)
@@ -105,7 +105,7 @@ func TestOpenKvConcurrentInitializationSharesStore(t *testing.T) {
 func TestOpenKvRejectsConflictingOptions(t *testing.T) {
 	t.Parallel()
 
-	rootModule := New()
+	rootModule := newTestRootModule(t)
 
 	runtime := modulestest.NewRuntime(t)
 	moduleInstance := rootModule.NewModuleInstance(runtime.VU).(*ModuleInstance)
@@ -138,7 +138,7 @@ func TestOpenKvRejectsConflictingOptions(t *testing.T) {
 func TestOpenKvAllowsEquivalentDiskPaths(t *testing.T) {
 	t.Parallel()
 
-	rootModule := New()
+	rootModule := newTestRootModule(t)
 	runtime := modulestest.NewRuntime(t)
 	moduleInstance := rootModule.NewModuleInstance(runtime.VU).(*ModuleInstance)
 
@@ -169,4 +169,29 @@ func TestOpenKvAllowsEquivalentDiskPaths(t *testing.T) {
 			_ = moduleInstance.kv.Close()
 		}
 	})
+}
+
+func newTestRootModule(t *testing.T) *RootModule {
+	t.Helper()
+
+	rm := New()
+
+	t.Cleanup(func() {
+		cleanupRootModule(t, rm)
+	})
+
+	return rm
+}
+
+func cleanupRootModule(t *testing.T, rm *RootModule) {
+	t.Helper()
+
+	rm.mu.Lock()
+	store := rm.store
+	rm.store = nil
+	rm.mu.Unlock()
+
+	if store != nil {
+		require.NoError(t, store.Close())
+	}
 }
