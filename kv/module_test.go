@@ -36,6 +36,7 @@ func TestOpenKvConcurrentInitializationSharesStore(t *testing.T) {
 		firstRelease = make(chan struct{})
 	)
 
+	testOpenKVStoreBarrierMu.Lock()
 	testOpenKVStoreBarrier = func() {
 		if enterCount.Add(1) != 1 {
 			return
@@ -44,8 +45,13 @@ func TestOpenKvConcurrentInitializationSharesStore(t *testing.T) {
 		close(firstEntered)
 		<-firstRelease
 	}
+	testOpenKVStoreBarrierMu.Unlock()
 
-	defer func() { testOpenKVStoreBarrier = nil }()
+	defer func() {
+		testOpenKVStoreBarrierMu.Lock()
+		testOpenKVStoreBarrier = nil
+		testOpenKVStoreBarrierMu.Unlock()
+	}()
 
 	results := make(chan *ModuleInstance, 2)
 

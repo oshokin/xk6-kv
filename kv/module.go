@@ -43,7 +43,10 @@ type (
 // without impacting production behavior (nil in non-test builds).
 //
 //nolint:gochecknoglobals // this is a test hook.
-var testOpenKVStoreBarrier func()
+var (
+	testOpenKVStoreBarrier   func()
+	testOpenKVStoreBarrierMu sync.RWMutex
+)
 
 const (
 	// BackendDisk is the persistent store backed by the filesystem.
@@ -103,8 +106,11 @@ func (rm *RootModule) getOrCreateStore(options Options) (store.Store, bool, erro
 		)
 	}
 
-	if testOpenKVStoreBarrier != nil {
-		testOpenKVStoreBarrier()
+	testOpenKVStoreBarrierMu.RLock()
+	barrier := testOpenKVStoreBarrier
+	testOpenKVStoreBarrierMu.RUnlock()
+	if barrier != nil {
+		barrier()
 	}
 
 	baseStore, err := rm.createBaseStore(options)
