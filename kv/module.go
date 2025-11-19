@@ -107,8 +107,11 @@ func (rm *RootModule) getOrCreateStore(options Options) (store.Store, bool, erro
 	}
 
 	testOpenKVStoreBarrierMu.RLock()
+
 	barrier := testOpenKVStoreBarrier
+
 	testOpenKVStoreBarrierMu.RUnlock()
+
 	if barrier != nil {
 		barrier()
 	}

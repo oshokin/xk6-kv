@@ -37,6 +37,7 @@ func TestOpenKvConcurrentInitializationSharesStore(t *testing.T) {
 	)
 
 	testOpenKVStoreBarrierMu.Lock()
+
 	testOpenKVStoreBarrier = func() {
 		if enterCount.Add(1) != 1 {
 			return
@@ -45,11 +46,14 @@ func TestOpenKvConcurrentInitializationSharesStore(t *testing.T) {
 		close(firstEntered)
 		<-firstRelease
 	}
+
 	testOpenKVStoreBarrierMu.Unlock()
 
 	defer func() {
 		testOpenKVStoreBarrierMu.Lock()
+
 		testOpenKVStoreBarrier = nil
+
 		testOpenKVStoreBarrierMu.Unlock()
 	}()
 
