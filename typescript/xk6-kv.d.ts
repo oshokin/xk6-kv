@@ -120,6 +120,68 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Options for backing up a snapshot.
+   */
+  export interface BackupOptions {
+    /**
+     * Destination path for the Bolt snapshot file.
+     * Required unless you intentionally want to overwrite the backend's live Bolt file.
+     */
+    fileName?: string;
+
+    /**
+     * When true, allow writes to proceed during backup (best-effort consistency).
+     * When false (default), writes are blocked for strict point-in-time consistency.
+     */
+    allowConcurrentWrites?: boolean;
+  }
+
+  /**
+   * Summary returned by backup().
+   */
+  export interface BackupSummary {
+    /** Number of entries captured in the snapshot. */
+    totalEntries: number;
+    /** On-disk size of the snapshot file in bytes. */
+    bytesWritten: number;
+    /** True when AllowConcurrentWrites was enabled (best-effort snapshot). */
+    bestEffort: boolean;
+    /** Warning message describing best-effort semantics (present only when bestEffort=true). */
+    warning?: string;
+  }
+
+  /**
+   * Options for restoring a snapshot.
+   */
+  export interface RestoreOptions {
+    /**
+     * Path to the Bolt snapshot file produced by backup().
+     * Required unless you intentionally want to restore from the backend's live Bolt file.
+     */
+    fileName?: string;
+
+    /**
+     * Maximum number of entries allowed during import.
+     * Use to guard against unexpected snapshot sizes. <= 0 disables the guard.
+     */
+    maxEntries?: number;
+
+    /**
+     * Maximum total key/value payload (bytes) allowed during import.
+     * <= 0 disables the guard.
+     */
+    maxBytes?: number;
+  }
+
+  /**
+   * Summary returned by restore().
+   */
+  export interface RestoreSummary {
+    /** Number of entries hydrated from the snapshot. */
+    totalEntries: number;
+  }
+
+  /**
    * A single key-value entry.
    */
   export interface Entry {
@@ -494,6 +556,27 @@ declare module 'k6/x/kv' {
      * ```
      */
     rebuildKeyList(): Promise<boolean>;
+
+    // ==================== Snapshot Operations ====================
+
+    /**
+     * Streams the current store contents into a BoltDB snapshot on disk.
+     * When the disk backend is asked to back up to its own DB path the call
+     * succeeds but only returns metadata (no copy is produced).
+     *
+     * @param options - Destination path and concurrency mode.
+     * @returns Promise that resolves to snapshot metadata.
+     */
+    backup(options?: BackupOptions): Promise<BackupSummary>;
+
+    /**
+     * Replaces the store contents with entries from a snapshot file created via backup().
+     * Restoring from the disk backend's live DB path is treated as a no-op summary.
+     *
+     * @param options - Source snapshot path and optional safety limits.
+     * @returns Promise that resolves to the number of entries imported.
+     */
+    restore(options?: RestoreOptions): Promise<RestoreSummary>;
 
     // ==================== Lifecycle ====================
 

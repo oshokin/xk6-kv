@@ -437,6 +437,69 @@ func (k *KV) RebuildKeyList() *sobek.Promise {
 	)
 }
 
+// Backup streams the entire dataset into a BoltDB snapshot file.
+// Options allow overriding the destination path and enabling best-effort mode.
+// Backup creates a point-in-time snapshot of the KV store and writes it to disk.
+// Returns a Promise that resolves to a backup summary with operation metrics.
+// The summary uses camelCase field names for JavaScript convention compatibility.
+func (k *KV) Backup(options sobek.Value) *sobek.Promise {
+	backupOptions := ImportBackupOptions(k.vu.Runtime(), options)
+
+	return k.runAsyncWithStore(
+		func(s store.Store) (any, error) {
+			storeSummary, err := s.Backup(&store.BackupOptions{
+				FileName:              backupOptions.FileName,
+				AllowConcurrentWrites: backupOptions.AllowConcurrentWrites,
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			// Convert to map with camelCase keys for JavaScript.
+			// Sobek doesn't reliably respect JSON tags, so we use explicit map conversion.
+			return map[string]any{
+				"totalEntries": storeSummary.TotalEntries,
+				"bytesWritten": storeSummary.BytesWritten,
+				"bestEffort":   storeSummary.BestEffort,
+				"warning":      storeSummary.Warning,
+			}, nil
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
+}
+
+// Restore replaces the current dataset with a snapshot.
+// Restore loads a previously created snapshot back into the KV store.
+// Returns a Promise that resolves to a restore summary with operation metrics.
+// The summary uses camelCase field names for JavaScript convention compatibility.
+func (k *KV) Restore(options sobek.Value) *sobek.Promise {
+	restoreOptions := ImportRestoreOptions(k.vu.Runtime(), options)
+
+	return k.runAsyncWithStore(
+		func(s store.Store) (any, error) {
+			storeSummary, err := s.Restore(&store.RestoreOptions{
+				FileName:   restoreOptions.FileName,
+				MaxEntries: restoreOptions.MaxEntries,
+				MaxBytes:   restoreOptions.MaxBytes,
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			// Convert to map with camelCase keys for JavaScript.
+			// Sobek doesn't reliably respect JSON tags, so we use explicit map conversion.
+			return map[string]any{
+				"totalEntries": storeSummary.TotalEntries,
+			}, nil
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
+}
+
 // ListEntry is the JavaScript-facing representation of a key-value pair returned by List().
 type ListEntry struct {
 	// Key is the entry key (List results are lexicographically ordered by this).
@@ -572,6 +635,67 @@ func ImportRandomKeyOptions(rt *sobek.Runtime, options sobek.Value) RandomKeyOpt
 	return randomKeyOptions
 }
 
+// BackupOptions controls kv.backup().
+type BackupOptions struct {
+	FileName              string `json:"fileName"`
+	AllowConcurrentWrites bool   `json:"allowConcurrentWrites"`
+}
+
+// ImportBackupOptions converts JS values into BackupOptions.
+func ImportBackupOptions(rt *sobek.Runtime, options sobek.Value) BackupOptions {
+	backupOptions := BackupOptions{}
+	if common.IsNullish(options) {
+		return backupOptions
+	}
+
+	optionsObj := options.ToObject(rt)
+	backupOptions.FileName = optionsObj.Get("fileName").String()
+
+	allowValue := optionsObj.Get("allowConcurrentWrites")
+	if allowValue != nil {
+		var allow bool
+		if err := rt.ExportTo(allowValue, &allow); err == nil {
+			backupOptions.AllowConcurrentWrites = allow
+		}
+	}
+
+	return backupOptions
+}
+
+// RestoreOptions controls kv.restore().
+type RestoreOptions struct {
+	FileName   string `json:"fileName"`
+	MaxEntries int    `json:"maxEntries"`
+	MaxBytes   int64  `json:"maxBytes"`
+}
+
+// ImportRestoreOptions converts JS values into RestoreOptions.
+func ImportRestoreOptions(rt *sobek.Runtime, options sobek.Value) RestoreOptions {
+	restoreOptions := RestoreOptions{}
+	if common.IsNullish(options) {
+		return restoreOptions
+	}
+
+	optionsObj := options.ToObject(rt)
+	restoreOptions.FileName = optionsObj.Get("fileName").String()
+
+	if maxEntriesValue := optionsObj.Get("maxEntries"); maxEntriesValue != nil {
+		var parsedValue int64
+		if err := rt.ExportTo(maxEntriesValue, &parsedValue); err == nil {
+			restoreOptions.MaxEntries = int(parsedValue)
+		}
+	}
+
+	if maxBytesValue := optionsObj.Get("maxBytes"); maxBytesValue != nil {
+		var parsedValue int64
+		if err := rt.ExportTo(maxBytesValue, &parsedValue); err == nil {
+			restoreOptions.MaxBytes = parsedValue
+		}
+	}
+
+	return restoreOptions
+}
+
 // databaseNotOpenError produces a consistent error when the backing store is nil.
 func (k *KV) databaseNotOpenError() error {
 	return NewError(DatabaseNotOpenError, "database is not open")
@@ -618,7 +742,7 @@ func (k *KV) runAsyncWithStore(
 		goResult, err := operation(k.store)
 		if err != nil {
 			runOnEventLoop(func() error {
-				return reject(err)
+				return reject(classifyError(err))
 			})
 
 			return

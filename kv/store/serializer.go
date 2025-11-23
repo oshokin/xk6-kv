@@ -29,7 +29,7 @@ func NewJSONSerializer() *JSONSerializer {
 func (s *JSONSerializer) Serialize(value any) ([]byte, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
-		return nil, fmt.Errorf("unable to serialize value to JSON: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrSerializerEncodeFailed, err)
 	}
 
 	return data, nil
@@ -45,7 +45,7 @@ func (s *JSONSerializer) Deserialize(data []byte) (any, error) {
 
 	var value any
 	if err = json.Unmarshal(data, &value); err != nil {
-		return nil, fmt.Errorf("unable to deserialize JSON value: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrSerializerDecodeFailed, err)
 	}
 
 	return value, nil
@@ -64,13 +64,16 @@ func NewStringSerializer() *StringSerializer {
 }
 
 // Serialize converts a value to a string and then to bytes.
+// Strings are converted directly; other types use fmt.Sprintf-style formatting.
+// This allows storing numbers, booleans, etc. as human-readable strings.
 func (s *StringSerializer) Serialize(value any) ([]byte, error) {
-	// For string values, just convert to bytes
+	// Fast path for strings: direct byte conversion without formatting overhead.
 	if str, ok := value.(string); ok {
 		return []byte(str), nil
 	}
 
-	// For other values, try to convert to string.
+	// Fallback for non-strings: use %v formatting (e.g., numbers, booleans).
+	// fmt.Appendf is allocation-efficient compared to fmt.Sprintf.
 	return fmt.Appendf(nil, "%v", value), nil
 }
 

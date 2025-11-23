@@ -45,7 +45,7 @@ func (s *SerializedStore) Set(key string, value any) error {
 	// Serialize the value.
 	serializedValue, err := s.serializer.Serialize(value)
 	if err != nil {
-		return fmt.Errorf("failed to serialize value: %w", err)
+		return fmt.Errorf("%w: %w", ErrSerializerEncodeFailed, err)
 	}
 
 	// Store the serialized value.
@@ -64,7 +64,7 @@ func (s *SerializedStore) IncrementBy(key string, delta int64) (int64, error) {
 func (s *SerializedStore) GetOrSet(key string, value any) (any, bool, error) {
 	serializedValue, err := s.serializer.Serialize(value)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to serialize value: %w", err)
+		return nil, false, fmt.Errorf("%w: %w", ErrSerializerEncodeFailed, err)
 	}
 
 	rawValue, loaded, err := s.store.GetOrSet(key, serializedValue)
@@ -84,7 +84,7 @@ func (s *SerializedStore) GetOrSet(key string, value any) (any, bool, error) {
 func (s *SerializedStore) Swap(key string, value any) (any, bool, error) {
 	serializedValue, err := s.serializer.Serialize(value)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to serialize value: %w", err)
+		return nil, false, fmt.Errorf("%w: %w", ErrSerializerEncodeFailed, err)
 	}
 
 	prevRaw, loaded, err := s.store.Swap(key, serializedValue)
@@ -207,6 +207,16 @@ func (s *SerializedStore) RebuildKeyList() error {
 	return s.store.RebuildKeyList()
 }
 
+// Backup streams the underlying store contents into a BoltDB snapshot.
+func (s *SerializedStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
+	return s.store.Backup(opts)
+}
+
+// Restore replaces the underlying store contents with a previously exported snapshot.
+func (s *SerializedStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
+	return s.store.Restore(opts)
+}
+
 // Close forwards the close operation to the underlying store (if it has resources to release).
 // Memory stores typically implement this as a no-op.
 func (s *SerializedStore) Close() error {
@@ -252,7 +262,7 @@ func (s *SerializedStore) deserializeEntries(rawEntries []Entry) ([]Entry, error
 	for i, e := range rawEntries {
 		value, err := s.deserializeValue(e.Value)
 		if err != nil {
-			return nil, fmt.Errorf("deserialize value for key %s: %w", e.Key, err)
+			return nil, fmt.Errorf("%w: key %s: %w", ErrSerializerDecodeFailed, e.Key, err)
 		}
 
 		entries[i] = Entry{

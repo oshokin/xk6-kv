@@ -91,6 +91,8 @@ func (rm *RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
 
 // getOrCreateStore creates a new store if it doesn't exist,
 // or returns the existing store if the options are the same.
+// Returns (store, isNewlyCreated, error).
+// The isNewlyCreated flag helps callers know whether to clean up on failure.
 func (rm *RootModule) getOrCreateStore(options Options) (store.Store, bool, error) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
@@ -100,12 +102,16 @@ func (rm *RootModule) getOrCreateStore(options Options) (store.Store, bool, erro
 			return rm.store, false, nil
 		}
 
+		// Reject re-configuration attempts to prevent confusion and data loss.
+		// Users must use consistent options across all VUs in a test.
 		return nil, false, fmt.Errorf(
 			"openKv already initialized with backend=%q serialization=%q trackKeys=%t path=%q",
 			rm.opts.Backend, rm.opts.Serialization, rm.opts.TrackKeys, rm.opts.Path,
 		)
 	}
 
+	// Test hook: allows test code to synchronize concurrent OpenKv calls.
+	// Production code sees nil and skips this entirely.
 	testOpenKVStoreBarrierMu.RLock()
 
 	barrier := testOpenKVStoreBarrier
@@ -161,15 +167,24 @@ func (rm *RootModule) createSerializer(options Options) (store.Serializer, error
 	}
 }
 
-// clearStoreOnFailure clears the store if it was newly created and failed to initialize.
+// clearStoreOnFailure resets the store reference if initialization failed.
+// This prevents partially-initialized stores from being reused by subsequent calls.
+// Only applicable when this goroutine created the store (isNewlyCreated == true).
+//
+// Critical safety mechanism: if Open() fails after we set rm.store but before
+// the store is fully usable, we must nil it out so the next OpenKv() call
+// doesn't return a broken store to another VU.
 func (rm *RootModule) clearStoreOnFailure(candidate store.Store, isNewlyCreated bool) {
 	if !isNewlyCreated {
+		// Another goroutine created the store: don't touch it.
 		return
 	}
 
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
+	// Double-check we're clearing the right store (defensive against races).
+	// Only nil it out if it still points to our candidate.
 	if rm.store == candidate {
 		rm.store = nil
 	}
@@ -259,7 +274,7 @@ func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
 	}
 
 	if err := vu.Runtime().ExportTo(options, &opts); err != nil {
-		return opts, fmt.Errorf("unable to parse kv options: %w", err)
+		return opts, fmt.Errorf("failed to parse kv options: %w", err)
 	}
 
 	// Validate backend.

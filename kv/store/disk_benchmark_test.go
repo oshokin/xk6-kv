@@ -9,8 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newBenchmarkDiskStore creates a temporary on-disk store, binds it to a temp file,
-// and registers cleanup. It returns the initialized store and the temp file path.
+// newBenchmarkDiskStore creates a temporary on-disk store,
+// binds it to a temporary file, and registers cleanup.
+// It returns the initialized store and the temporary file path.
 func newBenchmarkDiskStore(b *testing.B, trackKeys bool, namePattern string) *DiskStore {
 	b.Helper()
 

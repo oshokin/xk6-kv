@@ -24,8 +24,9 @@ go.work
 /k6
 /k6.exe
 
-# The default on-disk database file used by the disk backend in this repo.
-.k6.kv
+
+# Ignore BoltDB and KV files.
+*.kv
 
 # Local tool/cache/bin directory.
 /bin/

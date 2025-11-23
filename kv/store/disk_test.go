@@ -16,8 +16,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newTestDiskStore creates a temporary on-disk store bound to a provided path (or a temp file when empty),
-// optionally opens it, and registers cleanup. It returns the initialized store.
+// newTestDiskStore creates a temporary on-disk store bound to a provided path
+// (or a temporary file when empty), optionally opens it, and registers cleanup.
+// It returns the initialized store.
 func newTestDiskStore(t *testing.T, trackKeys bool, path string, autoOpen bool) *DiskStore {
 	t.Helper()
 
@@ -88,8 +89,8 @@ func TestNewDiskStore_PathHandling(t *testing.T) {
 	t.Run("directory path", func(t *testing.T) {
 		t.Parallel()
 
-		dir := t.TempDir()
-		store, err := NewDiskStore(true, dir)
+		tempDir := t.TempDir()
+		store, err := NewDiskStore(true, tempDir)
 		require.ErrorContains(t, err, "is a directory", "directories must be rejected during validation")
 		assert.Nil(t, store, "store must not be created when path is a directory")
 	})
@@ -97,17 +98,17 @@ func TestNewDiskStore_PathHandling(t *testing.T) {
 	t.Run("missing parent directory", func(t *testing.T) {
 		t.Parallel()
 
-		temporaryDirectory := t.TempDir()
-		missingDirectory := filepath.Join(temporaryDirectory, "missing", "store.db")
+		tempDir := t.TempDir()
+		missingDir := filepath.Join(tempDir, "missing", "store.db")
 
-		store := newTestDiskStore(t, true, missingDirectory, false)
+		store := newTestDiskStore(t, true, missingDir, false)
 		require.NotNil(t, store, "NewDiskStore() must not return nil")
 
 		err := store.Open()
 		require.NoError(t, err, "Open() must create missing parent directories")
-		assert.Equal(t, missingDirectory, store.path, "path must remain unchanged (no fallback to default)")
+		assert.Equal(t, missingDir, store.path, "path must remain unchanged (no fallback to default)")
 
-		parentDir := filepath.Dir(missingDirectory)
+		parentDir := filepath.Dir(missingDir)
 		info, statErr := os.Stat(parentDir)
 		require.NoError(t, statErr, "parent directory must exist after Open()")
 		assert.True(t, info.IsDir(), "parent directory must be a directory")

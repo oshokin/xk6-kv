@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,33 +25,44 @@ import (
 //   - When trackKeys is enabled, we maintain keysList/keysMap and an OSTree
 //     to keep RandomKey() fast and consistent under concurrent edits.
 type DiskStore struct {
-	path     string
-	handle   *bolt.DB
-	bucket   []byte
-	opened   atomic.Bool
+	// path is the filesystem path to the BoltDB file.
+	path string
+	// handle is the underlying BoltDB handle.
+	handle *bolt.DB
+	// bucket is the internal BoltDB bucket name.
+	bucket []byte
+	// trackKeys is a flag to track whether in-memory key tracking is enabled.
+	trackKeys bool
+	// keysList is a slice of all keys for O(1) random access by index.
+	keysList []string
+	// keysMap is a map from key to its index in keysList for O(1) deletion.
+	keysMap map[string]int
+	// keysLock is a mutex to protect concurrent access to keysList/keysMap/ost.
+	keysLock sync.RWMutex
+	// ost is an order-statistics index (lexicographic; used for prefix random).
+	ost *OSTree
+	// opened is a flag to track whether the store is open.
+	opened atomic.Bool
+	// refCount is a counter to track the number of openers.
 	refCount atomic.Int64
-	lock     sync.Mutex // Serializes open/close transitions
-
-	// In-memory key tracking (enabled when trackKeys == true).
-	// This allows:
-	//   - O(1) random key when no prefix.
-	//   - O(log n) random key with a prefix via the OSTree index.
-	trackKeys bool           // Whether in-memory key tracking is enabled
-	keysList  []string       // Slice of all keys for O(1) random access by index
-	keysMap   map[string]int // Maps key to its index in keysList for O(1) deletion
-	keysLock  sync.RWMutex   // Mutex to protect concurrent access to keysList/keysMap/ost
-	ost       *OSTree        // Order-statistics index (lexicographic; used for prefix random)
+	// lock is a mutex to serialize open/close transitions.
+	lock sync.Mutex
 }
 
 const (
 	// DefaultDiskStorePath is the default filesystem path to the BoltDB file.
 	DefaultDiskStorePath = ".k6.kv"
 
-	// DefaultKvBucket is the default BoltDB bucket name we use inside the file.
-	DefaultKvBucket = "k6"
+	// DefaultBoltDBBucket is the default BoltDB bucket name we use inside the file.
+	DefaultBoltDBBucket = "k6"
 )
 
-// NewDiskStore constructs a DiskStore using the provided filesystem path and DefaultKvBucket.
+// defaultBoltDBBucketBytes is the default bucket name for the BoltDB file.
+//
+//nolint:gochecknoglobals // readonly constant is used for default bucket name.
+var defaultBoltDBBucketBytes = []byte(DefaultBoltDBBucket)
+
+// NewDiskStore constructs a DiskStore using the provided filesystem path and DefaultBoltDBBucket.
 // When path is empty, DefaultDiskStorePath is used to preserve backwards compatibility.
 // If trackKeys is true, an in-memory index is initialized to accelerate RandomKey().
 func NewDiskStore(trackKeys bool, path string) (*DiskStore, error) {
@@ -85,7 +97,7 @@ func ResolveDiskPath(dbPath string) (string, error) {
 	if trimmedPath == "" {
 		defaultPath, err := filepath.Abs(DefaultDiskStorePath)
 		if err != nil {
-			return "", fmt.Errorf("unable to resolve default disk path %q: %w", DefaultDiskStorePath, err)
+			return "", fmt.Errorf("%w: default path %q: %w", ErrDiskPathResolveFailed, DefaultDiskStorePath, err)
 		}
 
 		return defaultPath, nil
@@ -95,7 +107,7 @@ func ResolveDiskPath(dbPath string) (string, error) {
 
 	absPath, err := filepath.Abs(cleanedPath)
 	if err != nil {
-		return "", fmt.Errorf("unable to resolve disk path %q: %w", cleanedPath, err)
+		return "", fmt.Errorf("%w: path %q: %w", ErrDiskPathResolveFailed, cleanedPath, err)
 	}
 
 	info, err := os.Stat(absPath)
@@ -109,7 +121,7 @@ func ResolveDiskPath(dbPath string) (string, error) {
 	case errors.Is(err, os.ErrNotExist):
 		return absPath, nil
 	default:
-		return absPath, fmt.Errorf("disk store path %q validation failed: %w", absPath, err)
+		return absPath, fmt.Errorf("%w: %q: %w", ErrDiskPathResolveFailed, absPath, err)
 	}
 }
 
@@ -130,20 +142,20 @@ func (s *DiskStore) Open() error {
 	// time and the actual open call.
 	dirPath := filepath.Dir(s.path)
 	if err := os.MkdirAll(dirPath, 0o750); err != nil {
-		return fmt.Errorf("failed to create directory %q for disk store: %w", dirPath, err)
+		return fmt.Errorf("%w: %q: %w", ErrDiskDirectoryCreateFailed, dirPath, err)
 	}
 
 	// Open the database file.
 	handler, err := bolt.Open(s.path, 0o600, nil)
 	if err != nil {
-		return fmt.Errorf("failed to open disk store at %q: %w", s.path, err)
+		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	// Create the internal bucket if it doesn't exist.
 	err = handler.Update(func(tx *bolt.Tx) error {
-		_, bucketErr := tx.CreateBucketIfNotExists([]byte(DefaultKvBucket))
+		_, bucketErr := tx.CreateBucketIfNotExists(defaultBoltDBBucketBytes)
 		if bucketErr != nil {
-			return fmt.Errorf("failed to create internal bucket %q: %w", DefaultKvBucket, bucketErr)
+			return fmt.Errorf("%w: internal bucket %q: %w", ErrBoltDBBucketCreateFailed, DefaultBoltDBBucket, bucketErr)
 		}
 
 		return nil
@@ -156,7 +168,7 @@ func (s *DiskStore) Open() error {
 
 	// Set the handle and bucket.
 	s.handle = handler
-	s.bucket = []byte(DefaultKvBucket)
+	s.bucket = defaultBoltDBBucketBytes
 
 	// Rebuild the key list if tracking is enabled.
 	if s.trackKeys {
@@ -167,7 +179,7 @@ func (s *DiskStore) Open() error {
 		if rebuildErr != nil {
 			_ = handler.Close()
 
-			return fmt.Errorf("failed to initialize key list: %w", rebuildErr)
+			return fmt.Errorf("%w: %w", ErrDiskStoreRebuildKeysFailed, rebuildErr)
 		}
 	}
 
@@ -182,7 +194,7 @@ func (s *DiskStore) Open() error {
 func (s *DiskStore) Get(key string) (any, error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return nil, fmt.Errorf("failed to open disk store: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	var value []byte
@@ -196,13 +208,13 @@ func (s *DiskStore) Get(key string) (any, error) {
 
 		value = bucket.Get([]byte(key))
 		if value != nil {
-			value = cloneBytes(value)
+			value = slices.Clone(value)
 		}
 
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("unable to get value from disk store: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreReadFailed, err)
 	}
 
 	if value == nil {
@@ -218,7 +230,7 @@ func (s *DiskStore) Get(key string) (any, error) {
 func (s *DiskStore) Set(key string, value any) error {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return fmt.Errorf("failed to open disk store: %w", err)
+		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	// Convert value to bytes if it's not already.
@@ -231,6 +243,7 @@ func (s *DiskStore) Set(key string, value any) error {
 
 	if s.trackKeys {
 		// Lightweight existence check to decide whether to update indexes later.
+		// We check before the transaction to avoid holding keysLock during disk I/O.
 		s.keysLock.RLock()
 		_, existed = s.keysMap[key]
 		s.keysLock.RUnlock()
@@ -240,13 +253,13 @@ func (s *DiskStore) Set(key string, value any) error {
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return errors.New("bucket not found")
+			return ErrBucketNotFound
 		}
 
 		return bucket.Put([]byte(key), valueBytes)
 	})
 	if err != nil {
-		return fmt.Errorf("unable to insert value into disk store: %w", err)
+		return fmt.Errorf("%w: %w", ErrDiskStoreWriteFailed, err)
 	}
 
 	// Update indexes only if the key was new.
@@ -265,7 +278,7 @@ func (s *DiskStore) Set(key string, value any) error {
 func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return 0, fmt.Errorf("failed to open disk store: %w", err)
+		return 0, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	var (
@@ -277,7 +290,7 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 	err := s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return errors.New("bucket not found")
+			return ErrBucketNotFound
 		}
 
 		// Get currentValue value.
@@ -291,7 +304,7 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 
 			parsedCurrentValue, err = strconv.ParseInt(string(currentValue), 10, 64)
 			if err != nil {
-				return fmt.Errorf("value at %q is not a valid integer: %w", key, err)
+				return fmt.Errorf("%w: key %q: %w", ErrValueParseFailed, key, err)
 			}
 		} else {
 			wasNew = true
@@ -304,7 +317,7 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 		return bucket.Put([]byte(key), []byte(strconv.FormatInt(parsedCurrentValue, 10)))
 	})
 	if err != nil {
-		return 0, fmt.Errorf("unable to increment value in disk store: %w", err)
+		return 0, fmt.Errorf("%w: %w", ErrDiskStoreIncrementFailed, err)
 	}
 
 	// Update tracking if this was a new key.
@@ -322,7 +335,7 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, err error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return nil, false, fmt.Errorf("failed to open disk store: %w", err)
+		return nil, false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	// Convert value to bytes if it's not already.
@@ -339,14 +352,14 @@ func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, er
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return errors.New("bucket not found")
+			return ErrBucketNotFound
 		}
 
 		// Check if key exists.
 		if got := bucket.Get([]byte(key)); got != nil {
 			exists = true
 
-			result = append([]byte(nil), got...)
+			result = slices.Clone(got)
 
 			return nil
 		}
@@ -355,7 +368,7 @@ func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, er
 		return bucket.Put([]byte(key), valueBytes)
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("unable to get or set value in disk store: %w", err)
+		return nil, false, fmt.Errorf("%w: %w", ErrDiskStoreGetOrSetFailed, err)
 	}
 
 	if exists {
@@ -376,7 +389,7 @@ func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, er
 func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return nil, false, fmt.Errorf("failed to open disk store: %w", err)
+		return nil, false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	// Convert value to bytes if it's not already.
@@ -393,20 +406,20 @@ func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err 
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return errors.New("bucket not found")
+			return ErrBucketNotFound
 		}
 
 		// Get previous value (copy for safety).
 		if current := bucket.Get([]byte(key)); current != nil {
 			existed = true
 
-			prev = append([]byte(nil), current...)
+			prev = slices.Clone(current)
 		}
 
 		return bucket.Put([]byte(key), valueBytes)
 	})
 	if err != nil {
-		return nil, false, fmt.Errorf("unable to swap value in disk store: %w", err)
+		return nil, false, fmt.Errorf("%w: %w", ErrDiskStoreSwapFailed, err)
 	}
 
 	// Update tracking if this is a new key.
@@ -428,7 +441,7 @@ func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err 
 func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool, error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return false, fmt.Errorf("failed to open disk store: %w", err)
+		return false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	expectAbsent := oldValue == nil
@@ -459,7 +472,7 @@ func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return errors.New("bucket not found")
+			return ErrBucketNotFound
 		}
 
 		// Get current value.
@@ -484,7 +497,7 @@ func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool
 		return bucket.Put([]byte(key), newBytes)
 	})
 	if err != nil {
-		return false, fmt.Errorf("unable to compare and swap in disk store: %w", err)
+		return false, fmt.Errorf("%w: %w", ErrDiskStoreCompareSwapFailed, err)
 	}
 
 	// Indexes only change when a new key is inserted via expectAbsent semantics.
@@ -503,7 +516,7 @@ func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool
 func (s *DiskStore) Delete(key string) error {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return fmt.Errorf("failed to open disk store: %w", err)
+		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	// Remove from BoltDB.
@@ -516,7 +529,7 @@ func (s *DiskStore) Delete(key string) error {
 		return bucket.Delete([]byte(key))
 	})
 	if err != nil {
-		return fmt.Errorf("unable to delete value from disk store: %w", err)
+		return fmt.Errorf("%w: %w", ErrDiskStoreDeleteFailed, err)
 	}
 
 	// If tracking is enabled, remove the key from the in-memory structures.
@@ -535,17 +548,20 @@ func (s *DiskStore) Delete(key string) error {
 func (s *DiskStore) Exists(key string) (bool, error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return false, fmt.Errorf("failed to open disk store: %w", err)
+		return false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
+	// When tracking is enabled, check in-memory index first for fast-path.
 	if s.trackKeys {
 		s.keysLock.RLock()
 		_, exists := s.keysMap[key]
 		s.keysLock.RUnlock()
 
+		// Trust positive hits from index (key definitely exists).
 		if exists {
 			return true, nil
 		}
+		// Fall through to disk check for negative results to handle index drift.
 	}
 
 	var exists bool
@@ -561,7 +577,7 @@ func (s *DiskStore) Exists(key string) (bool, error) {
 		return nil
 	})
 	if err != nil {
-		return exists, fmt.Errorf("unable to check if key exists in disk store: %w", err)
+		return exists, fmt.Errorf("%w: %w", ErrDiskStoreExistsFailed, err)
 	}
 
 	return exists, nil
@@ -571,7 +587,7 @@ func (s *DiskStore) Exists(key string) (bool, error) {
 func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return false, fmt.Errorf("failed to open disk store: %w", err)
+		return false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	var deleted bool
@@ -579,7 +595,7 @@ func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 	err := s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return errors.New("bucket not found")
+			return ErrBucketNotFound
 		}
 
 		// Check if key exists.
@@ -598,7 +614,7 @@ func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 		return nil
 	})
 	if err != nil {
-		return false, fmt.Errorf("unable to delete if exists in disk store: %w", err)
+		return false, fmt.Errorf("%w: %w", ErrDiskStoreDeleteIfExistsFailed, err)
 	}
 
 	// Update tracking structures if deleted.
@@ -616,7 +632,7 @@ func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 func (s *DiskStore) CompareAndDelete(key string, oldValue any) (bool, error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return false, fmt.Errorf("failed to open disk store: %w", err)
+		return false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	oldBytes, err := normalizeToBytes(oldValue)
@@ -629,7 +645,7 @@ func (s *DiskStore) CompareAndDelete(key string, oldValue any) (bool, error) {
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return errors.New("bucket not found")
+			return ErrBucketNotFound
 		}
 
 		// Get current value.
@@ -653,7 +669,7 @@ func (s *DiskStore) CompareAndDelete(key string, oldValue any) (bool, error) {
 		return nil
 	})
 	if err != nil {
-		return false, fmt.Errorf("unable to compare and delete in disk store: %w", err)
+		return false, fmt.Errorf("%w: %w", ErrDiskStoreCompareDeleteFailed, err)
 	}
 
 	// Update tracking structures if deleted.
@@ -671,26 +687,26 @@ func (s *DiskStore) CompareAndDelete(key string, oldValue any) (bool, error) {
 func (s *DiskStore) Clear() error {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return fmt.Errorf("failed to open disk store: %w", err)
+		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	err := s.handle.Update(func(tx *bolt.Tx) error {
 		// Drop whole bucket.
 		err := tx.DeleteBucket(s.bucket)
 		if err != nil {
-			return fmt.Errorf("failed to delete bucket %s: %w", s.bucket, err)
+			return fmt.Errorf("%w: bucket %s: %w", ErrDiskStoreDeleteFailed, s.bucket, err)
 		}
 
 		// Recreate it empty.
 		_, err = tx.CreateBucket(s.bucket)
 		if err != nil {
-			return fmt.Errorf("failed to create bucket %s: %w", s.bucket, err)
+			return fmt.Errorf("%w: bucket %s: %w", ErrDiskStoreWriteFailed, s.bucket, err)
 		}
 
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("unable to clear disk store: %w", err)
+		return fmt.Errorf("%w: %w", ErrDiskStoreClearFailed, err)
 	}
 
 	// Reset the in-memory key tracking structures.
@@ -714,7 +730,7 @@ func (s *DiskStore) Clear() error {
 func (s *DiskStore) Size() (int64, error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return 0, fmt.Errorf("failed to open disk store: %w", err)
+		return 0, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	var size int64
@@ -730,7 +746,7 @@ func (s *DiskStore) Size() (int64, error) {
 		return nil
 	})
 	if err != nil {
-		return 0, fmt.Errorf("unable to get size of disk store: %w", err)
+		return 0, fmt.Errorf("%w: %w", ErrDiskStoreSizeFailed, err)
 	}
 
 	return size, nil
@@ -744,7 +760,7 @@ func (s *DiskStore) Size() (int64, error) {
 func (s *DiskStore) Scan(prefix, afterKey string, limit int64) (*ScanPage, error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
-		return nil, fmt.Errorf("failed to open disk store: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	page := &ScanPage{
@@ -760,7 +776,7 @@ func (s *DiskStore) Scan(prefix, afterKey string, limit int64) (*ScanPage, error
 		return s.fillDiskScanPage(page, bucket.Cursor(), prefix, afterKey, limit)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("unable to scan entries from disk store: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreScanFailed, err)
 	}
 
 	return page, nil
@@ -780,7 +796,6 @@ func (s *DiskStore) List(prefix string, limit int64) ([]Entry, error) {
 
 // RandomKey returns a random key, optionally filtered by prefix.
 // Empty store or no matching prefix => "", nil.
-//
 // Paths:
 //   - trackKeys = true:
 //     prefix==""  -> O(1) from keysList.
@@ -806,14 +821,14 @@ func (s *DiskStore) RebuildKeyList() error {
 	}
 
 	if err := s.ensureOpen(); err != nil {
-		return fmt.Errorf("failed to open disk store: %w", err)
+		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	s.keysLock.Lock()
 	defer s.keysLock.Unlock()
 
 	if err := s.rebuildKeyListLocked(); err != nil {
-		return fmt.Errorf("unable to rebuild keys from disk: %w", err)
+		return fmt.Errorf("%w: %w", ErrDiskStoreRebuildKeysFailed, err)
 	}
 
 	return nil
@@ -859,11 +874,10 @@ func (s *DiskStore) ensureOpen() error {
 		return nil
 	}
 
-	return errors.New("disk store is closed; call Open() before performing operations")
+	return ErrDiskStoreClosed
 }
 
 // addKeyIndexLocked inserts key into in-memory indexes (O(1)).
-//
 // Precondition: caller holds keysLock.
 func (s *DiskStore) addKeyIndexLocked(key string) {
 	// Check if key exists.
@@ -882,7 +896,6 @@ func (s *DiskStore) addKeyIndexLocked(key string) {
 }
 
 // removeKeyIndexLocked removes key from in-memory indexes using swap-delete.
-//
 // Precondition: caller holds keysLock.
 func (s *DiskStore) removeKeyIndexLocked(key string) {
 	// Check if key exists.
@@ -891,16 +904,17 @@ func (s *DiskStore) removeKeyIndexLocked(key string) {
 		return
 	}
 
-	// Swap with last element for O(1) deletion.
+	// Swap-with-last deletion to avoid shifting array elements (O(1) instead of O(n)).
 	lastIndex := len(s.keysList) - 1
 	if idx != lastIndex {
+		// Swap target with last element.
 		moved := s.keysList[lastIndex]
 
 		s.keysList[idx] = moved
 		s.keysMap[moved] = idx
 	}
 
-	// Remove last element.
+	// Truncate list and remove from map.
 	s.keysList = s.keysList[:lastIndex]
 	delete(s.keysMap, key)
 
@@ -937,7 +951,7 @@ func (s *DiskStore) fillDiskScanPage(page *ScanPage, cursor *bolt.Cursor, prefix
 		lastKey := string(k)
 		page.Entries = append(page.Entries, Entry{
 			Key:   lastKey,
-			Value: cloneBytes(v),
+			Value: slices.Clone(v),
 		})
 
 		if hasLimit && int64(len(page.Entries)) >= limit {
@@ -1000,7 +1014,7 @@ func (s *DiskStore) randomKeyWithTracking(prefix string) (string, error) {
 			return "", nil
 		}
 
-		return s.keysList[rand.IntN(len(s.keysList))], nil //nolint:gosec // math/rand/v2 is safe
+		return s.keysList[rand.IntN(len(s.keysList))], nil //nolint:gosec // math/rand/v2 is safe.
 	}
 
 	// Prefix form: consult OSTree index.
@@ -1008,17 +1022,19 @@ func (s *DiskStore) randomKeyWithTracking(prefix string) (string, error) {
 		return "", nil
 	}
 
+	// OSTree provides O(log n) range bounds for prefix.
 	l, r := s.ost.RangeBounds(prefix)
 	if r <= l {
 		return "", nil
 	}
 
-	idx := l + rand.IntN(r-l) //nolint:gosec // math/rand/v2 is safe
+	// Pick random index in range and retrieve Kth element.
+	idx := l + rand.IntN(r-l) //nolint:gosec // math/rand/v2 is safe.
 	if key, ok := s.ost.Kth(idx); ok {
 		return key, nil
 	}
 
-	// Extremely unlikely unless a concurrent delete races us; be user-friendly.
+	// Kth failed - extremely unlikely unless concurrent delete raced us.
 	return "", nil
 }
 
@@ -1069,7 +1085,7 @@ func (s *DiskStore) countKeys(prefix string) (int64, error) {
 		return nil
 	})
 	if err != nil {
-		return 0, fmt.Errorf("failed to count keys: %w", err)
+		return 0, fmt.Errorf("%w: %w", ErrDiskStoreCountFailed, err)
 	}
 
 	return count, nil
@@ -1112,7 +1128,7 @@ func (s *DiskStore) getKeyByIndex(prefix string, index int64) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to get key by index: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrDiskStoreRandomAccessFailed, err)
 	}
 
 	if !found {
@@ -1158,13 +1174,4 @@ func (s *DiskStore) rebuildKeyListLocked() error {
 	}
 
 	return nil
-}
-
-// cloneBytes returns a copy of the given byte slice.
-func cloneBytes(src []byte) []byte {
-	if src == nil {
-		return nil
-	}
-
-	return append([]byte(nil), src...)
 }

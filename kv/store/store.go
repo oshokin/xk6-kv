@@ -123,6 +123,22 @@ type Store interface {
 	// Implementations that do not maintain indexes MAY implement this as a no-op.
 	RebuildKeyList() error
 
+	// Backup writes the store contents to an on-disk snapshot (BoltDB file).
+	// MemoryStore streams data into a fresh BoltDB file, optionally allowing
+	// best-effort concurrency. DiskStore copies its underlying BoltDB file.
+	// When DiskStore is asked to back up to its own DB path, a fast-path summary
+	// is returned without copying (so callers can detect the noop).
+	// Returns a summary detailing entry counts and snapshot metadata.
+	Backup(opts *BackupOptions) (*BackupSummary, error)
+
+	// Restore replaces the current store contents with entries from a snapshot created by Backup().
+	// Implementations should treat this as destructive; the existing dataset is wiped before the
+	// snapshot contents are applied. DiskStore treats "restore from live DB path"
+	// as a noop summary so the caller can detect the mistake without destroying
+	// the running database.
+	// Returns a summary indicating how many entries were hydrated.
+	Restore(opts *RestoreOptions) (*RestoreSummary, error)
+
 	// Close releases any resources held by the store (file handles, caches,
 	// background workers, etc.). After Close returns, the Store should not be
 	// used. Close SHOULD be idempotent.

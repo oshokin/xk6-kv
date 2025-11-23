@@ -7,11 +7,16 @@ import (
 // ostNode is a node in a randomized BST (treap) that stores subtree sizes
 // so we can do order-statistics operations (rank/select).
 type ostNode struct {
-	key      string
-	priority int // Maintains max-heap property for BST structure
-	size     int // Subtree size including self
-	left     *ostNode
-	right    *ostNode
+	// key is the key of the node.
+	key string
+	// priority is the priority of the node.
+	priority int
+	// size is the size of the subtree including the node.
+	size int
+	// left is the left child of the node.
+	left *ostNode
+	// right is the right child of the node.
+	right *ostNode
 }
 
 // nodeSize gracefully handles nil nodes to avoid nil checks in recursive functions.
@@ -41,10 +46,9 @@ func rotateRight(n *ostNode) *ostNode {
 	n.left = l.right
 	l.right = n
 
-	// Original parent must be updated first.
+	// Update sizes bottom-up: child n first (now has fewer descendants),
+	// then parent l (gains n's original right subtree).
 	pull(n)
-
-	// Then new parent.
 	pull(l)
 
 	return l
@@ -57,24 +61,26 @@ func rotateLeft(n *ostNode) *ostNode {
 	n.right = r.left
 	r.left = n
 
-	// Update original parent (now child).
+	// Update sizes bottom-up: n loses its right subtree, r gains n as left child.
 	pull(n)
-
-	// Update new root.
 	pull(r)
 
 	return r
 }
 
 // insert recursively finds insertion point then bubbles up using rotations
-// to maintain treap properties. Returns new root of subtree.
+// to maintain treap properties (BST order + max-heap by priority).
+// Returns new root of subtree.
+//
+// The random priority ensures O(log n) expected height through probabilistic balancing.
 func insert(n *ostNode, key string, prio int) *ostNode {
 	if n == nil {
 		return &ostNode{key: key, priority: prio, size: 1}
 	}
 
 	if key == n.key {
-		// no duplicates - treat as idempotent operation.
+		// Key already exists: no duplicates allowed in this tree.
+		// Treat as idempotent: return existing node unchanged.
 		return n
 	}
 
@@ -82,6 +88,7 @@ func insert(n *ostNode, key string, prio int) *ostNode {
 		n.left = insert(n.left, key, prio)
 
 		// Fix heap property violation after recursive insertion.
+		// If newly inserted node has higher priority, rotate up.
 		if n.left.priority > n.priority {
 			n = rotateRight(n)
 		}
@@ -122,15 +129,16 @@ func deleteKey(n *ostNode, key string) *ostNode {
 			return n.left
 		}
 
-		// Two children: rotate higher priority child up until
-		// target becomes leaf (preserving treap properties).
+		// Two children: use rotations to sink the target node down to a leaf position
+		// while preserving the treap heap property (higher priority = closer to root).
+		// Choose rotation direction based on which child has higher priority.
 		if n.left.priority > n.right.priority {
 			n = rotateRight(n)
-			// Target moved right, delete from right subtree.
+			// After right rotation, target moved to right subtree.
 			n.right = deleteKey(n.right, key)
 		} else {
 			n = rotateLeft(n)
-			// Target moved left, delete from left subtree.
+			// After left rotation, target moved to left subtree.
 			n.left = deleteKey(n.left, key)
 		}
 	}
@@ -142,18 +150,24 @@ func deleteKey(n *ostNode, key string) *ostNode {
 }
 
 // rankLess counts keys < k by leveraging BST ordering
-// and stored subtree sizes for efficiency.
+// and stored subtree sizes for O(log n) efficiency.
+//
+// Key insight: at each node we can count entire subtrees in O(1)
+// rather than visiting every node individually.
 func rankLess(n *ostNode, k string) int {
 	if n == nil {
 		return 0
 	}
 
-	// When k is in left subtree: no need to count right subtree.
+	// When k <= n.key: target is in left subtree or equals n.key.
+	// We don't count n or the right subtree because they're >= k.
 	if k <= n.key {
 		return rankLess(n.left, k)
 	}
 
-	// When k is in right subtree: count left subtree + current node.
+	// When k > n.key: count everything in left subtree + n itself,
+	// then recurse into right subtree for additional matches.
+	// This avoids visiting nodes we know are < k.
 	return 1 + nodeSize(n.left) + rankLess(n.right, k)
 }
 
@@ -167,17 +181,22 @@ func kth(n *ostNode, k int) (string, bool) {
 	leftSize := nodeSize(n.left)
 
 	switch {
-	case k < leftSize: // Target is in left subtree
+	case k < leftSize:
+		// Target is in left subtree: delegate without adjustment.
 		return kth(n.left, k)
-	case k == leftSize: // Current node is exactly the kth
+	case k == leftSize:
+		// Current node is exactly the k-th in sorted order.
 		return n.key, true
-	default: // Target is in right subtree (adjust index)
+	default:
+		// Target is in right subtree: subtract left subtree size + current node
+		// to convert global index k into a right-subtree-local index.
 		return kth(n.right, k-leftSize-1)
 	}
 }
 
 // OSTree is an order-statistics tree with string keys (lexicographic order).
 type OSTree struct {
+	// root is the root node of the tree.
 	root *ostNode
 }
 
@@ -219,6 +238,14 @@ func (t *OSTree) Kth(k int) (string, bool) {
 
 // nextPrefix computes the lexicographic successor of a prefix
 // by incrementing the last byte with carry propagation.
+//
+// Examples:
+//
+//	"abc"     → "abd"      (simple increment)
+//	"ab\xFF"  → "ac"       (carry propagates left)
+//	"\xFF"    → ""         (all bytes maxed, no successor)
+//
+// Used to compute exclusive end bounds for prefix ranges.
 func nextPrefix(prefix string) string {
 	// Empty prefix has no natural successor.
 	if prefix == "" {
@@ -226,20 +253,22 @@ func nextPrefix(prefix string) string {
 	}
 
 	b := []byte(prefix)
+	// Iterate right-to-left, looking for a byte we can increment.
 	for i := len(b) - 1; i >= 0; i-- {
 		if b[i] == 0xFF {
-			// Cannot increment, propagate left.
+			// This byte is at max value: incrementing would overflow.
+			// Continue left to find a byte we can increment (carry propagation).
 			continue
 		}
 
-		// Increment first non-max byte.
+		// Found a byte < 0xFF: increment it and truncate everything after.
+		// Example: "abc" → "abd", "ab\xFF" → "ac"
 		b[i]++
 
-		// Truncate after incremented byte (lexicographic minimum).
 		return string(b[:i+1])
 	}
 
-	// All bytes 0xFF -> no upper bound.
+	// All bytes 0xFF -> no upper bound (matches everything lexicographically greater).
 	return ""
 }
 

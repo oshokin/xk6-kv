@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -23,6 +24,66 @@ func TestNewMemoryStore(t *testing.T) {
 	require.NotNil(t, store, "NewMemoryStore() must not return nil")
 	require.NotNil(t, store.container, "container map must be allocated")
 	assert.Empty(t, store.container, "new store must be empty")
+}
+
+// TestMemoryStore_BlockMutationsAPI verifies that blockMutations correctly blocks all
+// mutation operations with a custom error, and unblockMutations restores normal operation.
+func TestMemoryStore_BlockMutationsAPI(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(true)
+
+	require.NoError(t, store.blockMutations(errors.New("custom block")))
+
+	err := store.Set("k1", "v1")
+	require.EqualError(t, err, "custom block")
+
+	store.unblockMutations()
+	require.NoError(t, store.Set("k1", "v1"))
+
+	require.NoError(t, store.blockMutations(nil))
+
+	err = store.Set("k2", "v2")
+	require.ErrorIs(t, err, ErrMutationBlocked)
+
+	store.unblockMutations()
+	require.NoError(t, store.Set("k2", "v2"))
+}
+
+// TestMemoryStore_BlockMutations_WaitGroupRace stress-tests concurrent blocking
+// and mutation operations to detect race conditions in the WaitGroup synchronization.
+func TestMemoryStore_BlockMutations_WaitGroupRace(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(false)
+
+	// Trigger many concurrent writes + blocks to hit the race.
+	for range 100 {
+		var wg sync.WaitGroup
+
+		// Launch 50 concurrent writers.
+		for i := range 50 {
+			wg.Add(1)
+
+			go func(id int) {
+				defer wg.Done()
+
+				for range 10 {
+					_ = store.Set(fmt.Sprintf("k%d", id), "v")
+				}
+			}(i)
+		}
+
+		// Concurrently block mutations.
+		for range 10 {
+			wg.Go(func() {
+				_ = store.blockMutations(errors.New("test"))
+				store.unblockMutations()
+			})
+		}
+
+		wg.Wait()
+	}
 }
 
 // TestMemoryStore_GetSet_RoundtripAndTypes validates:
@@ -61,8 +122,8 @@ func TestMemoryStore_GetSet_RoundtripAndTypes(t *testing.T) {
 	require.Error(t, store.Set("invalid-key", 123), "Set of unsupported type must error")
 }
 
-// TestMemoryStore_Concurrency performs concurrent Set/Get loops to smoke-test synchronization.
-// If we complete without deadlock or data race (under -race), the test passes.
+// TestMemoryStore_Concurrency performs concurrent Set/Get loops to smoke-test
+// synchronization. Passes if no deadlock or data race is detected (under -race).
 func TestMemoryStore_Concurrency(t *testing.T) {
 	t.Parallel()
 
@@ -92,8 +153,8 @@ func TestMemoryStore_Concurrency(t *testing.T) {
 	wg.Wait()
 }
 
-// TestMemoryStore_IncrementBy_Basic checks IncrementBy on absent key (start at 0), positive/negative
-// increments, and that non-integer payloads cause an error.
+// TestMemoryStore_IncrementBy_Basic verifies IncrementBy starts absent keys at 0,
+// handles positive/negative increments correctly, and rejects non-integer values.
 func TestMemoryStore_IncrementBy_Basic(t *testing.T) {
 	t.Parallel()
 
@@ -112,7 +173,8 @@ func TestMemoryStore_IncrementBy_Basic(t *testing.T) {
 	require.Error(t, err, "non-integer value must cause IncrementBy error")
 }
 
-// TestMemoryStore_IncrementBy_Concurrent verifies concurrent increments produce the exact sum.
+// TestMemoryStore_IncrementBy_Concurrent verifies that concurrent IncrementBy operations
+// are atomic and produce the exact expected sum without data loss.
 func TestMemoryStore_IncrementBy_Concurrent(t *testing.T) {
 	t.Parallel()
 
@@ -148,7 +210,8 @@ func TestMemoryStore_IncrementBy_Concurrent(t *testing.T) {
 	assert.EqualValues(t, concurrencyLevel, actual, "counter mismatch")
 }
 
-// TestMemoryStore_GetOrSet_Basic validates first-writer wins semantics and the "loaded" flag.
+// TestMemoryStore_GetOrSet_Basic verifies first-writer-wins semantics: the first call
+// stores the value (loaded=false), subsequent calls return the existing value (loaded=true).
 func TestMemoryStore_GetOrSet_Basic(t *testing.T) {
 	t.Parallel()
 
@@ -166,8 +229,8 @@ func TestMemoryStore_GetOrSet_Basic(t *testing.T) {
 	assert.Equal(t, []byte("v1"), value.([]byte), "existing value must be returned")
 }
 
-// TestMemoryStore_GetOrSet_Concurrent ensures only one goroutine creates the value and
-// all others observe the identical stored bytes.
+// TestMemoryStore_GetOrSet_Concurrent verifies that under concurrent contention,
+// exactly one goroutine wins and stores its value, and all others observe that value.
 func TestMemoryStore_GetOrSet_Concurrent(t *testing.T) {
 	t.Parallel()
 
@@ -214,6 +277,7 @@ func TestMemoryStore_GetOrSet_Concurrent(t *testing.T) {
 	var (
 		firstWriterCount int
 		firstValue       string
+		pendingReaders   [][]byte
 	)
 
 	for result := range resultsCh {
@@ -222,15 +286,30 @@ func TestMemoryStore_GetOrSet_Concurrent(t *testing.T) {
 		if !result.loaded {
 			firstWriterCount++
 			firstValue = string(result.actualBytes)
-		} else {
-			assert.Equal(t, firstValue, string(result.actualBytes), "all readers must see the same stored value")
+
+			for _, reader := range pendingReaders {
+				assert.Equal(t, firstValue, string(reader), "all readers must see the same stored value")
+			}
+
+			pendingReaders = nil
+
+			continue
 		}
+
+		if firstWriterCount == 0 {
+			pendingReaders = append(pendingReaders, result.actualBytes)
+
+			continue
+		}
+
+		assert.Equal(t, firstValue, string(result.actualBytes), "all readers must see the same stored value")
 	}
 
 	assert.Equal(t, 1, firstWriterCount, "exactly one goroutine must create the value")
 }
 
-// TestMemoryStore_Swap_Basic checks insertion (loaded=false, prev=nil) and replacement (loaded=true with prev bytes).
+// TestMemoryStore_Swap_Basic verifies Swap returns (nil, false) for new keys,
+// and (previous_value, true) when replacing existing keys.
 func TestMemoryStore_Swap_Basic(t *testing.T) {
 	t.Parallel()
 
@@ -251,7 +330,8 @@ func TestMemoryStore_Swap_Basic(t *testing.T) {
 	assert.Equal(t, []byte("v2"), got.([]byte), "value must be replaced")
 }
 
-// TestMemoryStore_CompareAndSwap_Basic verifies CAS fails on wrong old value and succeeds on correct one.
+// TestMemoryStore_CompareAndSwap_Basic verifies CompareAndSwap fails when the
+// old value doesn't match, and succeeds only when it matches exactly.
 func TestMemoryStore_CompareAndSwap_Basic(t *testing.T) {
 	t.Parallel()
 
@@ -275,6 +355,8 @@ func TestMemoryStore_CompareAndSwap_Basic(t *testing.T) {
 	assert.Equal(t, []byte("new"), got.([]byte), "value must be updated")
 }
 
+// TestMemoryStore_CompareAndSwap_InsertWhenAbsent verifies that CompareAndSwap
+// with oldValue=nil creates the key when absent, and fails when the key exists.
 func TestMemoryStore_CompareAndSwap_InsertWhenAbsent(t *testing.T) {
 	t.Parallel()
 
@@ -293,7 +375,8 @@ func TestMemoryStore_CompareAndSwap_InsertWhenAbsent(t *testing.T) {
 	assert.False(t, ok, "second CAS must fail because key now exists")
 }
 
-// TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner ensures exactly one CAS succeeds under contention.
+// TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner verifies that under concurrent
+// contention on the same key, exactly one CompareAndSwap operation succeeds.
 func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 	t.Parallel()
 
@@ -338,7 +421,8 @@ func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 	assert.Equal(t, []byte("v1"), got.([]byte))
 }
 
-// TestMemoryStore_Delete ensures Delete removes present keys and is a no-op (no error) for missing keys.
+// TestMemoryStore_Delete verifies Delete removes existing keys from the store,
+// and is a no-op (returns no error) for keys that don't exist.
 func TestMemoryStore_Delete(t *testing.T) {
 	t.Parallel()
 
@@ -352,7 +436,8 @@ func TestMemoryStore_Delete(t *testing.T) {
 	require.NoError(t, store.Delete("non-existent"), "Delete on missing key must not error")
 }
 
-// TestMemoryStore_Exists checks Exists returns false for missing keys and true for present keys.
+// TestMemoryStore_Exists verifies Exists correctly returns false for missing keys
+// and true for keys that are present in the store.
 func TestMemoryStore_Exists(t *testing.T) {
 	t.Parallel()
 
@@ -369,8 +454,8 @@ func TestMemoryStore_Exists(t *testing.T) {
 	assert.True(t, exists)
 }
 
-// TestMemoryStore_DeleteIfExists_Basic verifies it returns (false) for absent key, (true) when it deletes,
-// and that the key is gone afterwards.
+// TestMemoryStore_DeleteIfExists_Basic verifies DeleteIfExists returns false for
+// absent keys, returns true when successfully deleting, and removes the key.
 func TestMemoryStore_DeleteIfExists_Basic(t *testing.T) {
 	t.Parallel()
 
@@ -390,7 +475,8 @@ func TestMemoryStore_DeleteIfExists_Basic(t *testing.T) {
 	assert.False(t, exists, "key must not exist after deletion")
 }
 
-// TestMemoryStore_DeleteIfExists_ConcurrentSingleWinner ensures exactly one deleter wins under contention.
+// TestMemoryStore_DeleteIfExists_ConcurrentSingleWinner verifies that under
+// concurrent contention, exactly one DeleteIfExists operation succeeds.
 func TestMemoryStore_DeleteIfExists_ConcurrentSingleWinner(t *testing.T) {
 	t.Parallel()
 
@@ -432,7 +518,8 @@ func TestMemoryStore_DeleteIfExists_ConcurrentSingleWinner(t *testing.T) {
 	assert.False(t, exists, "key must be removed")
 }
 
-// TestMemoryStore_CompareAndDelete_Basic checks that CompareAndDelete only removes the key when the expected value matches.
+// TestMemoryStore_CompareAndDelete_Basic verifies CompareAndDelete only removes
+// the key when the expected value matches exactly, and fails otherwise.
 func TestMemoryStore_CompareAndDelete_Basic(t *testing.T) {
 	t.Parallel()
 
@@ -454,7 +541,8 @@ func TestMemoryStore_CompareAndDelete_Basic(t *testing.T) {
 	assert.False(t, exists, "key must be removed")
 }
 
-// TestMemoryStore_CompareAndDelete_ConcurrentSingleWinner ensures exactly one CompareAndDelete wins under contention.
+// TestMemoryStore_CompareAndDelete_ConcurrentSingleWinner verifies that under
+// concurrent contention, exactly one CompareAndDelete operation succeeds.
 func TestMemoryStore_CompareAndDelete_ConcurrentSingleWinner(t *testing.T) {
 	t.Parallel()
 
@@ -495,8 +583,8 @@ func TestMemoryStore_CompareAndDelete_ConcurrentSingleWinner(t *testing.T) {
 	assert.False(t, exists, "key must be deleted")
 }
 
-// TestMemoryStore_AtomicOps_DoNotChangeBytesUnexpectedly ensures the store does not alias external byte slices.
-// After storing a []byte, mutating the original slice must not affect the stored value.
+// TestMemoryStore_AtomicOps_DoNotChangeBytesUnexpectedly verifies the store clones
+// byte slices defensively: mutating the original slice after storing doesn't affect stored data.
 func TestMemoryStore_AtomicOps_DoNotChangeBytesUnexpectedly(t *testing.T) {
 	t.Parallel()
 
@@ -520,20 +608,27 @@ func TestMemoryStore_AtomicOps_DoNotChangeBytesUnexpectedly(t *testing.T) {
 	)
 }
 
-// TestMemoryStore_Clear confirms Clear removes all entries.
+// TestMemoryStore_Clear verifies that Clear removes all entries from the store.
 func TestMemoryStore_Clear(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(true)
 
-	require.NoError(t, store.Set("key1", "value1"))
-	require.NoError(t, store.Set("key2", "value2"))
+	entries := []struct{ key, value string }{
+		{"key1", "value1"},
+		{"key2", "value2"},
+	}
+
+	for _, e := range entries {
+		require.NoError(t, store.Set(e.key, e.value))
+	}
 
 	require.NoError(t, store.Clear())
 	assert.Empty(t, store.container, "store must be empty after Clear")
 }
 
-// TestMemoryStore_Size verifies Size reports 0 for empty stores and the exact number after inserts.
+// TestMemoryStore_Size verifies Size returns 0 for empty stores and accurately
+// reports the number of entries after insertions.
 func TestMemoryStore_Size(t *testing.T) {
 	t.Parallel()
 
@@ -543,17 +638,23 @@ func TestMemoryStore_Size(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 0, size, "empty store must report size=0")
 
-	require.NoError(t, store.Set("key1", "value1"))
-	require.NoError(t, store.Set("key2", "value2"))
+	entries := []struct{ key, value string }{
+		{"key1", "value1"},
+		{"key2", "value2"},
+	}
+
+	for _, e := range entries {
+		require.NoError(t, store.Set(e.key, e.value))
+	}
 
 	size, err = store.Size()
 	require.NoError(t, err)
-	assert.EqualValues(t, 2, size, "size must equal number of entries")
+	assert.EqualValues(t, len(entries), size, "size must equal number of entries")
 }
 
-// TestMemoryStore_Scan_PrefixPagination exercises Scan across multiple prefixes, pagination limits,
-// empty prefixes, limit <= 0 semantics, and ensures results stay in sync with List() in both
-// tracking modes.
+// TestMemoryStore_Scan_PrefixPagination verifies Scan correctly handles prefix filtering,
+// pagination with limits, limit<=0 semantics, and stays consistent with List() results
+// across both tracking modes (trackKeys on/off).
 func TestMemoryStore_Scan_PrefixPagination(t *testing.T) {
 	t.Parallel()
 
@@ -676,8 +777,8 @@ func TestMemoryStore_Scan_PrefixPagination(t *testing.T) {
 	}
 }
 
-// TestMemoryStore_Scan_ConcurrentMutations ensures Scan remains safe under concurrent Set/Delete
-// workloads for both tracking modes and that NextKey always reflects the last entry key when set.
+// TestMemoryStore_Scan_ConcurrentMutations verifies Scan remains safe and consistent
+// under concurrent Set/Delete operations, and NextKey always reflects the last entry when set.
 func TestMemoryStore_Scan_ConcurrentMutations(t *testing.T) {
 	t.Parallel()
 
@@ -770,8 +871,8 @@ func TestMemoryStore_Scan_ConcurrentMutations(t *testing.T) {
 	}
 }
 
-// TestMemoryStore_Scan_MutationAfterPagination ensures inserting keys below the previously
-// returned cursor does not cause duplicates in subsequent pages.
+// TestMemoryStore_Scan_MutationAfterPagination verifies that inserting keys
+// lexicographically before the NextKey cursor doesn't cause duplicates in subsequent pages.
 func TestMemoryStore_Scan_MutationAfterPagination(t *testing.T) {
 	t.Parallel()
 
@@ -805,8 +906,8 @@ func TestMemoryStore_Scan_MutationAfterPagination(t *testing.T) {
 	}
 }
 
-// TestMemoryStore_List checks listing with/without prefix and with limits, verifying both contents
-// and the sort order by key.
+// TestMemoryStore_List verifies List returns entries in lexicographic order,
+// correctly applies prefix filters and limits, and handles empty stores.
 func TestMemoryStore_List(t *testing.T) {
 	t.Parallel()
 
@@ -860,15 +961,13 @@ func TestMemoryStore_List(t *testing.T) {
 	assert.True(t, strings.HasPrefix(entries[0].Key, "prefix"))
 }
 
-// TestDiskStore_KeyTrackingConsistency validates the internal key index (map/list) remains consistent
-// after Set/Delete/Clear when trackKeys is enabled.
+// TestMemoryStore_KeyTrackingConsistency verifies the internal key index
+// (keysList/keysMap) remains consistent after Set/Delete/Clear when trackKeys is enabled.
 func TestMemoryStore_KeyTrackingConsistency(t *testing.T) {
 	t.Parallel()
 
-	var (
-		store = NewMemoryStore(true)
-		keys  = []string{"key1", "key2", "key3"}
-	)
+	store := NewMemoryStore(true)
+	keys := []string{"key1", "key2", "key3"}
 
 	for _, key := range keys {
 		require.NoError(t, store.Set(key, "value"))
@@ -876,7 +975,7 @@ func TestMemoryStore_KeyTrackingConsistency(t *testing.T) {
 
 	store.mu.RLock()
 
-	assert.Len(t, store.keysList, 3)
+	assert.Len(t, store.keysList, len(keys))
 
 	for _, key := range keys {
 		_, exists := store.keysMap[key]
@@ -885,12 +984,12 @@ func TestMemoryStore_KeyTrackingConsistency(t *testing.T) {
 
 	store.mu.RUnlock()
 
-	require.NoError(t, store.Delete("key2"))
+	require.NoError(t, store.Delete(keys[1]))
 
 	store.mu.RLock()
 
-	assert.Len(t, store.keysList, 2)
-	_, exists := store.keysMap["key2"]
+	assert.Len(t, store.keysList, len(keys)-1)
+	_, exists := store.keysMap[keys[1]]
 	assert.False(t, exists, "deleted key must not remain in index")
 
 	store.mu.RUnlock()
@@ -902,8 +1001,8 @@ func TestMemoryStore_KeyTrackingConsistency(t *testing.T) {
 	store.mu.RUnlock()
 }
 
-// TestMemoryStore_RandomKey_Distribution_WithTracking validates that with tracking enabled,
-// RandomKey on an empty store returns "", and over repeated draws it eventually returns all present keys.
+// TestMemoryStore_RandomKey_Distribution_WithTracking verifies RandomKey returns
+// empty string for empty stores, and over repeated calls returns all keys uniformly.
 func TestMemoryStore_RandomKey_Distribution_WithTracking(t *testing.T) {
 	t.Parallel()
 
@@ -933,8 +1032,9 @@ func TestMemoryStore_RandomKey_Distribution_WithTracking(t *testing.T) {
 	}
 }
 
-// TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled covers prefix filtering when tracking is enabled,
-// including empty store, no-prefix, matching prefix, no-match prefix, and correctness after deletions and clear.
+// TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled verifies RandomKey with
+// prefix filtering works correctly when trackKeys=true, including edge cases like
+// empty stores, non-matching prefixes, and behavior after deletions.
 func TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
 	t.Parallel()
 
@@ -973,7 +1073,8 @@ func TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
 	assert.Empty(t, key, "after clear, prefix must return empty key")
 }
 
-// TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled covers prefix filtering with tracking disabled.
+// TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled verifies RandomKey with
+// prefix filtering works correctly when trackKeys=false (fallback two-pass scan mode).
 func TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
 	t.Parallel()
 
@@ -997,8 +1098,8 @@ func TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
 	assert.Empty(t, key, "no-match prefix must return empty key")
 }
 
-// TestMemoryStore_RebuildKeyList_RandomKeyPrefix ensures RebuildKeyList reconstructs the internal index
-// such that RandomKey with a prefix works again after simulated index loss.
+// TestMemoryStore_RebuildKeyList_RandomKeyPrefix verifies RebuildKeyList correctly
+// reconstructs the internal index, restoring RandomKey functionality with prefixes.
 func TestMemoryStore_RebuildKeyList_RandomKeyPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -1022,7 +1123,7 @@ func TestMemoryStore_RebuildKeyList_RandomKeyPrefix(t *testing.T) {
 	assert.True(t, strings.HasPrefix(key, "p:"), "must return key with prefix p:")
 }
 
-// TestMemoryStore_Close ensures Close is a no-op that returns no error (in-memory store).
+// TestMemoryStore_Close verifies Close is a no-op for MemoryStore and returns no error.
 func TestMemoryStore_Close(t *testing.T) {
 	t.Parallel()
 
@@ -1030,7 +1131,8 @@ func TestMemoryStore_Close(t *testing.T) {
 	require.NoError(t, store.Close())
 }
 
-// TestMemory_GetOrSet_Delete_Interleave_NoPanic ensures that GetOrSet and Delete can be called concurrently without panicking.
+// TestMemory_GetOrSet_Delete_Interleave_NoPanic verifies that concurrent GetOrSet
+// and Delete operations on the same key do not cause panics or slice bound errors.
 func TestMemory_GetOrSet_Delete_Interleave_NoPanic(t *testing.T) {
 	t.Parallel()
 

@@ -3,10 +3,10 @@ module github.com/oshokin/xk6-kv
 go 1.25
 
 require (
-	github.com/grafana/sobek v0.0.0-20251113105955-976a34df9c09
+	github.com/grafana/sobek v0.0.0-20251121143121-9f4828fa8148
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/bbolt v1.4.3
-	go.k6.io/k6 v1.4.0
+	go.k6.io/k6 v1.4.1
 )
 
 require (

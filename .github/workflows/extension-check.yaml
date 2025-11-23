@@ -75,8 +75,8 @@ jobs:
           which go
           # Display the Go version.
           go version
-          # Run tests with race detector, configurable timeout, for all packages.
-          go test -race -timeout ${{ env.TEST_TIMEOUT }} ./...
+          # Run tests with race detector, verbose output, and configurable timeout.
+          go test -race -v -timeout ${{ env.TEST_TIMEOUT }} ./...
 
   # Job to verify that the extension builds correctly with xk6.
   test-build:

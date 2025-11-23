@@ -26,6 +26,7 @@ A k6 extension providing a persistent key-value store to share state across Virt
 - 📦 **Stable Bolt Bucket**: Disk backend always uses the `k6` bucket (**original upstream bug tied it to the DB path and could orphan data - now fixed**)
 - 🧭 **Cursor Scanning**: Stream large datasets via `scan()` with continuation tokens
 - 📝 **Serialization**: JSON or string serialization
+- 💾 **Snapshots**: Export/import Bolt files for backups and data seeding
 - 📘 **TypeScript Support**: Full type declarations for IntelliSense and type safety
 - ⚡ **High Performance**: Optimized for concurrent workloads
 
@@ -114,6 +115,32 @@ export async function teardown() {
 }
 ```
 
+## Error Handling
+
+Every rejected `kv.*` promise carries a **typed error object** with `name` and `message` fields. Check `err.name` (or `err.Name` when k6 serialises it as Go struct) instead of matching raw strings:
+
+```javascript
+try {
+  await kv.backup({ fileName: "./snapshots/run.kv" });
+} catch (err) {
+  if (err?.name === "BackupInProgressError") {
+    console.log("Another VU is already writing a snapshot—safe to ignore.");
+  } else if (err?.name === "SnapshotPermissionError") {
+    fail(`Backup path is not writable: ${err.message}`);
+  } else {
+    throw err;
+  }
+}
+```
+
+High-level categories:
+
+- **Options & inputs** – typed guards such as `BackupOptionsRequiredError`, `ValueNumberRequiredError`, `UnsupportedValueTypeError`.
+- **Concurrency & lifecycle** – e.g. `BackupInProgressError`, `RestoreInProgressError`, `StoreClosedError`.
+- **Disk & snapshot IO** – precise signals for path issues, permission problems, Bolt failures, or restore budget overruns.
+
+📚 A complete catalogue with root causes and remediation tips lives in [`examples/README.md`](./examples/README.md#error-manual).
+
 ## TypeScript Support
 
 Full TypeScript support with IntelliSense and type safety! Copy the [`typescript/`](./typescript/) folder to your project for a ready-to-use starter kit.\
@@ -201,6 +228,25 @@ All methods return Promises except `close()`.
   ```
 
 - **`rebuildKeyList(): Promise<boolean>`** - Rebuilds in-memory key indexes (useful for disk backend with `trackKeys: true`).
+
+#### Snapshot Operations
+
+- **`backup(options?: BackupOptions): Promise<BackupSummary>`**  
+  Writes the current dataset to a BoltDB file. Always set `fileName` (leaving it blank points at the backend’s live Bolt file) and use `allowConcurrentWrites: true` for a best-effort dump that releases writers sooner (summary includes `bestEffort` + `warning` so you can alarm on it).
+
+- **`restore(options?: RestoreOptions): Promise<RestoreSummary>`**  
+  Replaces the dataset with a snapshot produced by `backup()`. Optional `maxEntries` / `maxBytes` guards protect against oversized or corrupted inputs.
+
+```typescript
+await kv.backup({
+  fileName: "./backups/kv-latest.kv",
+  allowConcurrentWrites: true,
+});
+ 
+await kv.restore({ fileName: "./backups/kv-latest.kv" });
+```
+
+> **Disk backend note:** pointing `fileName` at the live BoltDB path is treated as a no-op (backup just returns metadata; restore leaves the DB untouched), so always write to / read from a different file.
 
 - **`close(): void`** - Synchronously closes the store. Call in `teardown()`.
 
