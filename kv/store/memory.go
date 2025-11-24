@@ -83,7 +83,7 @@ func (s *MemoryStore) Get(key string) (any, error) {
 
 	value, ok := s.container[key]
 	if !ok {
-		return nil, fmt.Errorf("key %q not found", key)
+		return nil, fmt.Errorf("%w: %q", ErrKeyNotFound, key)
 	}
 
 	// Return the raw bytes - serialization will be handled by the SerializedStore wrapper.

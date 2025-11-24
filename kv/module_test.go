@@ -10,6 +10,8 @@ import (
 	"go.k6.io/k6/js/modulestest"
 )
 
+// TestOpenKvConcurrentInitializationSharesStore tests that
+// concurrent openKv calls share the same store.
 func TestOpenKvConcurrentInitializationSharesStore(t *testing.T) {
 	t.Parallel()
 
@@ -102,6 +104,8 @@ func TestOpenKvConcurrentInitializationSharesStore(t *testing.T) {
 	})
 }
 
+// TestOpenKvRejectsConflictingOptions tests that openKv
+// rejects conflicting options by panicking.
 func TestOpenKvRejectsConflictingOptions(t *testing.T) {
 	t.Parallel()
 
@@ -135,6 +139,8 @@ func TestOpenKvRejectsConflictingOptions(t *testing.T) {
 	})
 }
 
+// TestOpenKvAllowsEquivalentDiskPaths tests that openKv allows
+// equivalent disk paths by not panicking.
 func TestOpenKvAllowsEquivalentDiskPaths(t *testing.T) {
 	t.Parallel()
 
@@ -175,6 +181,7 @@ func TestOpenKvAllowsEquivalentDiskPaths(t *testing.T) {
 	})
 }
 
+// newTestRootModule creates a new test root module.
 func newTestRootModule(t *testing.T) *RootModule {
 	t.Helper()
 
@@ -187,6 +194,7 @@ func newTestRootModule(t *testing.T) *RootModule {
 	return rm
 }
 
+// cleanupRootModule cleans up the root module.
 func cleanupRootModule(t *testing.T, rm *RootModule) {
 	t.Helper()
 

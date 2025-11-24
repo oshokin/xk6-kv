@@ -16,7 +16,7 @@ type (
 	// BackupOptions configure how Backup writes a BoltDB-based snapshot.
 	BackupOptions struct {
 		// FileName is the destination path for the snapshot. Required.
-		FileName string `json:"fileName"`
+		FileName string
 
 		// AllowConcurrentWrites controls whether writers are allowed to progress
 		// while the snapshot is being persisted.
@@ -29,44 +29,44 @@ type (
 		// In short: AllowConcurrentWrites does not provide a point-in-time view.
 		// When false, writers are blocked for the entire backup to provide
 		// a strictly consistent view.
-		AllowConcurrentWrites bool `json:"allowConcurrentWrites"`
+		AllowConcurrentWrites bool
 	}
 
 	// BackupSummary reports metrics about a backup operation.
 	BackupSummary struct {
 		// TotalEntries is the number of key/value pairs captured in the snapshot.
-		TotalEntries int `json:"totalEntries"`
+		TotalEntries int
 
 		// BytesWritten is the final size of the snapshot file on disk.
-		BytesWritten int64 `json:"bytesWritten"`
+		BytesWritten int64
 
 		// BestEffort is true when the snapshot was taken with AllowConcurrentWrites.
-		BestEffort bool `json:"bestEffort"`
+		BestEffort bool
 
 		// Warning contains additional context about the snapshot mode.
 		// When BestEffort is true, Warning repeats allowConcurrentWritesWarning so callers
 		// can surface it to operators.
-		Warning string `json:"warning,omitempty"`
+		Warning string
 	}
 
 	// RestoreOptions configure Restore behavior.
 	RestoreOptions struct {
 		// FileName is the path to the Bolt snapshot file. Required.
-		FileName string `json:"fileName"`
+		FileName string
 
 		// MaxEntries limits how many entries may be loaded.
 		// Zero disables the cap.
-		MaxEntries int `json:"maxEntries"`
+		MaxEntries int
 
 		// MaxBytes limits the aggregate key/value payload hydrated during restore.
 		// Zero disables the cap.
-		MaxBytes int64 `json:"maxBytes"`
+		MaxBytes int64
 	}
 
 	// RestoreSummary reports the outcome of a restore operation.
 	RestoreSummary struct {
 		// TotalEntries is the number of key/value pairs hydrated from the snapshot.
-		TotalEntries int `json:"totalEntries"`
+		TotalEntries int
 	}
 
 	// boltDBBatchWriter buffers entries and flushes them in bounded BoltDB transactions.
@@ -262,7 +262,7 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 	if err := s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return fmt.Errorf("bucket %s not found", s.bucket)
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		// Capture entry count before WriteTo (Stats() is only valid during transaction).
@@ -373,7 +373,7 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 		return snapshotDB.View(func(snapshotTx *bolt.Tx) error {
 			srcBucket := snapshotTx.Bucket(defaultBoltDBBucketBytes)
 			if srcBucket == nil {
-				return fmt.Errorf("snapshot missing bucket %q", defaultBoltDBBucketBytes)
+				return fmt.Errorf("%w: %q", ErrBucketNotFound, defaultBoltDBBucketBytes)
 			}
 
 			// Copy all entries from snapshot bucket to destination bucket.
@@ -415,7 +415,7 @@ func (s *DiskStore) diskKeyCount() (int, error) {
 	err := s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return fmt.Errorf("bucket %s not found", s.bucket)
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		count = bucket.Stats().KeyN
@@ -681,7 +681,7 @@ func (s *MemoryStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 	if err := db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(defaultBoltDBBucketBytes)
 		if bucket == nil {
-			return fmt.Errorf("snapshot missing bucket %q", defaultBoltDBBucketBytes)
+			return fmt.Errorf("%w: %q", ErrBucketNotFound, defaultBoltDBBucketBytes)
 		}
 
 		return bucket.ForEach(func(k, v []byte) error {

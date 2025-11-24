@@ -2,6 +2,7 @@ package kv
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/oshokin/xk6-kv/kv/store"
 )
@@ -52,8 +53,26 @@ const (
 	// DiskStoreWriteError is emitted when writes or mutations to the disk backend fail.
 	DiskStoreWriteError ErrorName = "DiskStoreWriteError"
 
+	// InvalidBackendError is emitted when openKv receives an unsupported backend option.
+	InvalidBackendError ErrorName = "InvalidBackendError"
+
+	// InvalidCursorError is emitted when scan() receives a malformed cursor.
+	InvalidCursorError ErrorName = "InvalidCursorError"
+
+	// InvalidOptionsError is emitted when openKv options cannot be parsed.
+	InvalidOptionsError ErrorName = "InvalidOptionsError"
+
+	// InvalidSerializationError is emitted when openKv receives an unsupported serialization option.
+	InvalidSerializationError ErrorName = "InvalidSerializationError"
+
+	// KVOptionsConflictError is emitted when openKv is called with different options than the existing store.
+	KVOptionsConflictError ErrorName = "KVOptionsConflictError"
+
 	// KeyListRebuildError is emitted when key rebuild logic fails.
 	KeyListRebuildError ErrorName = "KeyListRebuildError"
+
+	// KeyNotFoundError is emitted when a requested key does not exist.
+	KeyNotFoundError ErrorName = "KeyNotFoundError"
 
 	// RestoreInProgressError is emitted when kv.restore() collides with another restore.
 	RestoreInProgressError ErrorName = "RestoreInProgressError"
@@ -94,7 +113,13 @@ const (
 
 	// ValueParseError is emitted when stored values cannot be parsed.
 	ValueParseError ErrorName = "ValueParseError"
+
+	// UnexpectedStoreOutputError is emitted when the store returns a nil value without an accompanying error.
+	UnexpectedStoreOutputError ErrorName = "UnexpectedStoreOutputError"
 )
+
+// ErrUnexpectedStoreOutput indicates a store implementation returned a nil result without an error.
+var ErrUnexpectedStoreOutput = errors.New("unexpected store output")
 
 // Error represents a custom error emitted by the kv module.
 type Error struct {
@@ -148,7 +173,8 @@ func classifyError(err error) error {
 	case errors.Is(err, store.ErrSnapshotPermissionDenied):
 		return NewError(SnapshotPermissionError, err.Error())
 	case errors.Is(err, store.ErrDiskPathResolveFailed),
-		errors.Is(err, store.ErrDiskDirectoryCreateFailed):
+		errors.Is(err, store.ErrDiskDirectoryCreateFailed),
+		errors.Is(err, store.ErrDiskPathIsDirectory):
 		return NewError(DiskPathError, err.Error())
 	case errors.Is(err, store.ErrDiskStoreOpenFailed):
 		return NewError(DiskStoreOpenError, err.Error())
@@ -178,6 +204,16 @@ func classifyError(err error) error {
 		return NewError(KeyListRebuildError, err.Error())
 	case errors.Is(err, store.ErrDiskStoreRandomAccessFailed):
 		return NewError(DiskStoreIndexError, err.Error())
+	case errors.Is(err, store.ErrInvalidBackend):
+		return NewError(InvalidBackendError, err.Error())
+	case errors.Is(err, store.ErrInvalidCursor):
+		return NewError(InvalidCursorError, err.Error())
+	case errors.Is(err, store.ErrInvalidSerialization):
+		return NewError(InvalidSerializationError, err.Error())
+	case errors.Is(err, store.ErrKVOptionsConflict):
+		return NewError(KVOptionsConflictError, err.Error())
+	case errors.Is(err, store.ErrKVOptionsInvalid):
+		return NewError(InvalidOptionsError, err.Error())
 	case errors.Is(err, store.ErrBackupDirectoryFailed),
 		errors.Is(err, store.ErrBackupTempFileFailed),
 		errors.Is(err, store.ErrBackupCopyFailed),
@@ -196,6 +232,8 @@ func classifyError(err error) error {
 		return NewError(SnapshotReadError, err.Error())
 	case errors.Is(err, store.ErrBucketNotFound):
 		return NewError(BucketNotFoundError, err.Error())
+	case errors.Is(err, store.ErrKeyNotFound):
+		return NewError(KeyNotFoundError, err.Error())
 	case errors.Is(err, store.ErrDiskStoreClosed):
 		return NewError(StoreClosedError, err.Error())
 	case errors.Is(err, store.ErrUnsupportedValueType):
@@ -205,7 +243,19 @@ func classifyError(err error) error {
 		return NewError(SerializerError, err.Error())
 	case errors.Is(err, store.ErrValueParseFailed):
 		return NewError(ValueParseError, err.Error())
+	case errors.Is(err, ErrUnexpectedStoreOutput):
+		return NewError(UnexpectedStoreOutputError, err.Error())
 	}
 
 	return err
+}
+
+// unexpectedStoreOutput returns an error indicating that a store implementation
+// returned a nil result without an error.
+func unexpectedStoreOutput(method string) error {
+	if method == "" {
+		return ErrUnexpectedStoreOutput
+	}
+
+	return fmt.Errorf("%w: %s returned nil result", ErrUnexpectedStoreOutput, method)
 }

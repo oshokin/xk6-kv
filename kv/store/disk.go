@@ -114,7 +114,7 @@ func ResolveDiskPath(dbPath string) (string, error) {
 	switch {
 	case err == nil:
 		if info.IsDir() {
-			return absPath, fmt.Errorf("disk store path %q is a directory", absPath)
+			return absPath, fmt.Errorf("%w: %q", ErrDiskPathIsDirectory, absPath)
 		}
 
 		return absPath, nil
@@ -203,7 +203,7 @@ func (s *DiskStore) Get(key string) (any, error) {
 	err := s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return fmt.Errorf("bucket %s not found", s.bucket)
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		value = bucket.Get([]byte(key))
@@ -218,7 +218,7 @@ func (s *DiskStore) Get(key string) (any, error) {
 	}
 
 	if value == nil {
-		return nil, fmt.Errorf("key %q not found", key)
+		return nil, fmt.Errorf("%w: %q", ErrKeyNotFound, key)
 	}
 
 	// Return the raw bytes - serialization will be handled by the SerializedStore wrapper.
@@ -253,7 +253,7 @@ func (s *DiskStore) Set(key string, value any) error {
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return ErrBucketNotFound
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		return bucket.Put([]byte(key), valueBytes)
@@ -290,7 +290,7 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 	err := s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return ErrBucketNotFound
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		// Get currentValue value.
@@ -352,7 +352,7 @@ func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, er
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return ErrBucketNotFound
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		// Check if key exists.
@@ -406,7 +406,7 @@ func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err 
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return ErrBucketNotFound
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		// Get previous value (copy for safety).
@@ -472,7 +472,7 @@ func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return ErrBucketNotFound
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		// Get current value.
@@ -523,7 +523,7 @@ func (s *DiskStore) Delete(key string) error {
 	err := s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return fmt.Errorf("bucket %s not found", s.bucket)
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		return bucket.Delete([]byte(key))
@@ -569,7 +569,7 @@ func (s *DiskStore) Exists(key string) (bool, error) {
 	err := s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return fmt.Errorf("bucket %s not found", s.bucket)
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		exists = bucket.Get([]byte(key)) != nil
@@ -595,7 +595,7 @@ func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 	err := s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return ErrBucketNotFound
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		// Check if key exists.
@@ -645,7 +645,7 @@ func (s *DiskStore) CompareAndDelete(key string, oldValue any) (bool, error) {
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return ErrBucketNotFound
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		// Get current value.
@@ -738,7 +738,7 @@ func (s *DiskStore) Size() (int64, error) {
 	err := s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return fmt.Errorf("bucket %s not found", s.bucket)
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		size = int64(bucket.Stats().KeyN)
@@ -770,7 +770,7 @@ func (s *DiskStore) Scan(prefix, afterKey string, limit int64) (*ScanPage, error
 	err := s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return fmt.Errorf("bucket %s not found", s.bucket)
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		return s.fillDiskScanPage(page, bucket.Cursor(), prefix, afterKey, limit)
@@ -1062,7 +1062,7 @@ func (s *DiskStore) countKeys(prefix string) (int64, error) {
 	err := s.handle.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(s.bucket)
 		if b == nil {
-			return fmt.Errorf("bucket %s not found", s.bucket)
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		if prefix == "" {
@@ -1104,7 +1104,7 @@ func (s *DiskStore) getKeyByIndex(prefix string, index int64) (string, error) {
 	err := s.handle.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(s.bucket)
 		if b == nil {
-			return fmt.Errorf("bucket %s not found", s.bucket)
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		c := b.Cursor()
@@ -1147,7 +1147,7 @@ func (s *DiskStore) rebuildKeyListLocked() error {
 	err := s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
-			return fmt.Errorf("bucket %s not found", s.bucket)
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
 		return bucket.ForEach(func(k, _ []byte) error {

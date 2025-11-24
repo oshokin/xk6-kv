@@ -31,6 +31,8 @@ var (
 	ErrBucketNotFound = errors.New("bucket not found")
 	// ErrDiskDirectoryCreateFailed indicates disk directory creation failed.
 	ErrDiskDirectoryCreateFailed = errors.New("disk directory create failed")
+	// ErrDiskPathIsDirectory is returned when the disk store path points to a directory.
+	ErrDiskPathIsDirectory = errors.New("disk store path is a directory")
 	// ErrDiskPathResolveFailed indicates disk path resolution failed.
 	ErrDiskPathResolveFailed = errors.New("disk path resolve failed")
 	// ErrDiskStoreClearFailed indicates clearing the disk store failed.
@@ -71,8 +73,20 @@ var (
 	ErrDiskStoreSwapFailed = errors.New("disk store swap failed")
 	// ErrDiskStoreWriteFailed indicates writing to the disk store failed.
 	ErrDiskStoreWriteFailed = errors.New("disk store write failed")
+	// ErrInvalidBackend is returned when an unsupported backend is specified.
+	ErrInvalidBackend = errors.New("invalid backend")
+	// ErrInvalidCursor is returned when scan receives a malformed cursor.
+	ErrInvalidCursor = errors.New("invalid cursor")
+	// ErrInvalidSerialization is returned when an unsupported serialization format is specified.
+	ErrInvalidSerialization = errors.New("invalid serialization")
 	// ErrKeyListRebuildFailed indicates rebuilding the key list failed.
 	ErrKeyListRebuildFailed = errors.New("key list rebuild failed")
+	// ErrKeyNotFound is returned when a requested key does not exist in the store.
+	ErrKeyNotFound = errors.New("key not found")
+	// ErrKVOptionsConflict is returned when openKv is called with different options than the existing store.
+	ErrKVOptionsConflict = errors.New("kv options conflict with existing configuration")
+	// ErrKVOptionsInvalid is returned when kv options cannot be parsed.
+	ErrKVOptionsInvalid = errors.New("kv options invalid")
 	// ErrMutationBlocked is returned when mutations are blocked due to snapshot activity.
 	ErrMutationBlocked = errors.New("mutation is blocked")
 	// ErrRestoreBudgetBytesExceeded is returned when restore MaxBytes cap is hit.

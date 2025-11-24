@@ -470,6 +470,7 @@ func BenchmarkMemoryStore_AtomicConcurrent(b *testing.B) {
 	})
 }
 
+// runScanBenchmark runs a scan benchmark.
 func runScanBenchmark(b *testing.B, store Store, prefix, initialAfter string, limit int64) {
 	b.Helper()
 	b.ReportAllocs()

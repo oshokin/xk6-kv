@@ -55,13 +55,13 @@ func NewKV(vu modules.VU, s store.Store) *KV {
 	}
 }
 
-// Small result helpers we convert to JS on the event loop (via ToValue).
-// These structs map cleanly to JS objects through Sobek's ToValue encoder.
+// getOrSetResult is the JS-facing result of getOrSet().
 type getOrSetResult struct {
 	Value  any  `json:"value"`
 	Loaded bool `json:"loaded"`
 }
 
+// swapResult is the JS-facing result of swap().
 type swapResult struct {
 	Previous any  `json:"previous"`
 	Loaded   bool `json:"loaded"`
@@ -76,8 +76,8 @@ func (k *KV) Get(key sobek.Value) *sobek.Promise {
 	keyString := key.String()
 
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			return store.Get(keyString)
+		func(s store.Store) (any, error) {
+			return s.Get(keyString)
 		},
 
 		// Convert the Go value to a JavaScript value for the VU runtime.
@@ -103,8 +103,8 @@ func (k *KV) Set(key sobek.Value, value sobek.Value) *sobek.Promise {
 	exportedValue := value.Export()
 
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			return value, store.Set(keyString, exportedValue)
+		func(s store.Store) (any, error) {
+			return value, s.Set(keyString, exportedValue)
 		},
 
 		// Resolve with the exact same JS value the user passed in (identity/symmetry).
@@ -135,8 +135,8 @@ func (k *KV) IncrementBy(key sobek.Value, delta sobek.Value) *sobek.Promise {
 	}
 
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			return store.IncrementBy(keyString, deltaInt)
+		func(s store.Store) (any, error) {
+			return s.IncrementBy(keyString, deltaInt)
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -154,8 +154,8 @@ func (k *KV) GetOrSet(key sobek.Value, value sobek.Value) *sobek.Promise {
 	exportedValue := value.Export()
 
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			actualValue, wasLoaded, err := store.GetOrSet(keyString, exportedValue)
+		func(s store.Store) (any, error) {
+			actualValue, wasLoaded, err := s.GetOrSet(keyString, exportedValue)
 			if err != nil {
 				return nil, err
 			}
@@ -181,8 +181,8 @@ func (k *KV) Swap(key sobek.Value, value sobek.Value) *sobek.Promise {
 	exportedValue := value.Export()
 
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			previousValue, loaded, err := store.Swap(keyString, exportedValue)
+		func(s store.Store) (any, error) {
+			previousValue, loaded, err := s.Swap(keyString, exportedValue)
 			if err != nil {
 				return nil, err
 			}
@@ -211,8 +211,8 @@ func (k *KV) CompareAndSwap(key, oldValue, newValue sobek.Value) *sobek.Promise 
 	)
 
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			return store.CompareAndSwap(keyString, exportedOld, exportedNew)
+		func(s store.Store) (any, error) {
+			return s.CompareAndSwap(keyString, exportedOld, exportedNew)
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -228,8 +228,8 @@ func (k *KV) Delete(key sobek.Value) *sobek.Promise {
 	keyString := key.String()
 
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			return true, store.Delete(keyString)
+		func(s store.Store) (any, error) {
+			return true, s.Delete(keyString)
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -242,8 +242,8 @@ func (k *KV) Exists(key sobek.Value) *sobek.Promise {
 	keyString := key.String()
 
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			return store.Exists(keyString)
+		func(s store.Store) (any, error) {
+			return s.Exists(keyString)
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -257,8 +257,8 @@ func (k *KV) DeleteIfExists(key sobek.Value) *sobek.Promise {
 	keyString := key.String()
 
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			return store.DeleteIfExists(keyString)
+		func(s store.Store) (any, error) {
+			return s.DeleteIfExists(keyString)
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -273,8 +273,8 @@ func (k *KV) CompareAndDelete(key, old sobek.Value) *sobek.Promise {
 	exportedOld := old.Export()
 
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			return store.CompareAndDelete(keyString, exportedOld)
+		func(s store.Store) (any, error) {
+			return s.CompareAndDelete(keyString, exportedOld)
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -286,8 +286,8 @@ func (k *KV) CompareAndDelete(key, old sobek.Value) *sobek.Promise {
 // Depending on the backend, this may be an expensive O(n) operation.
 func (k *KV) Clear() *sobek.Promise {
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			return true, store.Clear()
+		func(s store.Store) (any, error) {
+			return true, s.Clear()
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -299,8 +299,8 @@ func (k *KV) Clear() *sobek.Promise {
 // On some backends this can be O(n).
 func (k *KV) Size() *sobek.Promise {
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			return store.Size()
+		func(s store.Store) (any, error) {
+			return s.Size()
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -331,7 +331,7 @@ func (k *KV) Scan(options sobek.Value) *sobek.Promise {
 			if scanOptions.Cursor != "" {
 				raw, err := base64.StdEncoding.DecodeString(scanOptions.Cursor)
 				if err != nil {
-					return nil, fmt.Errorf("invalid cursor for scan(): %w", err)
+					return nil, fmt.Errorf("%w: %w", store.ErrInvalidCursor, err)
 				}
 
 				afterKey = string(raw)
@@ -340,6 +340,10 @@ func (k *KV) Scan(options sobek.Value) *sobek.Promise {
 			page, err := s.Scan(scanOptions.Prefix, afterKey, scanOptions.Limit)
 			if err != nil {
 				return nil, err
+			}
+
+			if page == nil {
+				return nil, unexpectedStoreOutput("store.Scan")
 			}
 
 			jsEntries := make([]ListEntry, len(page.Entries))
@@ -382,10 +386,14 @@ func (k *KV) List(options sobek.Value) *sobek.Promise {
 	listOptions := ImportListOptions(k.vu.Runtime(), options)
 
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			entries, err := store.List(listOptions.Prefix, listOptions.Limit)
+		func(s store.Store) (any, error) {
+			entries, err := s.List(listOptions.Prefix, listOptions.Limit)
 			if err != nil {
 				return nil, err
+			}
+
+			if entries == nil {
+				return nil, unexpectedStoreOutput("store.List")
 			}
 
 			// Convert entries to the JS-facing struct.
@@ -412,8 +420,8 @@ func (k *KV) RandomKey(options sobek.Value) *sobek.Promise {
 	randomKeyOptions := ImportRandomKeyOptions(k.vu.Runtime(), options)
 
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			return store.RandomKey(randomKeyOptions.Prefix)
+		func(s store.Store) (any, error) {
+			return s.RandomKey(randomKeyOptions.Prefix)
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -428,8 +436,8 @@ func (k *KV) RandomKey(options sobek.Value) *sobek.Promise {
 // and a rebuild is needed after a crash or manual intervention.
 func (k *KV) RebuildKeyList() *sobek.Promise {
 	return k.runAsyncWithStore(
-		func(store store.Store) (any, error) {
-			return true, store.RebuildKeyList()
+		func(s store.Store) (any, error) {
+			return true, s.RebuildKeyList()
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -455,8 +463,12 @@ func (k *KV) Backup(options sobek.Value) *sobek.Promise {
 				return nil, err
 			}
 
-			// Convert to map with camelCase keys for JavaScript.
-			// Sobek doesn't reliably respect JSON tags, so we use explicit map conversion.
+			if storeSummary == nil {
+				return nil, unexpectedStoreOutput("store.Backup")
+			}
+
+			// If we return a struct, the fields will be converted to snake_case.
+			// I couldn't really find out why, let's return a map[string]any instead.
 			return map[string]any{
 				"totalEntries": storeSummary.TotalEntries,
 				"bytesWritten": storeSummary.BytesWritten,
@@ -488,8 +500,12 @@ func (k *KV) Restore(options sobek.Value) *sobek.Promise {
 				return nil, err
 			}
 
-			// Convert to map with camelCase keys for JavaScript.
-			// Sobek doesn't reliably respect JSON tags, so we use explicit map conversion.
+			if storeSummary == nil {
+				return nil, unexpectedStoreOutput("store.Restore")
+			}
+
+			// If we return a struct, the fields will be converted to snake_case.
+			// I couldn't really find out why, let's return a map[string]any instead.
 			return map[string]any{
 				"totalEntries": storeSummary.TotalEntries,
 			}, nil
@@ -500,7 +516,7 @@ func (k *KV) Restore(options sobek.Value) *sobek.Promise {
 	)
 }
 
-// ListEntry is the JavaScript-facing representation of a key-value pair returned by List().
+// ListEntry is the JS-facing representation of a key-value pair returned by list().
 type ListEntry struct {
 	// Key is the entry key (List results are lexicographically ordered by this).
 	Key string `json:"key"`
@@ -509,7 +525,7 @@ type ListEntry struct {
 	Value any `json:"value"`
 }
 
-// ScanOptions holds optional filters for Scan().
+// ScanOptions holds optional filters for scan().
 type ScanOptions struct {
 	// Prefix selects only keys that start with the given string.
 	Prefix string `json:"prefix"`
@@ -526,7 +542,7 @@ type ScanOptions struct {
 	isLimitSet bool
 }
 
-// ScanResult is the JS-facing result of kv.scan().
+// ScanResult is the JS-facing result of scan().
 type ScanResult struct {
 	// Entries holds the page of key/value pairs.
 	Entries []ListEntry `json:"entries"`
@@ -571,7 +587,7 @@ func ImportScanOptions(rt *sobek.Runtime, options sobek.Value) ScanOptions {
 	return scanOptions
 }
 
-// ListOptions describes filters for List(); all fields are optional.
+// ListOptions describes filters for list() operations, all fields are optional.
 type ListOptions struct {
 	// Prefix selects only keys that start with the given string.
 	Prefix string `json:"prefix"`
@@ -596,10 +612,13 @@ func ImportListOptions(rt *sobek.Runtime, options sobek.Value) ListOptions {
 	// Interpret the options as a plain object from JS.
 	optionsObj := options.ToObject(rt)
 
-	listOptions.Prefix = optionsObj.Get("prefix").String()
+	prefixValue := optionsObj.Get("prefix")
+	if !common.IsNullish(prefixValue) {
+		listOptions.Prefix = prefixValue.String()
+	}
 
 	limitValue := optionsObj.Get("limit")
-	if limitValue == nil {
+	if common.IsNullish(limitValue) {
 		return listOptions
 	}
 
@@ -615,7 +634,7 @@ func ImportListOptions(rt *sobek.Runtime, options sobek.Value) ListOptions {
 	return listOptions
 }
 
-// RandomKeyOptions holds the optional prefix filter for RandomKey().
+// RandomKeyOptions holds the optional prefix filter for randomKey().
 type RandomKeyOptions struct {
 	// Prefix restricts random selection to keys beginning with this string.
 	Prefix string `json:"prefix"`
@@ -630,12 +649,16 @@ func ImportRandomKeyOptions(rt *sobek.Runtime, options sobek.Value) RandomKeyOpt
 	}
 
 	optionsObj := options.ToObject(rt)
-	randomKeyOptions.Prefix = optionsObj.Get("prefix").String()
+
+	prefixValue := optionsObj.Get("prefix")
+	if !common.IsNullish(prefixValue) {
+		randomKeyOptions.Prefix = prefixValue.String()
+	}
 
 	return randomKeyOptions
 }
 
-// BackupOptions controls kv.backup().
+// BackupOptions is the JS-facing result of backup().
 type BackupOptions struct {
 	FileName              string `json:"fileName"`
 	AllowConcurrentWrites bool   `json:"allowConcurrentWrites"`
@@ -649,10 +672,14 @@ func ImportBackupOptions(rt *sobek.Runtime, options sobek.Value) BackupOptions {
 	}
 
 	optionsObj := options.ToObject(rt)
-	backupOptions.FileName = optionsObj.Get("fileName").String()
+
+	fileNameValue := optionsObj.Get("fileName")
+	if !common.IsNullish(fileNameValue) {
+		backupOptions.FileName = fileNameValue.String()
+	}
 
 	allowValue := optionsObj.Get("allowConcurrentWrites")
-	if allowValue != nil {
+	if !common.IsNullish(allowValue) {
 		var allow bool
 		if err := rt.ExportTo(allowValue, &allow); err == nil {
 			backupOptions.AllowConcurrentWrites = allow
@@ -662,7 +689,7 @@ func ImportBackupOptions(rt *sobek.Runtime, options sobek.Value) BackupOptions {
 	return backupOptions
 }
 
-// RestoreOptions controls kv.restore().
+// RestoreOptions is the JS-facing result of restore().
 type RestoreOptions struct {
 	FileName   string `json:"fileName"`
 	MaxEntries int    `json:"maxEntries"`
@@ -677,16 +704,20 @@ func ImportRestoreOptions(rt *sobek.Runtime, options sobek.Value) RestoreOptions
 	}
 
 	optionsObj := options.ToObject(rt)
-	restoreOptions.FileName = optionsObj.Get("fileName").String()
 
-	if maxEntriesValue := optionsObj.Get("maxEntries"); maxEntriesValue != nil {
+	fileNameValue := optionsObj.Get("fileName")
+	if !common.IsNullish(fileNameValue) {
+		restoreOptions.FileName = fileNameValue.String()
+	}
+
+	if maxEntriesValue := optionsObj.Get("maxEntries"); !common.IsNullish(maxEntriesValue) {
 		var parsedValue int64
 		if err := rt.ExportTo(maxEntriesValue, &parsedValue); err == nil {
 			restoreOptions.MaxEntries = int(parsedValue)
 		}
 	}
 
-	if maxBytesValue := optionsObj.Get("maxBytes"); maxBytesValue != nil {
+	if maxBytesValue := optionsObj.Get("maxBytes"); !common.IsNullish(maxBytesValue) {
 		var parsedValue int64
 		if err := rt.ExportTo(maxBytesValue, &parsedValue); err == nil {
 			restoreOptions.MaxBytes = parsedValue
@@ -759,9 +790,9 @@ func (k *KV) runAsyncWithStore(
 	return promise
 }
 
-// exportToInt64 converts a Sobek value (we are on the caller's thread here) into int64
-// WITHOUT using rt.ExportTo in worker goroutines. This accepts a few numeric shapes commonly
-// produced by JS -> Go marshaling.
+// exportToInt64 converts a Sobek value (we are on the caller's thread here)
+// into int64 WITHOUT using rt.ExportTo in worker goroutines.
+// This accepts a few numeric shapes commonly produced by JS -> Go marshaling.
 func exportToInt64(v sobek.Value) (int64, error) {
 	switch x := v.Export().(type) {
 	case int64:

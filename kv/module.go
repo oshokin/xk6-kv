@@ -83,6 +83,7 @@ func New() *RootModule {
 // NewModuleInstance implements modules.Module.
 // It creates a per-VU instance wired to the RootModule (which owns the shared store).
 func (rm *RootModule) NewModuleInstance(vu modules.VU) modules.Instance {
+	// configureRuntime(vu.Runtime())
 	return &ModuleInstance{
 		vu: vu,
 		rm: rm,
@@ -105,7 +106,8 @@ func (rm *RootModule) getOrCreateStore(options Options) (store.Store, bool, erro
 		// Reject re-configuration attempts to prevent confusion and data loss.
 		// Users must use consistent options across all VUs in a test.
 		return nil, false, fmt.Errorf(
-			"openKv already initialized with backend=%q serialization=%q trackKeys=%t path=%q",
+			"%w: backend=%q serialization=%q trackKeys=%t path=%q",
+			store.ErrKVOptionsConflict,
 			rm.opts.Backend, rm.opts.Serialization, rm.opts.TrackKeys, rm.opts.Path,
 		)
 	}
@@ -151,7 +153,8 @@ func (rm *RootModule) createBaseStore(options Options) (store.Store, error) {
 
 		return diskStore, nil
 	default:
-		return nil, fmt.Errorf("unsupported backend: %s", options.Backend)
+		// Unreachable: backend is validated in NewOptionsFrom before this is called.
+		return nil, fmt.Errorf("%w: %s", store.ErrInvalidBackend, options.Backend)
 	}
 }
 
@@ -163,7 +166,8 @@ func (rm *RootModule) createSerializer(options Options) (store.Serializer, error
 	case SerializationString:
 		return store.NewStringSerializer(), nil
 	default:
-		return nil, fmt.Errorf("unsupported serialization: %s", options.Serialization)
+		// Unreachable: serialization is validated in NewOptionsFrom before this is called.
+		return nil, fmt.Errorf("%w: %s", store.ErrInvalidSerialization, options.Serialization)
 	}
 }
 
@@ -274,22 +278,22 @@ func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
 	}
 
 	if err := vu.Runtime().ExportTo(options, &opts); err != nil {
-		return opts, fmt.Errorf("failed to parse kv options: %w", err)
+		return opts, fmt.Errorf("%w: %w", store.ErrKVOptionsInvalid, err)
 	}
 
 	// Validate backend.
 	if opts.Backend != BackendMemory && opts.Backend != BackendDisk {
 		return opts, fmt.Errorf(
-			"invalid backend: %q; valid values are: %q, %q",
-			opts.Backend, BackendMemory, BackendDisk,
+			"%w: %q; valid values are: %q, %q",
+			store.ErrInvalidBackend, opts.Backend, BackendMemory, BackendDisk,
 		)
 	}
 
 	// Validate serialization.
 	if opts.Serialization != SerializationJSON && opts.Serialization != SerializationString {
 		return opts, fmt.Errorf(
-			"invalid serialization: %q; valid values are: %q, %q",
-			opts.Serialization, SerializationJSON, SerializationString,
+			"%w: %q; valid values are: %q, %q",
+			store.ErrInvalidSerialization, opts.Serialization, SerializationJSON, SerializationString,
 		)
 	}
 

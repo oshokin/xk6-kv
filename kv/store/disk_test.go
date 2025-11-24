@@ -91,7 +91,7 @@ func TestNewDiskStore_PathHandling(t *testing.T) {
 
 		tempDir := t.TempDir()
 		store, err := NewDiskStore(true, tempDir)
-		require.ErrorContains(t, err, "is a directory", "directories must be rejected during validation")
+		require.ErrorIs(t, err, ErrDiskPathIsDirectory, "directories must be rejected during validation")
 		assert.Nil(t, store, "store must not be created when path is a directory")
 	})
 
@@ -370,6 +370,7 @@ func TestDiskStore_Get_ReturnsDistinctBuffers(t *testing.T) {
 	}
 }
 
+// TestDiskStore_GetReturnsCopy tests that Get returns a copy of the value.
 func TestDiskStore_GetReturnsCopy(t *testing.T) {
 	t.Parallel()
 
@@ -592,7 +593,7 @@ func TestDiskStore_Swap_Basic(t *testing.T) {
 	assert.Equal(t, []byte("v2"), got.([]byte), "value must be replaced")
 }
 
-// TestDiskStore_CompareAndSwap_Basic verifies CAS fails on wrong old value and succeeds on correct one.
+// TestDiskStore_CompareAndSwap_Basic verifies CAS fails on wrong old value and succeeds on correct one.c.
 func TestDiskStore_CompareAndSwap_Basic(t *testing.T) {
 	t.Parallel()
 
@@ -616,6 +617,8 @@ func TestDiskStore_CompareAndSwap_Basic(t *testing.T) {
 	assert.Equal(t, []byte("new"), got.([]byte), "value must be updated")
 }
 
+// TestDiskStore_CompareAndSwap_InsertWhenAbsent tests that CompareAndSwap inserts
+// a new value when the key is absent.
 func TestDiskStore_CompareAndSwap_InsertWhenAbsent(t *testing.T) {
 	t.Parallel()
 
@@ -924,7 +927,8 @@ func TestDiskStore_Scan_ReturnsDistinctBuffers(t *testing.T) {
 	}
 }
 
-func TestDiskStore_ScanReturnsCopy(t *testing.T) {
+// TestDiskStore_Scan_ReturnsCopy tests that Scan returns a copy of the value.
+func TestDiskStore_Scan_ReturnsCopy(t *testing.T) {
 	t.Parallel()
 
 	store := newTestDiskStore(t, false, "", true)

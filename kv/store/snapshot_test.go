@@ -612,6 +612,8 @@ func TestMemoryStore_Backup_Import_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestDiskStore_Export_ProducesSnapshot verifies that Export produces a valid
+// BoltDB snapshot file containing all key-value pairs from the store.
 func Test_DiskStore_Export_ProducesSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -649,6 +651,8 @@ func Test_DiskStore_Export_ProducesSnapshot(t *testing.T) {
 	assert.Equal(t, []byte("2"), collected["beta"])
 }
 
+// TestDiskStore_Import_ReplacesDataset verifies that Import replaces the dataset
+// with the contents of the snapshot file.
 func TestDiskStore_Import_ReplacesDataset(t *testing.T) {
 	t.Parallel()
 
