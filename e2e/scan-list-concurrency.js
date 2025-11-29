@@ -1,7 +1,7 @@
 import { check } from 'k6';
 import exec from 'k6/execution';
 import encoding from 'k6/encoding';
-import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
+import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: CONCURRENT SCAN + LIST EXPORTS
@@ -46,8 +46,11 @@ const KEY_PADDING = 6;
 // Number of tenant shards for invoice distribution.
 const TENANT_COUNT = 25;
 
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'scan-list-concurrency';
+
 // kv is the shared store client used throughout the scenario.
-const kv = createKv();
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -61,7 +64,8 @@ export const options = {
 
 // setup seeds a deterministic invoice dataset before contention begins.
 export async function setup() {
-  await kv.clear();
+  const standardSetup = createSetup(kv);
+  await standardSetup();
 
   for (let i = 0; i < TOTAL_INVOICES; i += 1) {
     const paddedId = String(i).padStart(KEY_PADDING, '0');
@@ -76,7 +80,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv);
+export const teardown = createTeardown(kv, TEST_NAME);
 
 // encodeCursor mimics the cursor encoding performed by Scan().
 // encodeCursor wraps encoding.b64encode for readability inside scan tasks.

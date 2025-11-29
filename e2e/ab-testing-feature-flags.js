@@ -1,6 +1,6 @@
 import { check } from 'k6';
 import exec from 'k6/execution';
-import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
+import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: A/B TESTING & FEATURE FLAGS SYSTEM
@@ -10,40 +10,40 @@ import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
 // manage feature toggles, track usage, and perform controlled rollouts.
 // This is a critical pattern in:
 //
-// - E-commerce platforms (testing checkout flows, product recommendations)
-// - Social media platforms (testing UI changes, algorithm updates)
-// - SaaS applications (testing new features, pricing models)
-// - Mobile applications (testing app features, UI layouts)
-// - Content platforms (testing article layouts, recommendation engines)
-// - Gaming platforms (testing game mechanics, monetization features)
+// - E-commerce platforms (testing checkout flows, product recommendations).
+// - Social media platforms (testing UI changes, algorithm updates).
+// - SaaS applications (testing new features, pricing models).
+// - Mobile applications (testing app features, UI layouts).
+// - Content platforms (testing article layouts, recommendation engines).
+// - Gaming platforms (testing game mechanics, monetization features).
 //
 // REAL-WORLD PROBLEM SOLVED:
 // Multiple users accessing features with different configurations simultaneously.
 // Without proper feature flag management, you get:
-// - Inconsistent user experiences (some users see features, others don't)
-// - Failed A/B tests (contaminated results)
-// - Rollback difficulties (can't quickly disable problematic features)
-// - Poor analytics (inaccurate usage tracking)
-// - Revenue impact (broken features affecting conversions)
+// - Inconsistent user experiences (some users see features, others don't).
+// - Failed A/B tests (contaminated results).
+// - Rollback difficulties (can't quickly disable problematic features).
+// - Poor analytics (inaccurate usage tracking).
+// - Revenue impact (broken features affecting conversions).
 //
 // ATOMIC OPERATIONS TESTED:
-// - getOrSet(): Initialize feature flags with defaults
-// - incrementBy(): Track feature usage statistics
-// - compareAndSwap(): Update feature configurations atomically
-// - exists(): Verify feature flag availability
-// - list(): Monitor all feature flags
+// - getOrSet(): Initialize feature flags with defaults.
+// - incrementBy(): Track feature usage statistics.
+// - compareAndSwap(): Update feature configurations atomically.
+// - exists(): Verify feature flag availability.
+// - list(): Monitor all feature flags.
 //
 // CONCURRENCY PATTERN:
-// - Multiple VUs represent different users
-// - Each VU checks feature flags and tracks usage
-// - Shared KV store ensures consistent feature state
-// - Deterministic retry loops ensure every CAS succeeds or surfaces a bug
+// - Multiple VUs represent different users.
+// - Each VU checks feature flags and tracks usage.
+// - Shared KV store ensures consistent feature state.
+// - Deterministic retry loops ensure every CAS succeeds or surfaces a bug.
 //
 // PERFORMANCE CHARACTERISTICS:
-// - High read frequency (every user interaction)
-// - Critical for user experience and business decisions
-// - Must handle thousands of concurrent feature checks
-// - Low latency impact (feature checks should be fast)
+// - High read frequency (every user interaction).
+// - Critical for user experience and business decisions.
+// - Must handle thousands of concurrent feature checks.
+// - Low latency impact (feature checks should be fast).
 
 // Feature flags being tested in this scenario.
 const FLAG_NAMES = ['new-checkout', 'dark-mode', 'premium-features', 'beta-search'];
@@ -54,8 +54,11 @@ const MAX_CAS_RETRIES = parseInt(__ENV.MAX_CAS_RETRIES || '1000', 10);
 // Number of user buckets for A/B test rollout (0-99 = 100 buckets for percentage-based rollouts).
 const BUCKET_COUNT = 100;
 
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'ab-testing-feature-flags';
+
 // kv is the shared store client used throughout the scenario.
-const kv = createKv();
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -73,7 +76,8 @@ export const options = {
 // setup creates a known flag set so monitoring checks can assert the exact
 // number of entries returned by list().
 export async function setup() {
-  await kv.clear();
+  const standardSetup = createSetup(kv);
+  await standardSetup();
 
   for (const flagName of FLAG_NAMES) {
     await kv.set(`flag:${flagName}`, buildDefaultFlag(flagName));
@@ -81,7 +85,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv);
+export const teardown = createTeardown(kv, TEST_NAME);
 
 // abTestingFeatureFlagsTest emulates a user checking gates, recording usage, and
 // occasionally acting as an admin to change rollout percentages.

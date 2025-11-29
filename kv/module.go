@@ -106,9 +106,9 @@ func (rm *RootModule) getOrCreateStore(options Options) (store.Store, bool, erro
 		// Reject re-configuration attempts to prevent confusion and data loss.
 		// Users must use consistent options across all VUs in a test.
 		return nil, false, fmt.Errorf(
-			"%w: backend=%q serialization=%q trackKeys=%t path=%q",
+			"%w: backend=%q path=%q serialization=%q trackKeys=%t shardCount=%d",
 			store.ErrKVOptionsConflict,
-			rm.opts.Backend, rm.opts.Serialization, rm.opts.TrackKeys, rm.opts.Path,
+			rm.opts.Backend, rm.opts.Path, rm.opts.Serialization, rm.opts.TrackKeys, rm.opts.ShardCount,
 		)
 	}
 
@@ -144,7 +144,7 @@ func (rm *RootModule) getOrCreateStore(options Options) (store.Store, bool, erro
 func (rm *RootModule) createBaseStore(options Options) (store.Store, error) {
 	switch options.Backend {
 	case BackendMemory:
-		return store.NewMemoryStore(options.TrackKeys), nil
+		return store.NewMemoryStore(options.TrackKeys, options.ShardCount), nil
 	case BackendDisk:
 		diskStore, err := store.NewDiskStore(options.TrackKeys, options.Path)
 		if err != nil {
@@ -248,20 +248,26 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 type Options struct {
 	// Backend selects the storage engine backing the KV store.
 	// Valid values: "memory" (ephemeral), "disk" (persistent).
-	Backend string `json:"backend"`
+	Backend string `js:"backend"`
 
 	// Path points to the BoltDB file when using the disk backend.
 	// When empty or invalid the default path is used.
 	// Ignored by the memory backend.
-	Path string `json:"path"`
+	Path string `js:"path"`
 
 	// Serialization selects how values are encoded/decoded when stored.
 	// Valid values: "json" (structured), "string" (raw string to []byte).
-	Serialization string `json:"serialization"`
+	Serialization string `js:"serialization"`
 
 	// TrackKeys enables in-memory key indexing for faster List/RandomKey/prefix ops.
 	// This consumes additional memory proportional to the number of keys.
-	TrackKeys bool `json:"trackKeys"`
+	TrackKeys bool `js:"trackKeys"`
+
+	// ShardCount sets the number of shards for the memory backend.
+	// If <= 0, defaults to runtime.NumCPU() (automatic).
+	// If > store.MaxShardCount, capped at store.MaxShardCount.
+	// Ignored by the disk backend.
+	ShardCount int `js:"shardCount"`
 }
 
 // NewOptionsFrom converts a Sobek (JS) value into an Options instance, applying defaults
@@ -289,14 +295,6 @@ func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
 		)
 	}
 
-	// Validate serialization.
-	if opts.Serialization != SerializationJSON && opts.Serialization != SerializationString {
-		return opts, fmt.Errorf(
-			"%w: %q; valid values are: %q, %q",
-			store.ErrInvalidSerialization, opts.Serialization, SerializationJSON, SerializationString,
-		)
-	}
-
 	if opts.Backend == BackendDisk {
 		canonicalPath, err := store.ResolveDiskPath(opts.Path)
 		if err != nil {
@@ -306,13 +304,27 @@ func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
 		opts.Path = canonicalPath
 	}
 
+	// Validate serialization.
+	if opts.Serialization != SerializationJSON && opts.Serialization != SerializationString {
+		return opts, fmt.Errorf(
+			"%w: %q; valid values are: %q, %q",
+			store.ErrInvalidSerialization, opts.Serialization, SerializationJSON, SerializationString,
+		)
+	}
+
+	// Validate shardCount for memory backend (ignored for disk backend).
+	if opts.Backend == BackendMemory {
+		opts.ShardCount = store.MaxShardCount
+	}
+
 	return opts, nil
 }
 
 // Equal checks if two Options are equal.
 func (o Options) Equal(other Options) bool {
 	return o.Backend == other.Backend &&
+		o.Path == other.Path &&
 		o.Serialization == other.Serialization &&
 		o.TrackKeys == other.TrackKeys &&
-		o.Path == other.Path
+		o.ShardCount == other.ShardCount
 }

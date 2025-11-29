@@ -10,43 +10,46 @@ import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common
 // track request counts per user and atomically reset counters when limits
 // are exceeded. This is a critical pattern in:
 //
-// - REST APIs (GitHub, Twitter, Stripe APIs)
-// - Microservices architectures (service-to-service communication)
-// - Payment processing systems (prevent fraud and abuse)
-// - Content delivery networks (CDN rate limiting)
-// - IoT device management (prevent device spam)
-// - Social media platforms (prevent bot abuse)
+// - REST APIs (GitHub, Twitter, Stripe APIs).
+// - Microservices architectures (service-to-service communication).
+// - Payment processing systems (prevent fraud and abuse).
+// - Content delivery networks (CDN rate limiting).
+// - IoT device management (prevent device spam).
+// - Social media platforms (prevent bot abuse).
 //
 // REAL-WORLD PROBLEM SOLVED:
 // Multiple clients/users making API requests simultaneously.
 // Without proper rate limiting, you get:
-// - API abuse and DoS attacks
-// - Resource exhaustion (CPU, memory, database connections)
-// - Unfair usage (some users hog all resources)
-// - Increased costs (cloud resources, bandwidth)
-// - Poor service quality for legitimate users
+// - API abuse and DoS attacks.
+// - Resource exhaustion (CPU, memory, database connections).
+// - Unfair usage (some users hog all resources).
+// - Increased costs (cloud resources, bandwidth).
+// - Poor service quality for legitimate users.
 //
 // ATOMIC OPERATIONS TESTED:
-// - incrementBy(): Atomically increment request counter per user
-// - compareAndSwap(): Reset counters atomically when limit exceeded
-// - get(): Read current counter value
+// - incrementBy(): Atomically increment request counter per user.
+// - compareAndSwap(): Reset counters atomically when limit exceeded.
+// - get(): Read current counter value.
 //
 // CONCURRENCY PATTERN:
-// - Multiple VUs represent different API clients/users
-// - Each VU increments its counter and resets when threshold reached
-// - Shared KV store ensures accurate counting under contention
+// - Multiple VUs represent different API clients/users.
+// - Each VU increments its counter and resets when threshold reached.
+// - Shared KV store ensures accurate counting under contention.
 //
 // PERFORMANCE CHARACTERISTICS:
-// - High frequency operations (every API call)
-// - Critical for service availability and security
-// - Must handle thousands of requests per second
-// - Low latency impact (rate limiting should be fast)
+// - High frequency operations (every API call).
+// - Critical for service availability and security.
+// - Must handle thousands of requests per second.
+// - Low latency impact (rate limiting should be fast).
 
 // Counter reset threshold - when counter reaches this value, trigger atomic reset via CAS.
 const RESET_THRESHOLD = parseInt(__ENV.RESET_THRESHOLD || '50', 10);
 
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'api-rate-limiting';
+
 // kv is the shared store client used throughout the scenario.
-const kv = createKv();
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -62,7 +65,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv);
+export const teardown = createTeardown(kv, TEST_NAME);
 
 // apiRateLimitingTest represents a single API call: increment usage counter,
 // and reset when threshold is reached using compareAndSwap.

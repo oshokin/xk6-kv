@@ -1,6 +1,6 @@
 import { check } from 'k6';
 import exec from 'k6/execution';
-import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
+import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: BACKGROUND JOB PROCESSING SYSTEM
@@ -10,40 +10,40 @@ import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
 // jobs and consumers process them atomically to avoid race conditions.
 // This is a fundamental pattern in:
 //
-// - Email delivery systems (SendGrid, Mailgun)
-// - Image/video processing pipelines (AWS SQS, Google Cloud Tasks)
-// - Data processing workflows (Apache Kafka, RabbitMQ)
-// - Notification systems (push notifications, SMS)
-// - Report generation systems (analytics, billing reports)
-// - File processing systems (document conversion, virus scanning)
+// - Email delivery systems (SendGrid, Mailgun).
+// - Image/video processing pipelines (AWS SQS, Google Cloud Tasks).
+// - Data processing workflows (Apache Kafka, RabbitMQ).
+// - Notification systems (push notifications, SMS).
+// - Report generation systems (analytics, billing reports).
+// - File processing systems (document conversion, virus scanning).
 //
 // REAL-WORLD PROBLEM SOLVED:
 // Multiple workers competing to process the same job simultaneously.
 // Without proper job management, you get:
-// - Duplicate job processing (wasted resources)
-// - Lost jobs (jobs never get processed)
-// - Race conditions (multiple workers on same job)
-// - Inconsistent job state (partially processed jobs)
-// - Resource waste (CPU, memory, network)
+// - Duplicate job processing (wasted resources).
+// - Lost jobs (jobs never get processed).
+// - Race conditions (multiple workers on same job).
+// - Inconsistent job state (partially processed jobs).
+// - Resource waste (CPU, memory, network).
 //
 // ATOMIC OPERATIONS TESTED:
-// - randomKey(): Find available jobs to process
-// - compareAndSwap(): Atomically claim job slots (deterministic ownership)
-// - deleteIfExists(): Complete job processing atomically
-// - set(): Recycle job slots for future work
-// - list(): Monitor queue health
+// - randomKey(): Find available jobs to process.
+// - compareAndSwap(): Atomically claim job slots (deterministic ownership).
+// - deleteIfExists(): Complete job processing atomically.
+// - set(): Recycle job slots for future work.
+// - list(): Monitor queue health.
 //
 // CONCURRENCY PATTERN:
-// - Producer: VUs recycle completed jobs back into the queue
-// - Consumer: VUs process existing jobs
-// - Coordination: Shared KV store prevents duplicate processing
-// - Atomic claiming ensures only one worker per job
+// - Producer: VUs recycle completed jobs back into the queue.
+// - Consumer: VUs process existing jobs.
+// - Coordination: Shared KV store prevents duplicate processing.
+// - Atomic claiming ensures only one worker per job.
 //
 // PERFORMANCE CHARACTERISTICS:
-// - High throughput (thousands of jobs per second)
-// - Critical for system reliability and resource efficiency
-// - Must handle job failures gracefully
-// - Low latency for job claiming (fast worker assignment)
+// - High throughput (thousands of jobs per second).
+// - Critical for system reliability and resource efficiency.
+// - Must handle job failures gracefully.
+// - Low latency for job claiming (fast worker assignment).
 
 // Key prefix for all job records in the queue.
 const JOB_KEY_PREFIX = 'job:';
@@ -60,8 +60,11 @@ const JOB_KEY_PAD_WIDTH = parseInt(__ENV.JOB_KEY_PAD_WIDTH || '4', 10);
 // Number of jobs to sample when monitoring queue health via list().
 const MONITORING_LIST_LIMIT = parseInt(__ENV.MONITORING_LIST_LIMIT || '5', 10);
 
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'background-job-processing';
+
 // kv is the shared store client used throughout the scenario.
-const kv = createKv();
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -77,7 +80,8 @@ export const options = {
 // setup seeds deterministic job slots so we can prove deterministic fairness
 // across backends, including disk.
 export async function setup() {
-  await kv.clear();
+  const standardSetup = createSetup(kv);
+  await standardSetup();
 
   for (let i = 0; i < JOB_SLOT_COUNT; i++) {
     await kv.set(jobKeyFromIndex(i), buildQueuedJob(i));
@@ -85,7 +89,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv);
+export const teardown = createTeardown(kv, TEST_NAME);
 
 // backgroundJobProcessingTest claims slots, simulates work, recycles the job, and
 // emits health metrics-touching every atomic helper the queue exposes.

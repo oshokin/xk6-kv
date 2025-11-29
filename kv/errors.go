@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/grafana/sobek"
+
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
@@ -116,6 +118,9 @@ const (
 
 	// UnexpectedStoreOutputError is emitted when the store returns a nil value without an accompanying error.
 	UnexpectedStoreOutputError ErrorName = "UnexpectedStoreOutputError"
+
+	// UnknownError is emitted when an error cannot be classified into any specific category.
+	UnknownError = "UnknownError"
 )
 
 // ErrUnexpectedStoreOutput indicates a store implementation returned a nil result without an error.
@@ -124,10 +129,10 @@ var ErrUnexpectedStoreOutput = errors.New("unexpected store output")
 // Error represents a custom error emitted by the kv module.
 type Error struct {
 	// Name contains one of the strings associated with an error name.
-	Name ErrorName `json:"name"`
+	Name ErrorName
 
 	// Message represents message or description associated with the given error name.
-	Message string `json:"message"`
+	Message string
 }
 
 // NewError returns a new Error instance.
@@ -143,10 +148,31 @@ func (e *Error) Error() string {
 	return string(e.Name) + ": " + e.Message
 }
 
+// ToSobekValue converts the error into a native JS object with "name" and "message" properties.
+// This ensures JS catch blocks can use err.name === "SomeError".
+func (e *Error) ToSobekValue(rt *sobek.Runtime) sobek.Value {
+	errorMessage := e.Error()
+	obj := rt.NewObject()
+
+	err := obj.Set("name", string(e.Name))
+	if err != nil {
+		// Fallback: return error message as plain string.
+		return rt.ToValue(errorMessage)
+	}
+
+	err = obj.Set("message", e.Message)
+	if err != nil {
+		// Fallback: return error message as plain string.
+		return rt.ToValue(errorMessage)
+	}
+
+	return obj
+}
+
 // classifyError downgrades internal Go errors to structured kv errors for JS.
 //
 //nolint:cyclop,funlen // this is a complex function but it is necessary to classify errors.
-func classifyError(err error) error {
+func classifyError(err error) *Error {
 	if err == nil {
 		return nil
 	}
@@ -193,7 +219,8 @@ func classifyError(err error) error {
 		return NewError(DiskStoreDeleteError, err.Error())
 	case errors.Is(err, store.ErrDiskStoreExistsFailed):
 		return NewError(DiskStoreExistsError, err.Error())
-	case errors.Is(err, store.ErrDiskStoreScanFailed):
+	case errors.Is(err, store.ErrDiskStoreScanFailed),
+		errors.Is(err, store.ErrUnexpectedHeapType):
 		return NewError(DiskStoreScanError, err.Error())
 	case errors.Is(err, store.ErrDiskStoreSizeFailed),
 		errors.Is(err, store.ErrDiskStoreCountFailed),
@@ -247,7 +274,7 @@ func classifyError(err error) error {
 		return NewError(UnexpectedStoreOutputError, err.Error())
 	}
 
-	return err
+	return NewError(UnknownError, err.Error())
 }
 
 // unexpectedStoreOutput returns an error indicating that a store implementation

@@ -68,6 +68,20 @@ declare module 'k6/x/kv' {
      * @default false
      */
     trackKeys?: boolean;
+
+    /**
+     * Number of shards for the memory backend (memory backend only).
+     * - If <= 0 or omitted: defaults to runtime.NumCPU() (automatic, recommended)
+     * - If > 65536: automatically capped at 65536 (MaxShardCount)
+     * - Ignored by disk backend
+     * 
+     * Sharding improves concurrent performance by reducing lock contention.
+     * On high-core systems (e.g., AMD Ryzen 9 9950X with 32 cores), 
+     * automatic sharding delivers 3.5x faster writes and 2x faster reads.
+     * 
+     * @default 0 (auto-detect based on CPU count)
+     */
+    shardCount?: number;
   }
 
   /**
@@ -619,7 +633,8 @@ declare module 'k6/x/kv' {
    * // In-memory backend with key tracking
    * const kv = openKv({
    *   backend: 'memory',
-   *   trackKeys: true
+   *   trackKeys: true,
+   *   shardCount: 0
    * });
    *
    * // Disk backend with custom path

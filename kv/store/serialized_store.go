@@ -31,12 +31,13 @@ func (s *SerializedStore) Open() error {
 // the configured serializer. If the underlying store returns a type other than
 // []byte or string, that value is returned as-is.
 func (s *SerializedStore) Get(key string) (any, error) {
-	// Get the raw value from the store.
+	// Get the raw value from the store (typically []byte from serialization).
 	rawValue, err := s.store.Get(key)
 	if err != nil {
 		return nil, err
 	}
 
+	// Deserialize to convert raw bytes back to the original type.
 	return s.deserializeValue(rawValue)
 }
 
@@ -90,10 +91,11 @@ func (s *SerializedStore) Swap(key string, value any) (any, bool, error) {
 	prevRaw, loaded, err := s.store.Swap(key, serializedValue)
 	if err != nil || !loaded {
 		// Either an error occurred, or the key didn't exist (loaded=false).
+		// In both cases, return nil for previous value (no previous value to decode).
 		return nil, loaded, err
 	}
 
-	// Decode the returned value.
+	// Decode the returned value: key existed, so we have a previous value to deserialize.
 	prevDecoded, err := s.deserializeValue(prevRaw)
 
 	return prevDecoded, true, err
@@ -240,22 +242,27 @@ func (s *SerializedStore) SetSerializer(serializer Serializer) {
 // deserializeValue decodes a raw value coming from the underlying store.
 // Supported raw input types are: []byte and string. Any other type is returned
 // as-is (assumed already deserialized by the underlying store).
+// This handles different store implementations that may return different raw types.
 func (s *SerializedStore) deserializeValue(raw any) (any, error) {
 	switch v := raw.(type) {
-	// Handle byte slice values.
+	// Handle byte slice values: most common case from disk-backed stores.
+	// No cloning needed: stores already return copies via slices.Clone.
 	case []byte:
 		return s.serializer.Deserialize(v)
 	// Handle string values from stores that don't use byte slices.
+	// Convert to []byte for deserialization.
 	case string:
 		return s.serializer.Deserialize([]byte(v))
 	default:
 		// Already a structured value (e.g., MemoryStore can keep native values).
+		// No deserialization needed: return as-is.
 		return raw, nil
 	}
 }
 
 // deserializeEntries applies deserializeValue to each Entry in a batch returned
 // by List, preserving keys and converting values as needed.
+// No cloning is performed here: stores already return defensive copies of data.
 func (s *SerializedStore) deserializeEntries(rawEntries []Entry) ([]Entry, error) {
 	entries := make([]Entry, len(rawEntries))
 

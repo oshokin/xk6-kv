@@ -3,74 +3,85 @@ package store
 import (
 	"bytes"
 	"fmt"
-	"math/rand/v2"
+	"runtime"
 	"slices"
-	"sort"
 	"strconv"
-	"strings"
 	"sync"
 )
 
-type (
-	// MemoryStore is an in-memory key-value store implementation.
-	// It is safe for concurrent use. When trackKeys is enabled, the store
-	// maintains auxiliary structures to support O(1) random selection without
-	// prefixes and O(log n) random selection with prefixes via an order-statistics
-	// tree (OSTree). When trackKeys is disabled, RandomKey falls back to an O(n)
-	// two-pass scan.
-	MemoryStore struct {
-		// container is the in-memory key-value store.
-		container map[string][]byte
-		// trackKeys is whether key tracking is enabled.
-		trackKeys bool
-		// keysList is a slice of all keys for O(1) random access when no prefix is used.
-		keysList []string
-		// keysMap is a map from key to index in keysList for O(1) deletes.
-		keysMap map[string]int
-		// ost is an order-statistics tree for prefix-based random selection.
-		ost *OSTree
-		// writerCount tracks the number of active writer goroutines.
-		writerCount int64
-		// writerMu protects writerCount and mutation blocking state.
-		writerMu sync.Mutex
-		// allWritersDone signals when writerCount reaches zero.
-		allWritersDone *sync.Cond
-		// isMutationBlocked tracks whether mutations are blocked.
-		isMutationBlocked bool
-		// mutationBlockReason holds the reason for the mutation block.
-		mutationBlockReason error
-		// mu protects the container and key tracking structures.
-		mu sync.RWMutex
-	}
-)
+// MaxShardCount is the maximum number of shards allowed.
+// 65536 (2^16) is a reasonable upper bound that provides excellent hash distribution
+// while keeping memory overhead minimal (~5MB for empty shard structures).
+// This limit is well beyond any practical CPU core count, allowing fine-grained
+// control for extreme concurrency scenarios.
+const MaxShardCount = 65536
 
-// NewMemoryStore creates a new MemoryStore.
-// If trackKeys is true, auxiliary key indexes (keysList/keysMap/OSTree) are
-// initialized to accelerate RandomKey() calls.
-func NewMemoryStore(trackKeys bool) *MemoryStore {
-	var idx *OSTree
-	if trackKeys {
-		idx = NewOSTree()
+// MemoryStore is an in-memory key-value store implementation backed by sharded maps.
+// Sharding improves scalability under concurrent workloads while preserving optional
+// key tracking structures for deterministic scans and random selection.
+type MemoryStore struct {
+	// shardCount is the number of shards to use.
+	shardCount int
+	// trackKeys is a flag to enable key tracking.
+	trackKeys bool
+	// shards is the array of shards.
+	shards []*memoryShard
+	// hashFn is the function to use to hash the key to a shard.
+	hashFn shardHashFunc
+	// mutationGate allows writers to run concurrently while still supporting mutation blocking.
+	// Uses RWMutex: writers acquire RLock (shared), blockers acquire Lock (exclusive).
+	mutationGate sync.RWMutex
+	// isMutationBlocked is a flag to indicate if mutations are blocked.
+	// Checked while holding mutationGate lock to avoid races.
+	isMutationBlocked bool
+	// mutationBlockReason is the reason why mutations are blocked.
+	// Stored so blocked operations can return a descriptive error.
+	mutationBlockReason error
+}
+
+// NewMemoryStore creates a MemoryStore configured with the provided shard count.
+// If shardCount <= 0, it defaults to runtime.NumCPU().
+// If shardCount > MaxShardCount, it is capped at MaxShardCount.
+func NewMemoryStore(trackKeys bool, shardCount int) *MemoryStore {
+	if shardCount <= 0 {
+		shardCount = max(1, runtime.NumCPU())
+	}
+
+	if shardCount > MaxShardCount {
+		shardCount = MaxShardCount
 	}
 
 	store := &MemoryStore{
-		mu:        sync.RWMutex{},
-		container: map[string][]byte{},
-		trackKeys: trackKeys,
-		keysList:  []string{},
-		keysMap:   make(map[string]int),
-		ost:       idx,
+		shardCount: shardCount,
+		trackKeys:  trackKeys,
+		shards:     make([]*memoryShard, shardCount),
+		hashFn:     selectShardHashFunc(defaultShardHashStrategy),
 	}
 
-	// Initialize condition variable for writer synchronization.
-	store.allWritersDone = sync.NewCond(&store.writerMu)
+	for i := range store.shards {
+		shard := &memoryShard{
+			container: make(map[string][]byte),
+		}
+
+		if trackKeys {
+			shard.keysList = []string{}
+			shard.keysMap = make(map[string]int)
+			shard.ost = NewOSTree()
+		}
+
+		store.shards[i] = shard
+	}
 
 	return store
 }
 
-// Open prepares the store for use.
-// MemoryStore keeps everything in-memory, so there is nothing to initialize.
+// Open prepares the store for use (no-op for in-memory store).
 func (s *MemoryStore) Open() error {
+	return nil
+}
+
+// Close releases resources held by the store (no-op for in-memory store).
+func (s *MemoryStore) Close() error {
 	return nil
 }
 
@@ -78,25 +89,28 @@ func (s *MemoryStore) Open() error {
 // The returned value is the stored bytes; serialization concerns are handled
 // by the SerializedStore wrapper. If the key does not exist, an error is returned.
 func (s *MemoryStore) Get(key string) (any, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	shard := s.getShardByKey(key)
 
-	value, ok := s.container[key]
+	shard.mu.RLock()
+	value, ok := shard.container[key]
+	shard.mu.RUnlock()
+
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", ErrKeyNotFound, key)
 	}
 
-	// Return the raw bytes - serialization will be handled by the SerializedStore wrapper.
-	return value, nil
+	// Return a defensive copy so callers cannot mutate the stored value.
+	return slices.Clone(value), nil
 }
 
 // Set associates value with key, overwriting any previous value.
 // The value must be a []byte or string; other types result in an error.
 func (s *MemoryStore) Set(key string, value any) error {
-	if err := s.guardMutation(); err != nil {
+	release, err := s.guardMutation()
+	if err != nil {
 		return err
 	}
-	defer s.finishWriter()
+	defer release()
 
 	// Convert value to bytes if it's not already.
 	valueBytes, err := normalizeToBytes(value)
@@ -104,16 +118,18 @@ func (s *MemoryStore) Set(key string, value any) error {
 		return err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	shard := s.getShardByKey(key)
 
-	// Check if key already exists.
-	_, existed := s.container[key]
-	s.container[key] = valueBytes
+	shard.mu.Lock()
+	_, existed := shard.container[key]
 
+	shard.container[key] = valueBytes
+	// Only update tracking structures for new keys to avoid unnecessary work.
 	if !existed {
-		s.addKeyLocked(key)
+		shard.addKeyTrackingLocked(key)
 	}
+
+	shard.mu.Unlock()
 
 	return nil
 }
@@ -122,19 +138,20 @@ func (s *MemoryStore) Set(key string, value any) error {
 // Absent keys are treated as 0. Values must be decimal ASCII int64.
 // Returns the new value as int64.
 func (s *MemoryStore) IncrementBy(key string, delta int64) (int64, error) {
-	if err := s.guardMutation(); err != nil {
+	release, err := s.guardMutation()
+	if err != nil {
 		return 0, err
 	}
-	defer s.finishWriter()
+	defer release()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	shard := s.getShardByKey(key)
 
-	// Parse current value or start from 0.
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
 	var current int64
 
-	if b, exists := s.container[key]; exists && len(b) > 0 {
-		// Parse current as base-10 int64.
+	if b, exists := shard.container[key]; exists && len(b) > 0 {
 		v, err := strconv.ParseInt(string(b), 10, 64)
 		if err != nil {
 			return 0, fmt.Errorf("%w: key %q: %w", ErrValueParseFailed, key, err)
@@ -144,27 +161,25 @@ func (s *MemoryStore) IncrementBy(key string, delta int64) (int64, error) {
 	}
 
 	current += delta
-	s.container[key] = []byte(strconv.FormatInt(current, 10))
+	shard.container[key] = []byte(strconv.FormatInt(current, 10))
 
-	// If this is a new key, index it.
-	// Check keysMap instead of container to avoid double-lookup overhead.
-	if _, existed := s.keysMap[key]; s.trackKeys && !existed {
-		// Note: addKeyLocked internally re-checks existence defensively,
-		// so this is safe even under concurrent reads.
-		s.addKeyLocked(key)
+	// Check keysMap existence before adding to tracking to avoid duplicate entries.
+	// This handles the case where IncrementBy creates a new key.
+	if _, existed := shard.keysMap[key]; s.trackKeys && !existed {
+		shard.addKeyTrackingLocked(key)
 	}
 
 	return current, nil
 }
 
 // GetOrSet returns the existing value (loaded=true) if key is present,
-// otherwise stores "value" and returns it (loaded=false).
-// The stored value is always a copy of the provided bytes/string.
+// otherwise stores value and returns it (loaded=false).
 func (s *MemoryStore) GetOrSet(key string, value any) (actual any, loaded bool, err error) {
-	if err := s.guardMutation(); err != nil {
+	release, err := s.guardMutation()
+	if err != nil {
 		return nil, false, err
 	}
-	defer s.finishWriter()
+	defer release()
 
 	// Convert value to bytes.
 	valueBytes, err := normalizeToBytes(value)
@@ -172,29 +187,34 @@ func (s *MemoryStore) GetOrSet(key string, value any) (actual any, loaded bool, 
 		return nil, false, err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	shard := s.getShardByKey(key)
 
-	// Check if key exists.
-	if existing, exists := s.container[key]; exists {
-		// Return the existing raw bytes as-is.
-		return existing, true, nil
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	if existing, exists := shard.container[key]; exists {
+		cloned, err := normalizeToBytes(existing)
+		if err != nil {
+			return nil, true, err
+		}
+
+		return cloned, true, nil
 	}
 
-	// Store new value.
-	s.container[key] = valueBytes
-	s.addKeyLocked(key)
+	shard.container[key] = valueBytes
+	shard.addKeyTrackingLocked(key)
 
-	return valueBytes, false, nil
+	return slices.Clone(valueBytes), false, nil
 }
 
-// Swap replaces the current value for key with "value", returning the previous
-// value and whether it existed.
+// Swap replaces the current value for key with value, returning the previous value
+// (cloned) and whether it existed.
 func (s *MemoryStore) Swap(key string, value any) (previous any, loaded bool, err error) {
-	if err := s.guardMutation(); err != nil {
+	release, err := s.guardMutation()
+	if err != nil {
 		return nil, false, err
 	}
-	defer s.finishWriter()
+	defer release()
 
 	// Convert value to bytes.
 	valueBytes, err := normalizeToBytes(value)
@@ -202,40 +222,36 @@ func (s *MemoryStore) Swap(key string, value any) (previous any, loaded bool, er
 		return nil, false, err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	shard := s.getShardByKey(key)
 
-	// If key exists, replace and return previous value (optionally copy for safety).
-	if current, ok := s.container[key]; ok {
-		// Return a copy so callers can't mutate internal storage by accident.
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	if current, ok := shard.container[key]; ok {
 		prev := slices.Clone(current)
-		s.container[key] = valueBytes
+		shard.container[key] = valueBytes
 
 		return prev, true, nil
 	}
 
-	// First insert: add and return a true nil interface for previous.
-	s.container[key] = valueBytes
-	s.addKeyLocked(key)
+	shard.container[key] = valueBytes
+	shard.addKeyTrackingLocked(key)
 
 	return nil, false, nil
 }
 
-// CompareAndSwap atomically replaces the current value with "new" only if the
-// current value equals "old". Returns true if the swap occurred.
-// Both "old" and "new" must be []byte or string.
+// CompareAndSwap atomically replaces the current value with newValue only if the
+// current value equals oldValue (or the key is absent when oldValue is nil).
 func (s *MemoryStore) CompareAndSwap(key string, oldValue any, newValue any) (bool, error) {
-	if err := s.guardMutation(); err != nil {
+	release, err := s.guardMutation()
+	if err != nil {
 		return false, err
 	}
-	defer s.finishWriter()
+	defer release()
 
 	expectAbsent := oldValue == nil
 
-	var (
-		oldBytes []byte
-		err      error
-	)
+	var oldBytes []byte
 
 	if !expectAbsent {
 		oldBytes, err = normalizeToBytes(oldValue)
@@ -250,61 +266,69 @@ func (s *MemoryStore) CompareAndSwap(key string, oldValue any, newValue any) (bo
 		return false, err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	shard := s.getShardByKey(key)
 
-	// Get current value.
-	current, exists := s.container[key]
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	current, exists := shard.container[key]
 
 	switch {
 	case expectAbsent:
+		// CAS with nil oldValue: only succeed if key doesn't exist.
 		if exists {
 			return false, nil
 		}
 
-		s.container[key] = newBytes
-		s.addKeyLocked(key)
+		shard.container[key] = newBytes
+		shard.addKeyTrackingLocked(key)
 
 		return true, nil
 	default:
+		// CAS with non-nil oldValue: compare current value byte-for-byte.
 		if !exists || !bytes.Equal(current, oldBytes) {
 			return false, nil
 		}
 
-		s.container[key] = newBytes
+		shard.container[key] = newBytes
 
 		// Indexes do not change because the key already existed.
+		// No need to update keysList/keysMap/OSTree for existing keys.
 		return true, nil
 	}
 }
 
-// Delete removes key if present. It is not an error if the key does not exist.
-// When trackKeys is enabled, auxiliary indexes are maintained consistently.
+// Delete removes key if present.
 func (s *MemoryStore) Delete(key string) error {
-	if err := s.guardMutation(); err != nil {
+	release, err := s.guardMutation()
+	if err != nil {
 		return err
 	}
-	defer s.finishWriter()
+	defer release()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	shard := s.getShardByKey(key)
 
-	if _, existed := s.container[key]; !existed {
+	shard.mu.Lock()
+
+	if _, existed := shard.container[key]; !existed {
+		shard.mu.Unlock()
 		return nil
 	}
 
-	delete(s.container, key)
-	s.removeKeyLocked(key)
+	delete(shard.container, key)
+	shard.removeKeyTrackingLocked(key)
+	shard.mu.Unlock()
 
 	return nil
 }
 
 // Exists reports whether key is present in the store.
 func (s *MemoryStore) Exists(key string) (bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	shard := s.getShardByKey(key)
 
-	_, ok := s.container[key]
+	shard.mu.RLock()
+	_, ok := shard.container[key]
+	shard.mu.RUnlock()
 
 	return ok, nil
 }
@@ -312,21 +336,13 @@ func (s *MemoryStore) Exists(key string) (bool, error) {
 // Clear removes all keys and values from the store.
 // When trackKeys is enabled, auxiliary indexes are fully reset as well.
 func (s *MemoryStore) Clear() error {
-	if err := s.guardMutation(); err != nil {
+	release, err := s.guardMutation()
+	if err != nil {
 		return err
 	}
-	defer s.finishWriter()
+	defer release()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.container = make(map[string][]byte)
-
-	if s.trackKeys {
-		s.keysList = []string{}
-		s.keysMap = make(map[string]int)
-		s.ost = NewOSTree()
-	}
+	s.clearAllShardsUnsafe()
 
 	return nil
 }
@@ -334,141 +350,70 @@ func (s *MemoryStore) Clear() error {
 // DeleteIfExists deletes key only if present.
 // Returns true if a deletion occurred.
 func (s *MemoryStore) DeleteIfExists(key string) (bool, error) {
-	if err := s.guardMutation(); err != nil {
+	release, err := s.guardMutation()
+	if err != nil {
 		return false, err
 	}
-	defer s.finishWriter()
+	defer release()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	shard := s.getShardByKey(key)
 
-	if _, exists := s.container[key]; !exists {
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	if _, exists := shard.container[key]; !exists {
 		return false, nil
 	}
 
-	delete(s.container, key)
-	s.removeKeyLocked(key)
+	delete(shard.container, key)
+	shard.removeKeyTrackingLocked(key)
 
 	return true, nil
 }
 
-// CompareAndDelete deletes key only if the current value equals "oldValue".
-// Returns true if the deletion occurred.
+// CompareAndDelete deletes key only if the current value equals oldValue.
 func (s *MemoryStore) CompareAndDelete(key string, oldValue any) (bool, error) {
-	if err := s.guardMutation(); err != nil {
+	release, err := s.guardMutation()
+	if err != nil {
 		return false, err
 	}
-	defer s.finishWriter()
+	defer release()
 
 	oldBytes, err := normalizeToBytes(oldValue)
 	if err != nil {
 		return false, err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	shard := s.getShardByKey(key)
 
-	// Get current value.
-	current, exists := s.container[key]
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
 
-	// Compare current value with old value.
+	current, exists := shard.container[key]
 	if !exists || !bytes.Equal(current, oldBytes) {
 		return false, nil
 	}
 
-	// Delete the key.
-	delete(s.container, key)
-	s.removeKeyLocked(key)
+	delete(shard.container, key)
+	shard.removeKeyTrackingLocked(key)
 
 	return true, nil
 }
 
 // Size returns the number of keys in the store.
 func (s *MemoryStore) Size() (int64, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	var total int64
 
-	return int64(len(s.container)), nil
-}
-
-// Scan returns a page of key-value pairs, ordered lexicographically.
-// If prefix is non-empty, only keys starting with prefix are considered.
-// If afterKey is non-empty, scanning starts strictly after it; otherwise from the first key.
-// If limit > 0, at most limit entries are returned; if limit <= 0, all matching entries are returned.
-// Returns a ScanPage with Entries and NextKey (set to the last key when more results exist; empty when done).
-func (s *MemoryStore) Scan(prefix, afterKey string, limit int64) (*ScanPage, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	// No tracking: fall back to a simple sorted-slice implementation.
-	if !s.trackKeys || s.ost == nil {
-		return s.scanWithoutTrackingLocked(prefix, afterKey, limit), nil
+	for _, shard := range s.shards {
+		shard.mu.RLock()
+		total += int64(len(shard.container))
+		shard.mu.RUnlock()
 	}
 
-	return s.scanWithTrackingLocked(prefix, afterKey, limit), nil
-}
-
-// RandomKey returns a random key, optionally filtered by "prefix".
-// Strategies:
-// 1. trackKeys && prefix == ""  -> O(1) random from keysList
-// 2. trackKeys && prefix != ""  -> O(log n) via OSTree (rank/select)
-// 3. !trackKeys                 -> O(n) two-pass scan
-//
-// If no match exists (including empty store), it returns "" and a nil error.
-func (s *MemoryStore) RandomKey(prefix string) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if s.trackKeys {
-		return s.randomKeyTracked(prefix), nil
-	}
-
-	return s.randomKeyScan(prefix), nil
-}
-
-// RebuildKeyList reconstructs key tracking structures from the container.
-// This is useful after crashes or when indexes might be out of sync.
-// It is an O(n) operation and should be used sparingly.
-// No-op if trackKeys is disabled.
-func (s *MemoryStore) RebuildKeyList() error {
-	if !s.trackKeys {
-		return nil
-	}
-
-	if err := s.guardMutation(); err != nil {
-		return err
-	}
-	defer s.finishWriter()
-
-	s.mu.Lock()
-
-	defer s.mu.Unlock()
-
-	// Reinitialize tracking structures
-	s.keysList = make([]string, 0, len(s.container))
-	s.keysMap = make(map[string]int, len(s.container))
-	s.ost = NewOSTree()
-
-	// Repopulate from container
-	for k := range s.container {
-		s.keysMap[k] = len(s.keysList)
-		s.keysList = append(s.keysList, k)
-		s.ost.Insert(k)
-	}
-
-	return nil
-}
-
-// Close releases resources associated with the store.
-// For MemoryStore this is a no-op and always returns nil.
-func (s *MemoryStore) Close() error {
-	return nil
+	return total, nil
 }
 
 // List returns key-value pairs whose keys start with prefix, sorted lexicographically.
-// If limit > 0, at most limit entries are returned.
-// If limit <= 0, all matching entries are returned.
-// For very large datasets, prefer disk backend or use Scan directly.
 func (s *MemoryStore) List(prefix string, limit int64) ([]Entry, error) {
 	page, err := s.Scan(prefix, "", limit)
 	if err != nil {
@@ -478,422 +423,30 @@ func (s *MemoryStore) List(prefix string, limit int64) ([]Entry, error) {
 	return page.Entries, nil
 }
 
-// blockMutations prevents future mutating operations from succeeding
-// until unblockMutations is called.
-// When reason is provided, it overrides the default error returned to callers.
-// blockMutations prevents new mutations and waits for all active writers to finish.
-// It uses a condition variable to efficiently wait without busy-spinning.
-func (s *MemoryStore) blockMutations(reason error) error {
-	if reason == nil {
-		reason = ErrMutationBlocked
+// RebuildKeyList reconstructs key tracking structures for every shard.
+func (s *MemoryStore) RebuildKeyList() error {
+	if !s.trackKeys {
+		return nil
 	}
 
-	s.writerMu.Lock()
-	defer s.writerMu.Unlock()
+	release, err := s.guardMutation()
+	if err != nil {
+		return err
+	}
+	defer release()
 
-	// Check if already blocked.
-	if s.isMutationBlocked {
-		if s.mutationBlockReason != nil {
-			return s.mutationBlockReason
+	for _, shard := range s.shards {
+		shard.mu.Lock()
+		shard.keysList = make([]string, 0, len(shard.container))
+		shard.keysMap = make(map[string]int, len(shard.container))
+		shard.ost = NewOSTree()
+
+		for k := range shard.container {
+			shard.addKeyTrackingLocked(k)
 		}
 
-		return ErrMutationBlocked
-	}
-
-	// Set the block flag and reason.
-	s.isMutationBlocked = true
-	s.mutationBlockReason = reason
-
-	// Wait for all active writers to drain using condition variable.
-	// This avoids busy-spinning and provides proper synchronization.
-	// Writers call Signal() when they decrement writerCount to 0,
-	// ensuring we wake up exactly when it's safe to proceed.
-	for s.writerCount > 0 {
-		s.allWritersDone.Wait()
+		shard.mu.Unlock()
 	}
 
 	return nil
-}
-
-// unblockMutations immediately clears any outstanding mutation blocks.
-func (s *MemoryStore) unblockMutations() {
-	s.writerMu.Lock()
-	defer s.writerMu.Unlock()
-
-	s.mutationBlockReason = nil
-	s.isMutationBlocked = false
-
-	// Wake up any waiting writers.
-	s.allWritersDone.Broadcast()
-}
-
-// guardMutation checks if mutations are blocked and increments the writer count.
-// Uses mutex to serialize the check and increment, preventing TOCTOU races.
-// Critical: the check and increment must be atomic to prevent writers from
-// entering after blockMutations() sets the flag but before it starts waiting.
-func (s *MemoryStore) guardMutation() error {
-	s.writerMu.Lock()
-	defer s.writerMu.Unlock()
-
-	// Check block status while holding the lock.
-	if s.isMutationBlocked {
-		if s.mutationBlockReason != nil {
-			return s.mutationBlockReason
-		}
-
-		return ErrMutationBlocked
-	}
-
-	// Increment writer count atomically with the check.
-	// This ensures blockMutations() will wait for us to finish.
-	s.writerCount++
-
-	return nil
-}
-
-// finishWriter decrements the writer count and signals any waiting blockers.
-func (s *MemoryStore) finishWriter() {
-	s.writerMu.Lock()
-	defer s.writerMu.Unlock()
-
-	s.writerCount--
-
-	// Signal blockMutations() if this was the last writer.
-	if s.writerCount == 0 {
-		s.allWritersDone.Signal()
-	}
-}
-
-// addKeyLocked inserts k into tracking indexes.
-// Precondition: s.mu must be held by caller. No-op if key already indexed.
-func (s *MemoryStore) addKeyLocked(k string) {
-	if !s.trackKeys {
-		return
-	}
-
-	if _, exists := s.keysMap[k]; exists {
-		return
-	}
-
-	s.keysMap[k] = len(s.keysList)
-	s.keysList = append(s.keysList, k)
-
-	if s.ost != nil {
-		s.ost.Insert(k)
-	}
-}
-
-// removeKeyLocked removes k from tracking indexes with O(1) swap-delete.
-// Precondition: s.mu must be held by caller.
-func (s *MemoryStore) removeKeyLocked(k string) {
-	if !s.trackKeys {
-		return
-	}
-
-	idx, exists := s.keysMap[k]
-	if !exists {
-		return
-	}
-
-	// Defensive: if the slice is empty or idx is stale/corrupt, clean up
-	// the map and OST without attempting to slice. This prevents panics
-	// from out-of-bounds access and ensures indices stay consistent even
-	// if a concurrent race condition corrupts the data structures.
-	if len(s.keysList) == 0 || idx < 0 || idx >= len(s.keysList) {
-		delete(s.keysMap, k)
-
-		if s.ost != nil {
-			s.ost.Delete(k)
-		}
-
-		return
-	}
-
-	last := len(s.keysList) - 1
-
-	// O(1) swap-delete: overwrite the deleted key with the last key in the slice,
-	// then shrink the slice by one. This avoids shifting all subsequent elements.
-	if idx != last {
-		moved := s.keysList[last]
-
-		s.keysList[idx] = moved
-		s.keysMap[moved] = idx // Update index mapping for the moved key.
-	}
-
-	// Now drop the tail.
-	s.keysList = s.keysList[:last]
-	delete(s.keysMap, k)
-
-	if s.ost != nil {
-		s.ost.Delete(k)
-	}
-}
-
-// scanWithoutTrackingLocked implements Scan when trackKeys is disabled by collecting
-// matching keys into a slice, sorting them, then applying afterKey and limit filters.
-// Precondition: s.mu is held for reading.
-func (s *MemoryStore) scanWithoutTrackingLocked(prefix, afterKey string, limit int64) *ScanPage {
-	// Collect matching keys.
-	keys := make([]string, 0, len(s.container))
-
-	for k := range s.container {
-		if prefix != "" && !strings.HasPrefix(k, prefix) {
-			continue
-		}
-
-		keys = append(keys, k)
-	}
-
-	if len(keys) == 0 {
-		return new(ScanPage)
-	}
-
-	// Lexicographical sort.
-	sort.Strings(keys)
-
-	// Find start index strictly after afterKey using binary search.
-	// sort.Search returns the first index where keys[i] > afterKey,
-	// which is exactly what we need for pagination.
-	var start int
-	if afterKey != "" {
-		start = sort.Search(len(keys), func(i int) bool {
-			return keys[i] > afterKey
-		})
-	}
-
-	if start >= len(keys) {
-		return new(ScanPage)
-	}
-
-	// Apply limit.
-	end := len(keys)
-	if limit > 0 && int64(end-start) > limit {
-		end = start + int(limit)
-	}
-
-	entries := make([]Entry, 0, end-start)
-	for i := start; i < end; i++ {
-		k := keys[i]
-		entries = append(entries, Entry{
-			Key:   k,
-			Value: s.container[k],
-		})
-	}
-
-	page := &ScanPage{
-		Entries: entries,
-	}
-
-	// If limit was set and we haven't reached the last key, expose a NextKey.
-	if limit > 0 && end < len(keys) {
-		page.NextKey = keys[end-1]
-	}
-
-	return page
-}
-
-// scanWithTrackingLocked implements Scan using the OSTree index for O(log n + limit * log n)
-// performance via Rank/Kth operations instead of sorting.
-// Precondition: s.mu is held for reading.
-func (s *MemoryStore) scanWithTrackingLocked(prefix, afterKey string, limit int64) *ScanPage {
-	if s.ost == nil || s.ost.Len() == 0 {
-		return new(ScanPage)
-	}
-
-	l, r := s.scanRangeBounds(prefix)
-	if l >= r {
-		return new(ScanPage)
-	}
-
-	start, ok := s.scanStartIndex(l, r, afterKey)
-	if !ok {
-		return new(ScanPage)
-	}
-
-	end := s.clampScanEnd(start, r, limit)
-	if start >= end {
-		return new(ScanPage)
-	}
-
-	page := &ScanPage{
-		Entries: s.collectEntriesInRange(start, end),
-	}
-
-	// There are more keys in the prefix range after this page when end < r.
-	if limit > 0 && end < r {
-		if lastKey, ok := s.ost.Kth(end - 1); ok {
-			page.NextKey = lastKey
-		}
-	}
-
-	return page
-}
-
-// scanRangeBounds returns the range bounds for a scan given a prefix.
-func (s *MemoryStore) scanRangeBounds(prefix string) (int, int) {
-	if prefix == "" {
-		return 0, s.ost.Len()
-	}
-
-	return s.ost.RangeBounds(prefix)
-}
-
-// scanStartIndex returns the start index for a scan given a lower bound,
-// upper bound, and afterKey.
-func (s *MemoryStore) scanStartIndex(l, r int, afterKey string) (int, bool) {
-	if afterKey == "" {
-		return l, true
-	}
-
-	// Rank gives us the count of keys < afterKey. We need the first key > afterKey.
-	idx := max(s.ost.Rank(afterKey), l)
-
-	// Edge case: if Rank points to a key == afterKey, skip it.
-	if idx < r {
-		if keyAtIdx, ok := s.ost.Kth(idx); ok && keyAtIdx <= afterKey {
-			idx++ // Move to the next key (first one > afterKey).
-		}
-	}
-
-	if idx >= r {
-		return 0, false
-	}
-
-	return idx, true
-}
-
-// clampScanEnd returns the end index for a scan given a start index,
-// upper bound, and limit.
-func (s *MemoryStore) clampScanEnd(start, r int, limit int64) int {
-	if limit <= 0 {
-		return r
-	}
-
-	maxEnd := start + int(limit)
-	if maxEnd < r {
-		return maxEnd
-	}
-
-	return r
-}
-
-// collectEntriesInRange collects entries in the range [start, end) from the OSTree.
-func (s *MemoryStore) collectEntriesInRange(start, end int) []Entry {
-	entries := make([]Entry, 0, end-start)
-
-	for i := start; i < end; i++ {
-		key, ok := s.ost.Kth(i)
-		if !ok {
-			break
-		}
-
-		value, exists := s.container[key]
-		if !exists {
-			// Index and container are out of sync; this shouldn't normally happen,
-			// but we fail soft by skipping the missing entry.
-			continue
-		}
-
-		entries = append(entries, Entry{
-			Key:   key,
-			Value: value,
-		})
-	}
-
-	return entries
-}
-
-// randomKeyTracked returns a random key using indexes.
-// Precondition: s.mu is held for reading; s.trackKeys == true.
-func (s *MemoryStore) randomKeyTracked(prefix string) string {
-	// No prefix: O(1) from keysList.
-	if prefix == "" {
-		if len(s.keysList) == 0 {
-			return ""
-		}
-
-		idx := rand.IntN(len(s.keysList)) //nolint:gosec // acceptable for randomized selection in tests.
-
-		return s.keysList[idx]
-	}
-
-	// With prefix: OSTree rank/select over [l, r).
-	if s.ost == nil || s.ost.Len() == 0 {
-		return ""
-	}
-
-	l, r := s.ost.RangeBounds(prefix)
-	if r <= l {
-		return ""
-	}
-
-	position := l + rand.IntN(r-l) //nolint:gosec // math/rand/v2 is safe.
-
-	k, ok := s.ost.Kth(position)
-	if !ok {
-		// Defensive: should not happen if l/r came from RangeBounds.
-		return ""
-	}
-
-	return k
-}
-
-// randomKeyScan returns a random key by scanning the map twice.
-// Precondition: s.mu is held for reading; s.trackKeys == false.
-// First pass counts matching keys; second pass selects the target-th match.
-// We do this to keep memory usage minimal without building a temporary slice.
-func (s *MemoryStore) randomKeyScan(prefix string) string {
-	// First pass: count matches.
-	var matchCount int
-
-	for k := range s.container {
-		if prefix != "" && !strings.HasPrefix(k, prefix) {
-			continue
-		}
-
-		matchCount++
-	}
-
-	if matchCount == 0 {
-		return ""
-	}
-
-	// Second pass: pick the target-th match.
-	target := rand.IntN(matchCount) //nolint:gosec // math/rand/v2 is safe.
-
-	for k := range s.container {
-		if prefix != "" && !strings.HasPrefix(k, prefix) {
-			continue
-		}
-
-		if target == 0 {
-			return k
-		}
-
-		target--
-	}
-
-	// Unreachable if matchCount > 0.
-	return ""
-}
-
-// normalizeToBytes converts "value" to an owned []byte copy.
-// Supported inputs:
-// - []byte   => cloned (defensive copy to prevent aliasing).
-// - string   => converted to []byte.
-//
-// Anything else is rejected so the store always contains raw bytes and
-// SerializedStore can uniformly (de)serialize at a higher layer.
-// The defensive copy prevents external code from mutating stored values
-// by holding a reference to the original slice.
-func normalizeToBytes(value any) ([]byte, error) {
-	switch v := value.(type) {
-	case []byte:
-		// Make a copy to avoid external aliasing after Set/Swap/GetOrSet.
-		return slices.Clone(v), nil
-	case string:
-		return []byte(v), nil
-	default:
-		return nil, fmt.Errorf("%w: %T", ErrUnsupportedValueType, value)
-	}
 }

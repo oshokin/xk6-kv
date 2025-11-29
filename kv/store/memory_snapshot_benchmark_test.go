@@ -30,11 +30,18 @@ func BenchmarkMemoryStore_Backup(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(scenario.trackKeys)
+			store := NewMemoryStore(scenario.trackKeys, 0)
 
 			b.StopTimer()
 			seedMemoryStore(b, store, totalSeedKeys, "backup-")
-			snapshotPath := filepath.Join(b.TempDir(), "backup.kv")
+
+			// Use unique filename per scenario to avoid conflicts in parallel execution.
+			snapshotName := fmt.Sprintf(
+				"memory-benchmark-backup-target-track-keys-%v-allow-concurrent-%v.kv",
+				scenario.trackKeys,
+				scenario.allowConcurrentWrites,
+			)
+			snapshotPath := filepath.Join(b.TempDir(), snapshotName)
 			b.StartTimer()
 
 			for b.Loop() {
@@ -57,18 +64,21 @@ func BenchmarkMemoryStore_Restore(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			source := NewMemoryStore(true)
+			source := NewMemoryStore(true, 0)
 
 			b.StopTimer()
 			seedMemoryStore(b, source, totalSeedKeys, "restore-")
 
 			tempDir := b.TempDir()
-			snapshotPath := filepath.Join(tempDir, "restore-src.kv")
+
+			// Use unique filename per scenario to avoid conflicts in parallel execution.
+			snapshotName := fmt.Sprintf("memory-benchmark-restore-source-track-keys-%v.kv", trackKeys)
+			snapshotPath := filepath.Join(tempDir, snapshotName)
 
 			_, err := source.Backup(&BackupOptions{FileName: snapshotPath})
 			require.NoError(b, err)
 
-			target := NewMemoryStore(trackKeys)
+			target := NewMemoryStore(trackKeys, 0)
 
 			b.StartTimer()
 

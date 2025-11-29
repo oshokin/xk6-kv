@@ -2,24 +2,13 @@ package store
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
-
-// seedMemoryStore pre-populates the store with N keys "prefix{i}" -> "value-{i}".
-// Seeding happens outside of timed regions in the benchmarks.
-func seedMemoryStore(b *testing.B, store *MemoryStore, totalKeys int, keyPrefix string) {
-	b.Helper()
-
-	for index := range totalKeys {
-		keyString := fmt.Sprintf("%s%d", keyPrefix, index)
-		valueString := fmt.Sprintf("value-%d", index)
-
-		require.NoErrorf(b, store.Set(keyString, valueString), "seed Set(%q) must succeed", keyString)
-	}
-}
 
 // BenchmarkMemoryStore_Get: measures read performance on a pre-populated store.
 // Runs with and without key tracking to expose any incidental overhead.
@@ -30,7 +19,7 @@ func BenchmarkMemoryStore_Get(b *testing.B) {
 
 			const totalSeedKeys = 1000
 
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(trackKeys, 0)
 
 			b.StopTimer()
 			seedMemoryStore(b, store, totalSeedKeys, "key-")
@@ -51,7 +40,7 @@ func BenchmarkMemoryStore_Set(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(trackKeys, 0)
 
 			b.ResetTimer()
 
@@ -70,7 +59,7 @@ func BenchmarkMemoryStore_IncrementBy(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(trackKeys, 0)
 
 			b.ResetTimer()
 
@@ -88,7 +77,7 @@ func BenchmarkMemoryStore_GetOrSet(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(trackKeys, 0)
 
 			b.ResetTimer()
 
@@ -108,7 +97,7 @@ func BenchmarkMemoryStore_Swap(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(trackKeys, 0)
 
 			b.ResetTimer()
 
@@ -126,7 +115,7 @@ func BenchmarkMemoryStore_CompareAndSwap(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(trackKeys, 0)
 			require.NoError(b, store.Set("k", "0"))
 
 			b.ResetTimer()
@@ -143,7 +132,7 @@ func BenchmarkMemoryStore_CompareAndSwap(b *testing.B) {
 func BenchmarkMemoryStore_CompareAndSwap_Contention(b *testing.B) {
 	b.ReportAllocs()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 	require.NoError(b, store.Set("k", "v0"))
 
 	b.ResetTimer()
@@ -154,51 +143,76 @@ func BenchmarkMemoryStore_CompareAndSwap_Contention(b *testing.B) {
 	})
 }
 
-// BenchmarkMemoryStore_RandomKey: measures cost of picking any random key in a large map.
-// Compares tracking index vs no-tracking scan path.
-func BenchmarkMemoryStore_RandomKey(b *testing.B) {
-	for _, trackKeys := range []bool{true, false} {
-		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
+// BenchmarkMemoryStore_ShardsParallelSet measures parallel write throughput comparing shard counts.
+func BenchmarkMemoryStore_ShardsParallelSet(b *testing.B) {
+	const keySpace = 10_000_000
+
+	keys := makeKeyPool(keySpace, "parallel-key-")
+	payload := []byte("value")
+	keyCount := uint64(len(keys))
+
+	for _, shardCount := range shardBenchmarkTargets() {
+		b.Run(fmt.Sprintf("shards=%d", shardCount), func(b *testing.B) {
 			b.ReportAllocs()
 
-			const genericKeys = 10_000
-
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(false, shardCount)
 
 			b.StopTimer()
-			seedMemoryStore(b, store, genericKeys, "key-")
-			b.StartTimer()
 
-			for b.Loop() {
-				_, _ = store.RandomKey("")
+			for _, key := range keys {
+				require.NoError(b, store.Set(key, payload))
 			}
+
+			b.StartTimer()
+			b.ResetTimer()
+
+			var cursor atomic.Uint64
+
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					idx := cursor.Add(1) - 1
+					key := keys[int(idx%keyCount)]
+
+					_ = store.Set(key, payload)
+				}
+			})
 		})
 	}
 }
 
-// BenchmarkMemoryStore_RandomKey_WithPrefix: measures cost of selecting random keys from a subset.
-// Compares indexed prefix selection (tracking) vs two-pass scan (no tracking).
-func BenchmarkMemoryStore_RandomKey_WithPrefix(b *testing.B) {
-	for _, trackKeys := range []bool{true, false} {
-		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
+// BenchmarkMemoryStore_ShardsParallelGet measures parallel read throughput across shard counts.
+func BenchmarkMemoryStore_ShardsParallelGet(b *testing.B) {
+	const keySpace = 10_000_000
+
+	keys := makeKeyPool(keySpace, "parallel-key-")
+	payload := []byte("value")
+	keyCount := uint64(len(keys))
+
+	for _, shardCount := range shardBenchmarkTargets() {
+		b.Run(fmt.Sprintf("shards=%d", shardCount), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(false, shardCount)
 
-			// Seed 10k generic + 2k with "pfx-" to simulate a dense subset.
 			b.StopTimer()
 
-			seedMemoryStore(b, store, 10_000, "key-")
-
-			for index := range 2_000 {
-				require.NoError(b, store.Set(fmt.Sprintf("pfx-%d", index), "value"))
+			for _, key := range keys {
+				require.NoError(b, store.Set(key, payload))
 			}
 
 			b.StartTimer()
+			b.ResetTimer()
 
-			for b.Loop() {
-				_, _ = store.RandomKey("pfx-")
-			}
+			var cursor atomic.Uint64
+
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					idx := cursor.Add(1) - 1
+					key := keys[int(idx%keyCount)]
+
+					_, _ = store.Get(key)
+				}
+			})
 		})
 	}
 }
@@ -210,7 +224,7 @@ func BenchmarkMemoryStore_Delete(b *testing.B) {
 		b.Run(fmt.Sprintf("Size=%d", totalSize), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(true)
+			store := NewMemoryStore(true, 0)
 
 			b.StopTimer()
 			seedMemoryStore(b, store, totalSize, "key-")
@@ -243,7 +257,7 @@ func BenchmarkMemoryStore_Exists(b *testing.B) {
 
 			const totalSeedKeys = 1000
 
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(trackKeys, 0)
 
 			b.StopTimer()
 			seedMemoryStore(b, store, totalSeedKeys, "key-")
@@ -265,7 +279,7 @@ func BenchmarkMemoryStore_DeleteIfExists(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(trackKeys, 0)
 			require.NoError(b, store.Set("k", "v"))
 
 			b.ResetTimer()
@@ -291,7 +305,7 @@ func BenchmarkMemoryStore_CompareAndDelete(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(trackKeys, 0)
 			require.NoError(b, store.Set("k", "v"))
 
 			b.ResetTimer()
@@ -310,44 +324,6 @@ func BenchmarkMemoryStore_CompareAndDelete(b *testing.B) {
 	}
 }
 
-// BenchmarkMemoryStore_Scan measures paginated scans across large datasets with and without tracking.
-func BenchmarkMemoryStore_Scan(b *testing.B) {
-	const (
-		totalPerPrefix = 10_000
-		pageLimit      = 100
-		resumeLimit    = 32
-	)
-
-	prefixes := []string{"user:", "order:", "misc:"}
-
-	for _, trackKeys := range []bool{true, false} {
-		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
-			store := NewMemoryStore(trackKeys)
-
-			b.StopTimer()
-
-			for _, prefix := range prefixes {
-				seedMemoryStore(b, store, totalPerPrefix, prefix)
-			}
-
-			b.StartTimer()
-
-			b.Run("PrefixUserLimit100", func(b *testing.B) {
-				runScanBenchmark(b, store, "user:", "", pageLimit)
-			})
-
-			b.Run("PrefixUserUnlimited", func(b *testing.B) {
-				runScanBenchmark(b, store, "user:", "", 0)
-			})
-
-			b.Run("PrefixOrderResume", func(b *testing.B) {
-				startAfter := fmt.Sprintf("order:%05d", totalPerPrefix/2)
-				runScanBenchmark(b, store, "order:", startAfter, resumeLimit)
-			})
-		})
-	}
-}
-
 // BenchmarkMemoryStore_List: list-all, list-by-prefix, and limit variants.
 // Tracking mode should strongly influence performance by enabling index-based behavior.
 func BenchmarkMemoryStore_List(b *testing.B) {
@@ -355,7 +331,7 @@ func BenchmarkMemoryStore_List(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(trackKeys, 0)
 
 			b.StopTimer()
 			seedMemoryStore(b, store, 1000, "key-")
@@ -409,7 +385,7 @@ func BenchmarkMemoryStore_List(b *testing.B) {
 func BenchmarkMemoryStore_Concurrent(b *testing.B) {
 	b.ReportAllocs()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	b.StopTimer()
 	seedMemoryStore(b, store, 1000, "key-")
@@ -439,7 +415,7 @@ func BenchmarkMemoryStore_Concurrent(b *testing.B) {
 func BenchmarkMemoryStore_AtomicConcurrent(b *testing.B) {
 	b.ReportAllocs()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	b.RunParallel(func(parallelBench *testing.PB) {
 		var i int
@@ -470,25 +446,39 @@ func BenchmarkMemoryStore_AtomicConcurrent(b *testing.B) {
 	})
 }
 
-// runScanBenchmark runs a scan benchmark.
-func runScanBenchmark(b *testing.B, store Store, prefix, initialAfter string, limit int64) {
+// seedMemoryStore pre-populates the store with N keys "prefix{i}" -> "value-{i}".
+// Seeding happens outside of timed regions in the benchmarks.
+func seedMemoryStore(b *testing.B, store *MemoryStore, totalKeys int, keyPrefix string) {
 	b.Helper()
-	b.ReportAllocs()
 
-	for b.Loop() {
-		after := initialAfter
+	for index := range totalKeys {
+		keyString := fmt.Sprintf("%s%d", keyPrefix, index)
+		valueString := fmt.Sprintf("value-%d", index)
 
-		for {
-			page, err := store.Scan(prefix, after, limit)
-			if err != nil {
-				b.Fatalf("scan failed: %v", err)
-			}
-
-			if len(page.Entries) == 0 || page.NextKey == "" {
-				break
-			}
-
-			after = page.NextKey
-		}
+		require.NoErrorf(b, store.Set(keyString, valueString), "seed Set(%q) must succeed", keyString)
 	}
+}
+
+// makeKeyPool deterministically materializes key strings up front to avoid per-iteration allocations.
+func makeKeyPool(totalKeys int, prefix string) []string {
+	keys := make([]string, totalKeys)
+
+	for i := range keys {
+		keys[i] = fmt.Sprintf("%s%d", prefix, i)
+	}
+
+	return keys
+}
+
+// shardBenchmarkTargets returns the shard counts we want to compare (1 and runtime.NumCPU()).
+func shardBenchmarkTargets() []int {
+	targets := []int{1}
+
+	cpuShards := max(runtime.NumCPU(), 1)
+
+	if cpuShards != 1 {
+		targets = append(targets, cpuShards)
+	}
+
+	return targets
 }

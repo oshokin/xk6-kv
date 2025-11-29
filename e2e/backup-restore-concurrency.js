@@ -1,7 +1,6 @@
 import { check } from 'k6';
 import exec from 'k6/execution';
-import { openKv } from 'k6/x/kv';
-import { BACKEND, TRACK_KEYS, VUS, ITERATIONS } from './common.js';
+import { getSnapshotPath, BACKEND, VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: DISASTER RECOVERY BACKUP/RESTORE SYSTEM
@@ -47,9 +46,6 @@ import { BACKEND, TRACK_KEYS, VUS, ITERATIONS } from './common.js';
 // - Restore operations must handle missing/partial snapshots gracefully
 // - Critical for business continuity and disaster recovery
 
-// Snapshot file path for backup/restore operations.
-const SNAPSHOT_PATH = '.e2e-backup.kv';
-
 // Key prefix for regular data writes during backup operations.
 const DATA_KEY_PREFIX = 'key:';
 
@@ -59,12 +55,14 @@ const CONCURRENT_KEY_PREFIX = 'concurrent:';
 // Baseline key to verify restore functionality.
 const BASELINE_KEY = 'baseline';
 
-// kv is the shared store client with custom path for isolation.
-const kv = openKv({
-  backend: BACKEND,
-  trackKeys: TRACK_KEYS,
-  path: '.k6.kv.e2e.backup.kv'
-});
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'backup-restore-concurrency';
+
+// Snapshot file path for backup/restore operations.
+const SNAPSHOT_PATH = getSnapshotPath(TEST_NAME);
+
+// kv is the shared store client used throughout the scenario.
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -81,7 +79,8 @@ export const options = {
 // setup initializes the store and attempts to restore from previous snapshot.
 // This validates that restore operations handle missing files gracefully.
 export async function setup() {
-  await kv.clear();
+  const standardSetup = createSetup(kv);
+  await standardSetup();
 
   // Seed baseline data to verify restore functionality.
   await kv.set(BASELINE_KEY, 'stable');
@@ -163,8 +162,12 @@ export default async function backupRestoreConcurrencyTest() {
 
       console.log(`concurrent backup summary: ${JSON.stringify(concurrentSummary)}`);
 
+      // For disk backend, BoltDB transactions always provide consistent snapshots,
+      // so bestEffort will be false even when allowConcurrentWrites=true.
+      // For memory backend, bestEffort reflects the allowConcurrentWrites flag.
       check(concurrentSummary, {
-        'backup:concurrent-best-effort': (s) => s.bestEffort === true
+        'backup:concurrent-best-effort': (s) =>
+          BACKEND === 'disk' ? s.bestEffort === false : s.bestEffort === true
       });
 
       // Write data after best-effort backup to test concurrent behavior.
@@ -185,29 +188,39 @@ export default async function backupRestoreConcurrencyTest() {
 
   // All VUs (including coordinator after iteration 1) continuously write data.
   // This simulates production traffic during backup operations.
-  await kv.set(`${DATA_KEY_PREFIX}${iteration}`, `value-${iteration}`);
+  try {
+    await kv.set(`${DATA_KEY_PREFIX}${iteration}`, `value-${iteration}`);
+  } catch (err) {
+    // During blocking backups, writes are temporarily blocked.
+    // This is expected behavior and should not fail the test.
+    if (err?.name === 'BackupInProgressError' || err?.name === 'RestoreInProgressError') {
+      // Expected: writes are blocked during backup/restore operations.
+      // This validates that the locking mechanism works correctly.
+      return;
+    }
+    // Re-throw unexpected errors.
+    throw err;
+  }
 }
 
 // teardown performs final verification and cleanup operations.
 export async function teardown() {
-  // Verify that best-effort backup captured concurrent writes.
-  const concurrentKeys = await kv.list({ prefix: CONCURRENT_KEY_PREFIX });
+    // Verify that best-effort backup captured concurrent writes.
+    const concurrentKeys = await kv.list({ prefix: CONCURRENT_KEY_PREFIX });
 
-  if (concurrentKeys.length > 0) {
-    console.log(`captured ${concurrentKeys.length} best-effort concurrent writes`);
-  }
+    if (concurrentKeys.length > 0) {
+      console.log(`captured ${concurrentKeys.length} best-effort concurrent writes`);
+    }
 
-  // Create final blocking backup to ensure all data is captured.
-  const finalSummary = await kv.backup({
-    fileName: SNAPSHOT_PATH,
-    allowConcurrentWrites: false
-  });
+    // Create final blocking backup to ensure all data is captured.
+    const finalSummary = await kv.backup({
+      fileName: SNAPSHOT_PATH,
+      allowConcurrentWrites: false
+    });
 
-  console.log(`final blocking backup summary: ${JSON.stringify(finalSummary)}`);
+    console.log(`final blocking backup summary: ${JSON.stringify(finalSummary)}`);
 
-  // Close disk backend cleanly to prevent file handle leaks.
-  if (BACKEND === 'disk') {
-    kv.close();
-  }
+    // Close disk backend cleanly to prevent file handle leaks.
+    const standardTeardown = createTeardown(kv, TEST_NAME);
+    await standardTeardown();
 }
-

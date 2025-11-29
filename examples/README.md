@@ -115,6 +115,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | `ValueParseError` | Disk increments found a non-integer payload (e.g. you stored `"foo"` and later called `incrementBy`). | `ErrValueParseFailed` |
 | `SerializerError` | JSON/string serializer failed to encode/decode a value. | `ErrSerializerEncodeFailed`, `ErrSerializerDecodeFailed` |
 | `UnexpectedStoreOutputError` | Store returned a nil result without an accompanying error (indicates a buggy or incompatible backend). | `ErrUnexpectedStoreOutput` |
+| `UnknownError` | An error occurred that cannot be classified into any specific category (fallback for unclassified errors). | (Any unclassified error) |
 
 #### Concurrency & lifecycle
 
@@ -160,7 +161,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | **Transient** | Retry with backoff: `BackupInProgressError`, `RestoreInProgressError` |
 | **User error** | Fix input and retry: `KeyNotFoundError`, `ValueNumberRequiredError`, `SnapshotNotFoundError` (on first run) |
 | **Configuration** | Check paths/permissions: `DiskPathError`, `SnapshotPermissionError`, `DiskStoreOpenError` |
-| **System failure** | Fail-fast and investigate: `DiskStoreWriteError`, `SnapshotIOError`, `BucketNotFoundError` |
+| **System failure** | Fail-fast and investigate: `DiskStoreWriteError`, `SnapshotIOError`, `BucketNotFoundError`, `UnknownError` |
 
 **Best practices:**
 

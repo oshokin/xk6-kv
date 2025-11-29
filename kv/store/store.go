@@ -147,21 +147,23 @@ type Store interface {
 
 // Entry represents a single key-value pair returned by List() or used by
 // implementations internally.
+// Fields are tagged for JavaScript camelCase convention when exposed via Sobek.
 type Entry struct {
 	// Key is the string identifier for the stored value.
-	Key string
+	Key string `js:"key"`
 	// Value holds the stored value in the implementation's native representation
 	// (commonly a []byte produced/consumed by a higher-level serializer).
-	Value any
+	Value any `js:"value"`
 }
 
 // ScanPage represents a single page of results from Scan().
+// Fields are tagged for JavaScript camelCase convention when exposed via Sobek.
 type ScanPage struct {
 	// Entries is the page of key-value pairs.
-	Entries []Entry
+	Entries []Entry `js:"entries"`
 
 	// NextKey is the last key of this page when more entries are available
 	// for the given prefix and limit. It is an empty string when the scan
 	// has reached the end of the keyspace (for that prefix).
-	NextKey string
+	NextKey string `js:"nextKey"`
 }

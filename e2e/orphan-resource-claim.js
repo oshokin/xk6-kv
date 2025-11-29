@@ -1,6 +1,6 @@
 import { check } from 'k6';
 import exec from 'k6/execution';
-import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
+import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: ORPHANED RESOURCE CLAIMING
@@ -32,8 +32,11 @@ const CONCURRENT_CLAIMERS = parseInt(__ENV.CONCURRENT_CLAIMERS || '12', 10);
 // Number of concurrent observers polling exists() to monitor state transitions.
 const CONCURRENT_WATCHERS = parseInt(__ENV.CONCURRENT_WATCHERS || '18', 10);
 
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'orphan-resource-claim';
+
 // kv is the shared store client used throughout the scenario.
-const kv = createKv();
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -47,7 +50,8 @@ export const options = {
 
 // setup seeds the pool of orphaned resources that workers will compete to claim.
 export async function setup() {
-  await kv.clear();
+  const standardSetup = createSetup(kv);
+  await standardSetup();
 
   // Seed orphaned resources for workers to claim.
   for (let i = 0; i < RESOURCE_POOL_SIZE; i++) {
@@ -61,7 +65,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv);
+export const teardown = createTeardown(kv, TEST_NAME);
 
 // orphanResourceClaim simulates workers racing to claim orphaned resources from a pool.
 // Multiple claimers try deleteIfExists() concurrently while observers monitor with exists().

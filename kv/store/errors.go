@@ -113,6 +113,8 @@ var (
 	ErrSerializerDecodeFailed = errors.New("serializer decode failed")
 	// ErrUnsupportedValueType is returned when a value of an unsupported type is set.
 	ErrUnsupportedValueType = errors.New("unsupported value type (want []byte or string)")
+	// ErrUnexpectedHeapType indicates an unexpected type was encountered in the iterator heap.
+	ErrUnexpectedHeapType = errors.New("unexpected type in heap")
 	// ErrValueParseFailed indicates parsing a stored value failed.
 	ErrValueParseFailed = errors.New("value parse failed")
 )

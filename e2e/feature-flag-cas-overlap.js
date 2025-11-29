@@ -1,6 +1,6 @@
 import { check } from 'k6';
 import exec from 'k6/execution';
-import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
+import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: ADMIN FEATURE FLAG ROLLOUT
@@ -37,8 +37,11 @@ const MAX_CAS_RETRIES = parseInt(__ENV.MAX_CAS_RETRIES || '50000', 10);
 // Rollout percentage range (0-99).
 const ROLLOUT_MAX = 100;
 
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'feature-flag-cas-overlap';
+
 // kv is the shared store client used throughout the scenario.
-const kv = createKv();
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -51,7 +54,9 @@ export const options = {
 
 // setup seeds the baseline flag before CAS storms begin.
 export async function setup() {
-  await kv.clear();
+  const standardSetup = createSetup(kv);
+  await standardSetup();
+
   await kv.set(FLAG_KEY, {
     rollout: 10,
     version: 0,
@@ -60,7 +65,24 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv);
+export const teardown = createTeardown(kv, TEST_NAME);
+
+// featureFlagCasOverlap launches Promise.all CAS operations and verifies they all
+// succeeded (unique version numbers recorded).
+export default async function featureFlagCasOverlap() {
+  // Alternating deltas simulate different admins adjusting rollout percentages.
+  const deltas = Array.from({ length: CONCURRENT_UPDATES }, (_, idx) =>
+    idx % 2 === 0 ? 1 : -1
+  );
+
+  const versions = await Promise.all(deltas.map((delta) => applyRolloutShift(delta)));
+
+  const uniqueVersions = new Set(versions);
+
+  check(true, {
+    'cas:all-succeeded': () => uniqueVersions.size === deltas.length
+  });
+}
 
 // applyRolloutShift retries compareAndSwap until it succeeds or exhausts attempts.
 async function applyRolloutShift(delta) {
@@ -80,21 +102,4 @@ async function applyRolloutShift(delta) {
   }
 
   throw new Error('CAS did not converge within max attempts');
-}
-
-// featureFlagCasOverlap launches Promise.all CAS operations and verifies they all
-// succeeded (unique version numbers recorded).
-export default async function featureFlagCasOverlap() {
-  // Alternating deltas simulate different admins adjusting rollout percentages.
-  const deltas = Array.from({ length: CONCURRENT_UPDATES }, (_, idx) =>
-    idx % 2 === 0 ? 1 : -1
-  );
-
-  const versions = await Promise.all(deltas.map((delta) => applyRolloutShift(delta)));
-
-  const uniqueVersions = new Set(versions);
-
-  check(true, {
-    'cas:all-succeeded': () => uniqueVersions.size === deltas.length
-  });
 }

@@ -14,7 +14,7 @@
 import { openKv } from "k6/x/kv";
 import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";
 
-const snapshotPath = "./snapshots/kv-example.kv";
+const snapshotPath = "backup-and-restore.kv";
 
 const kv = openKv({ backend: "memory" });
 

@@ -37,8 +37,11 @@ const CLAIM_BATCH_SIZE = parseInt(__ENV.CLAIM_BATCH_SIZE || '50', 10);
 // SKU key prefix for flash sale items.
 const SKU_PREFIX = __ENV.SKU_PREFIX || 'flash-sale:sku:';
 
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'flash-sale-order-claims';
+
 // kv is the shared store client used throughout the scenario.
-const kv = createKv();
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -50,7 +53,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv);
+export const teardown = createTeardown(kv, TEST_NAME);
 
 // flashSaleOrderClaims fires CLAIM_BATCH_SIZE concurrent getOrSet() calls to test
 // that promise resolution handles hundreds of simultaneous completions without

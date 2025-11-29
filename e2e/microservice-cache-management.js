@@ -1,6 +1,6 @@
 import { check } from 'k6';
 import exec from 'k6/execution';
-import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
+import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: MICROSERVICE CACHE MANAGEMENT SYSTEM
@@ -10,40 +10,40 @@ import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
 // to maintain consistent cached data and invalidate related caches atomically.
 // This is a critical pattern in:
 //
-// - E-commerce platforms (product catalog, inventory, pricing)
-// - Social media platforms (user profiles, posts, relationships)
-// - Banking systems (account balances, transaction history)
-// - Content management systems (articles, media, metadata)
-// - IoT platforms (device states, sensor data)
-// - Gaming platforms (player stats, leaderboards)
+// - E-commerce platforms (product catalog, inventory, pricing).
+// - Social media platforms (user profiles, posts, relationships).
+// - Banking systems (account balances, transaction history).
+// - Content management systems (articles, media, metadata).
+// - IoT platforms (device states, sensor data).
+// - Gaming platforms (player stats, leaderboards).
 //
 // REAL-WORLD PROBLEM SOLVED:
 // Multiple microservices updating related data simultaneously.
 // Without proper cache management, you get:
-// - Stale data served to users (wrong prices, outdated info)
-// - Inconsistent state across services
-// - Race conditions in cache updates
-// - Performance degradation (cache misses, DB overload)
-// - Data integrity issues (partial updates)
+// - Stale data served to users (wrong prices, outdated info).
+// - Inconsistent state across services.
+// - Race conditions in cache updates.
+// - Performance degradation (cache misses, DB overload).
+// - Data integrity issues (partial updates).
 //
 // ATOMIC OPERATIONS TESTED:
-// - swap(): Atomically update cached data
-// - compareAndSwap(): Update version numbers atomically
-// - compareAndDelete(): Invalidate related caches deterministically
-// - exists(): Verify cache health
-// - list(): Monitor cache state
+// - swap(): Atomically update cached data.
+// - compareAndSwap(): Update version numbers atomically.
+// - compareAndDelete(): Invalidate related caches deterministically.
+// - exists(): Verify cache health.
+// - list(): Monitor cache state.
 //
 // CONCURRENCY PATTERN:
-// - Multiple VUs represent different microservices
-// - Each VU updates different cached entities
-// - Deterministic key selection prevents false positives
-// - Version-based invalidation prevents stale data
+// - Multiple VUs represent different microservices.
+// - Each VU updates different cached entities.
+// - Deterministic key selection prevents false positives.
+// - Version-based invalidation prevents stale data.
 //
 // PERFORMANCE CHARACTERISTICS:
-// - High read/write ratio (cache hits vs updates)
-// - Critical for data consistency and user experience
-// - Must handle thousands of concurrent cache operations
-// - Low latency impact (cache operations should be fast)
+// - High read/write ratio (cache hits vs updates).
+// - Critical for data consistency and user experience.
+// - Must handle thousands of concurrent cache operations.
+// - Low latency impact (cache operations should be fast).
 
 // Total number of products seeded into the cache.
 const PRODUCT_COUNT = parseInt(__ENV.PRODUCT_COUNT || '20', 10);
@@ -60,8 +60,11 @@ const CACHE_PREFIX = 'product:';
 // Prefix for version identifiers.
 const VERSION_PREFIX = 'v';
 
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'microservice-cache-management';
+
 // kv is the shared store client used throughout the scenario.
-const kv = createKv();
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -78,7 +81,8 @@ export const options = {
 // setup seeds a deterministic product catalog so every run exercises the same
 // data dependencies and version numbers.
 export async function setup() {
-  await kv.clear();
+  const standardSetup = createSetup(kv);
+  await standardSetup();
 
   for (let i = 1; i <= PRODUCT_COUNT; i++) {
     const productId = `${CACHE_PREFIX}${i}`;
@@ -91,7 +95,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv);
+export const teardown = createTeardown(kv, TEST_NAME);
 
 // microserviceCacheManagementTest deterministically selects a product, updates its
 // cache entry, bumps the version via CAS, invalidates related data, and rebuilds

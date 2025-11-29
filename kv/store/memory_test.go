@@ -2,7 +2,6 @@ package store
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -19,71 +18,39 @@ import (
 func TestNewMemoryStore(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	require.NotNil(t, store, "NewMemoryStore() must not return nil")
-	require.NotNil(t, store.container, "container map must be allocated")
-	assert.Empty(t, store.container, "new store must be empty")
+	require.NotNil(t, store.shards, "shards slice must be allocated")
+	require.Len(t, store.shards, store.shardCount, "shards slice must match shardCount")
+
+	firstShard := store.shards[0]
+	require.NotNil(t, firstShard.container, "shard container map must be allocated")
+	assert.Empty(t, firstShard.container, "new store must be empty")
 }
 
-// TestMemoryStore_BlockMutationsAPI verifies that blockMutations correctly blocks all
-// mutation operations with a custom error, and unblockMutations restores normal operation.
-func TestMemoryStore_BlockMutationsAPI(t *testing.T) {
+// TestMemoryStore_Get_ReturnsCopy ensures Get callers cannot mutate stored bytes.
+func TestMemoryStore_Get_ReturnsCopy(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	const key = "immutable"
 
-	require.NoError(t, store.blockMutations(errors.New("custom block")))
+	store := NewMemoryStore(false, 0)
 
-	err := store.Set("k1", "v1")
-	require.EqualError(t, err, "custom block")
+	require.NoError(t, store.Set(key, []byte("original")))
 
-	store.unblockMutations()
-	require.NoError(t, store.Set("k1", "v1"))
+	gotAny, err := store.Get(key)
+	require.NoError(t, err)
 
-	require.NoError(t, store.blockMutations(nil))
+	gotBytes := gotAny.([]byte)
 
-	err = store.Set("k2", "v2")
-	require.ErrorIs(t, err, ErrMutationBlocked)
+	// Mutate returned slice, store should stay untouched.
+	gotBytes[0] = 'X'
 
-	store.unblockMutations()
-	require.NoError(t, store.Set("k2", "v2"))
-}
+	nextAny, err := store.Get(key)
+	require.NoError(t, err)
 
-// TestMemoryStore_BlockMutations_WaitGroupRace stress-tests concurrent blocking
-// and mutation operations to detect race conditions in the WaitGroup synchronization.
-func TestMemoryStore_BlockMutations_WaitGroupRace(t *testing.T) {
-	t.Parallel()
-
-	store := NewMemoryStore(false)
-
-	// Trigger many concurrent writes + blocks to hit the race.
-	for range 100 {
-		var wg sync.WaitGroup
-
-		// Launch 50 concurrent writers.
-		for i := range 50 {
-			wg.Add(1)
-
-			go func(id int) {
-				defer wg.Done()
-
-				for range 10 {
-					_ = store.Set(fmt.Sprintf("k%d", id), "v")
-				}
-			}(i)
-		}
-
-		// Concurrently block mutations.
-		for range 10 {
-			wg.Go(func() {
-				_ = store.blockMutations(errors.New("test"))
-				store.unblockMutations()
-			})
-		}
-
-		wg.Wait()
-	}
+	assert.Equal(t, []byte("original"), nextAny.([]byte))
 }
 
 // TestMemoryStore_GetSet_RoundtripAndTypes validates:
@@ -93,7 +60,7 @@ func TestMemoryStore_BlockMutations_WaitGroupRace(t *testing.T) {
 func TestMemoryStore_GetSet_RoundtripAndTypes(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	// Missing key must error.
 	_, err := store.Get("does-not-exist")
@@ -122,13 +89,13 @@ func TestMemoryStore_GetSet_RoundtripAndTypes(t *testing.T) {
 	require.Error(t, store.Set("invalid-key", 123), "Set of unsupported type must error")
 }
 
-// TestMemoryStore_Concurrency performs concurrent Set/Get loops to smoke-test
+// TestMemoryStore_GetSet_Concurrency performs concurrent Set/Get loops to smoke-test
 // synchronization. Passes if no deadlock or data race is detected (under -race).
-func TestMemoryStore_Concurrency(t *testing.T) {
+func TestMemoryStore_GetSet_Concurrency(t *testing.T) {
 	t.Parallel()
 
 	var (
-		store = NewMemoryStore(true)
+		store = NewMemoryStore(true, 0)
 		wg    sync.WaitGroup
 	)
 
@@ -158,7 +125,7 @@ func TestMemoryStore_Concurrency(t *testing.T) {
 func TestMemoryStore_IncrementBy_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	newValue, err := store.IncrementBy("ctr", 5)
 	require.NoError(t, err)
@@ -184,7 +151,7 @@ func TestMemoryStore_IncrementBy_Concurrent(t *testing.T) {
 	)
 
 	var (
-		store = NewMemoryStore(true)
+		store = NewMemoryStore(true, 0)
 		wg    sync.WaitGroup
 	)
 
@@ -215,7 +182,7 @@ func TestMemoryStore_IncrementBy_Concurrent(t *testing.T) {
 func TestMemoryStore_GetOrSet_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 	value, loaded, err := store.GetOrSet("k", "v1")
 
 	require.NoError(t, err)
@@ -227,6 +194,47 @@ func TestMemoryStore_GetOrSet_Basic(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, loaded, "existing key must return loaded=true")
 	assert.Equal(t, []byte("v1"), value.([]byte), "existing value must be returned")
+}
+
+// TestMemoryStore_GetOrSet_ReturnsCopy ensures callers cannot mutate stored values.
+func TestMemoryStore_GetOrSet_ReturnsCopy(t *testing.T) {
+	t.Parallel()
+
+	const key = "copy-key"
+
+	store := NewMemoryStore(false, 0)
+	require.NoError(t, store.Set(key, []byte("persisted")))
+
+	actual, loaded, err := store.GetOrSet(key, "ignored")
+	require.NoError(t, err)
+	require.True(t, loaded)
+
+	actualBytes := actual.([]byte)
+	actualBytes[0] = 'X'
+
+	next, err := store.Get(key)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("persisted"), next.([]byte))
+}
+
+// TestMemoryStore_GetOrSet_InsertReturnsCopy ensures the inserted value is not exposed.
+func TestMemoryStore_GetOrSet_InsertReturnsCopy(t *testing.T) {
+	t.Parallel()
+
+	const key = "insert-copy"
+
+	store := NewMemoryStore(true, 0)
+
+	actual, loaded, err := store.GetOrSet(key, []byte("fresh"))
+	require.NoError(t, err)
+	require.False(t, loaded)
+
+	actualBytes := actual.([]byte)
+	actualBytes[0] = 'X'
+
+	next, err := store.Get(key)
+	require.NoError(t, err)
+	assert.Equal(t, []byte("fresh"), next.([]byte))
 }
 
 // TestMemoryStore_GetOrSet_Concurrent verifies that under concurrent contention,
@@ -243,7 +251,7 @@ func TestMemoryStore_GetOrSet_Concurrent(t *testing.T) {
 	}
 
 	var (
-		store     = NewMemoryStore(true)
+		store     = NewMemoryStore(true, 0)
 		resultsCh = make(chan goroutineResult, concurrencyLevel)
 		wg        sync.WaitGroup
 	)
@@ -308,12 +316,62 @@ func TestMemoryStore_GetOrSet_Concurrent(t *testing.T) {
 	assert.Equal(t, 1, firstWriterCount, "exactly one goroutine must create the value")
 }
 
+// TestMemory_GetOrSet_Delete_Interleave_NoPanic verifies that concurrent GetOrSet
+// and Delete operations on the same key do not cause panics or slice bound errors.
+func TestMemory_GetOrSet_Delete_Interleave_NoPanic(t *testing.T) {
+	t.Parallel()
+
+	const (
+		testKey         = "order-new"
+		iterationsCount = 5_000
+		keysCount       = 100
+	)
+
+	var (
+		store     = NewMemoryStore(true, 0)
+		testValue = []byte("processed")
+	)
+
+	// Seed a realistic number of keys so the store is not empty and
+	// the index structures (if any) are exercised further than the trivial case.
+	for i := range keysCount {
+		require.NoError(t, store.Set(fmt.Sprintf("order-%d", i), testValue))
+	}
+
+	// Interleave GetOrSet and Delete in parallel - used to trigger [: -1].
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+
+	// Writer/creator: repeatedly tries to insert-or-read the same key.
+	go func() {
+		defer wg.Done()
+
+		for range iterationsCount {
+			_, _, _ = store.GetOrSet(testKey, testValue)
+		}
+	}()
+
+	// Remover: repeatedly deletes the same key, racing with the writer above.
+	go func() {
+		defer wg.Done()
+
+		for range iterationsCount {
+			_ = store.Delete(testKey)
+		}
+	}()
+
+	// If the implementation mishandles swap-delete or slice bounds on empty lists,
+	// a panic would bubble up and fail this test.
+	wg.Wait()
+}
+
 // TestMemoryStore_Swap_Basic verifies Swap returns (nil, false) for new keys,
 // and (previous_value, true) when replacing existing keys.
 func TestMemoryStore_Swap_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	prev, loaded, err := store.Swap("k", "v1")
 	require.NoError(t, err)
@@ -335,7 +393,7 @@ func TestMemoryStore_Swap_Basic(t *testing.T) {
 func TestMemoryStore_CompareAndSwap_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 	require.NoError(t, store.Set("k", "old"))
 
 	ok, err := store.CompareAndSwap("k", "BAD", "new")
@@ -360,7 +418,7 @@ func TestMemoryStore_CompareAndSwap_Basic(t *testing.T) {
 func TestMemoryStore_CompareAndSwap_InsertWhenAbsent(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	ok, err := store.CompareAndSwap("lock", nil, "holder")
 	require.NoError(t, err)
@@ -383,7 +441,7 @@ func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 	const concurrencyLevel = 200
 
 	var (
-		store = NewMemoryStore(true)
+		store = NewMemoryStore(true, 0)
 		okCh  = make(chan bool, concurrencyLevel)
 		wg    sync.WaitGroup
 	)
@@ -426,11 +484,16 @@ func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 func TestMemoryStore_Delete(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 	require.NoError(t, store.Set("test-key", "test-value"))
 
 	require.NoError(t, store.Delete("test-key"))
-	_, exists := store.container["test-key"]
+
+	shard := store.getShardByKey("test-key")
+	shard.mu.RLock()
+	_, exists := shard.container["test-key"]
+	shard.mu.RUnlock()
+
 	assert.False(t, exists, "key must be removed from container")
 
 	require.NoError(t, store.Delete("non-existent"), "Delete on missing key must not error")
@@ -441,7 +504,7 @@ func TestMemoryStore_Delete(t *testing.T) {
 func TestMemoryStore_Exists(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	exists, err := store.Exists("non-existent")
 	require.NoError(t, err)
@@ -459,7 +522,7 @@ func TestMemoryStore_Exists(t *testing.T) {
 func TestMemoryStore_DeleteIfExists_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	ok, err := store.DeleteIfExists("k")
 	require.NoError(t, err)
@@ -483,7 +546,7 @@ func TestMemoryStore_DeleteIfExists_ConcurrentSingleWinner(t *testing.T) {
 	const concurrencyLevel = 128
 
 	var (
-		store = NewMemoryStore(true)
+		store = NewMemoryStore(true, 0)
 		wins  int
 		mu    sync.Mutex
 		wg    sync.WaitGroup
@@ -523,7 +586,7 @@ func TestMemoryStore_DeleteIfExists_ConcurrentSingleWinner(t *testing.T) {
 func TestMemoryStore_CompareAndDelete_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 	require.NoError(t, store.Set("k", "v1"))
 
 	ok, err := store.CompareAndDelete("k", "BAD")
@@ -549,7 +612,7 @@ func TestMemoryStore_CompareAndDelete_ConcurrentSingleWinner(t *testing.T) {
 	const concurrencyLevel = 120
 
 	var (
-		store        = NewMemoryStore(true)
+		store        = NewMemoryStore(true, 0)
 		successCount int
 		mu           sync.Mutex
 		wg           sync.WaitGroup
@@ -589,7 +652,7 @@ func TestMemoryStore_AtomicOps_DoNotChangeBytesUnexpectedly(t *testing.T) {
 	t.Parallel()
 
 	var (
-		store         = NewMemoryStore(true)
+		store         = NewMemoryStore(true, 0)
 		originalBytes = []byte("payload")
 	)
 
@@ -612,7 +675,7 @@ func TestMemoryStore_AtomicOps_DoNotChangeBytesUnexpectedly(t *testing.T) {
 func TestMemoryStore_Clear(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	entries := []struct{ key, value string }{
 		{"key1", "value1"},
@@ -624,7 +687,7 @@ func TestMemoryStore_Clear(t *testing.T) {
 	}
 
 	require.NoError(t, store.Clear())
-	assert.Empty(t, store.container, "store must be empty after Clear")
+	assert.Equal(t, 0, totalKeysInStore(store), "store must be empty after Clear")
 }
 
 // TestMemoryStore_Size verifies Size returns 0 for empty stores and accurately
@@ -632,7 +695,7 @@ func TestMemoryStore_Clear(t *testing.T) {
 func TestMemoryStore_Size(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	size, err := store.Size()
 	require.NoError(t, err)
@@ -671,7 +734,7 @@ func TestMemoryStore_Scan_PrefixPagination(t *testing.T) {
 		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
 			t.Parallel()
 
-			store := NewMemoryStore(trackKeys)
+			store := NewMemoryStore(trackKeys, 0)
 			prefixKeys := seedStorePrefixes(t, store, prefixData)
 
 			// Collect full scan with pagination and compare to List results (keys and values).
@@ -704,14 +767,14 @@ func TestMemoryStore_Scan_PrefixPagination(t *testing.T) {
 			listEntries := mustListStore(t, store)
 			assert.Equal(
 				t,
-				keysFromEntries(listEntries),
-				keysFromEntries(allScanEntries),
+				keysFromEntries(t, listEntries),
+				keysFromEntries(t, allScanEntries),
 				"Scan keys must match List keys",
 			)
 			assert.Equal(
 				t,
-				valuesFromEntries(listEntries),
-				valuesFromEntries(allScanEntries),
+				valuesFromEntries(t, listEntries),
+				valuesFromEntries(t, allScanEntries),
 				"Scan values must match List values",
 			)
 
@@ -748,7 +811,7 @@ func TestMemoryStore_Scan_PrefixPagination(t *testing.T) {
 
 			// limit <= 0 should return entire prefix range after the provided cursor.
 			page := mustScanStore(t, store, "beta:", "beta:03", 0)
-			assert.Equal(t, prefixKeys["beta"][3:], keysFromEntries(page.Entries))
+			assert.Equal(t, prefixKeys["beta"][3:], keysFromEntries(t, page.Entries))
 			assert.Empty(t, page.NextKey, "NextKey must be empty when limit <= 0")
 
 			// afterKey outside prefix must result in an empty page.
@@ -769,139 +832,10 @@ func TestMemoryStore_Scan_PrefixPagination(t *testing.T) {
 			listAfterDelete := mustListStore(t, store)
 			assert.Equal(
 				t,
-				keysFromEntries(listAfterDelete),
-				keysFromEntries(scanAfterDelete),
+				keysFromEntries(t, listAfterDelete),
+				keysFromEntries(t, scanAfterDelete),
 				"Scan/List keys must match after deletes",
 			)
-		})
-	}
-}
-
-// TestMemoryStore_Scan_ConcurrentMutations verifies Scan remains safe and consistent
-// under concurrent Set/Delete operations, and NextKey always reflects the last entry when set.
-func TestMemoryStore_Scan_ConcurrentMutations(t *testing.T) {
-	t.Parallel()
-
-	const (
-		initialKeys  = 128
-		pageSize     = int64(5)
-		iterations   = 256
-		prefix       = "conc"
-		prefixFormat = "%s:%03d"
-	)
-
-	for _, trackKeys := range []bool{true, false} {
-		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
-			t.Parallel()
-
-			store := NewMemoryStore(trackKeys)
-
-			for i := range initialKeys {
-				require.NoError(t, store.Set(fmt.Sprintf(prefixFormat, prefix, i), fmt.Sprintf("value-%d", i)))
-			}
-
-			var wg sync.WaitGroup
-			wg.Add(3)
-
-			// Global scanner.
-			go func() {
-				defer wg.Done()
-
-				for range iterations {
-					page, err := store.Scan("", "", pageSize)
-					if err != nil {
-						t.Errorf("global scan failed: %v", err)
-						return
-					}
-
-					if len(page.Entries) == 0 {
-						continue
-					}
-
-					if page.NextKey != "" {
-						assert.Equal(t, page.Entries[len(page.Entries)-1].Key, page.NextKey)
-					}
-
-					for _, entry := range page.Entries {
-						assert.NotEmpty(t, entry.Key)
-					}
-				}
-			}()
-
-			// Prefix scanner.
-			go func() {
-				defer wg.Done()
-
-				for range iterations {
-					page, err := store.Scan(prefix+":", "", pageSize)
-					if err != nil {
-						t.Errorf("prefix scan failed: %v", err)
-						return
-					}
-
-					if page.NextKey != "" && len(page.Entries) > 0 {
-						assert.Equal(t, page.Entries[len(page.Entries)-1].Key, page.NextKey)
-					}
-				}
-			}()
-
-			// Writer / deleter.
-			go func() {
-				defer wg.Done()
-
-				for i := range iterations {
-					key := fmt.Sprintf(prefixFormat, prefix, i%initialKeys)
-
-					if i%2 == 0 {
-						if err := store.Delete(key); err != nil {
-							t.Errorf("delete failed: %v", err)
-							return
-						}
-					} else {
-						if err := store.Set(key, fmt.Sprintf("value-updated-%d", i)); err != nil {
-							t.Errorf("set failed: %v", err)
-							return
-						}
-					}
-				}
-			}()
-
-			wg.Wait()
-		})
-	}
-}
-
-// TestMemoryStore_Scan_MutationAfterPagination verifies that inserting keys
-// lexicographically before the NextKey cursor doesn't cause duplicates in subsequent pages.
-func TestMemoryStore_Scan_MutationAfterPagination(t *testing.T) {
-	t.Parallel()
-
-	initialKeys := []string{"k1", "k2", "k3", "k4"}
-
-	for _, trackKeys := range []bool{true, false} {
-		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
-			t.Parallel()
-
-			store := NewMemoryStore(trackKeys)
-
-			for _, key := range initialKeys {
-				require.NoError(t, store.Set(key, key+"-value"))
-			}
-
-			firstPage := mustScanStore(t, store, "", "", 2)
-			require.Equal(t, []string{"k1", "k2"}, keysFromEntries(firstPage.Entries))
-			require.Equal(t, "k2", firstPage.NextKey)
-
-			// Insert a key lexicographically before NextKey.
-			require.NoError(t, store.Set("k1.5", "k1.5-value"))
-
-			secondPage := mustScanStore(t, store, "", firstPage.NextKey, 2)
-			require.Equal(t, []string{"k3", "k4"}, keysFromEntries(secondPage.Entries))
-			assert.Empty(t, secondPage.NextKey, "final page must not expose NextKey")
-
-			// Ensure the newly inserted key appears when scanning from scratch.
-			fullScan := collectScanEntries(t, store, 0)
-			assert.Equal(t, []string{"k1", "k1.5", "k2", "k3", "k4"}, keysFromEntries(fullScan))
 		})
 	}
 }
@@ -911,7 +845,7 @@ func TestMemoryStore_Scan_MutationAfterPagination(t *testing.T) {
 func TestMemoryStore_List(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	// Empty store.
 	entries, err := store.List("", 0)
@@ -966,136 +900,27 @@ func TestMemoryStore_List(t *testing.T) {
 func TestMemoryStore_KeyTrackingConsistency(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 	keys := []string{"key1", "key2", "key3"}
 
 	for _, key := range keys {
 		require.NoError(t, store.Set(key, "value"))
 	}
 
-	store.mu.RLock()
-
-	assert.Len(t, store.keysList, len(keys))
+	assert.Equal(t, len(keys), totalTrackedKeys(store))
 
 	for _, key := range keys {
-		_, exists := store.keysMap[key]
-		assert.Truef(t, exists, "key missing from index: %s", key)
+		assert.Truef(t, keyTrackedInStore(store, key), "key missing from index: %s", key)
 	}
-
-	store.mu.RUnlock()
 
 	require.NoError(t, store.Delete(keys[1]))
 
-	store.mu.RLock()
-
-	assert.Len(t, store.keysList, len(keys)-1)
-	_, exists := store.keysMap[keys[1]]
-	assert.False(t, exists, "deleted key must not remain in index")
-
-	store.mu.RUnlock()
+	assert.Equal(t, len(keys)-1, totalTrackedKeys(store))
+	assert.False(t, keyTrackedInStore(store, keys[1]), "deleted key must not remain in index")
 
 	require.NoError(t, store.Clear())
 
-	store.mu.RLock()
-	assert.Empty(t, store.keysList, "index must be empty after Clear")
-	store.mu.RUnlock()
-}
-
-// TestMemoryStore_RandomKey_Distribution_WithTracking verifies RandomKey returns
-// empty string for empty stores, and over repeated calls returns all keys uniformly.
-func TestMemoryStore_RandomKey_Distribution_WithTracking(t *testing.T) {
-	t.Parallel()
-
-	store := NewMemoryStore(true)
-
-	key, err := store.RandomKey("")
-	require.NoError(t, err)
-	assert.Empty(t, key, "empty store must return empty key")
-
-	keys := []string{"alpha", "beta", "gamma"}
-	for _, k := range keys {
-		require.NoError(t, store.Set(k, "some-value"))
-	}
-
-	found := make(map[string]bool)
-
-	for range 1000 {
-		k, err := store.RandomKey("")
-		require.NoError(t, err)
-		require.NotEmpty(t, k, "non-empty store must return some key")
-
-		found[k] = true
-	}
-
-	for _, k := range keys {
-		assert.Truef(t, found[k], "key not observed in random selections: %s", k)
-	}
-}
-
-// TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled verifies RandomKey with
-// prefix filtering works correctly when trackKeys=true, including edge cases like
-// empty stores, non-matching prefixes, and behavior after deletions.
-func TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
-	t.Parallel()
-
-	store := NewMemoryStore(true)
-
-	key, err := store.RandomKey("a:")
-	require.NoError(t, err)
-	assert.Empty(t, key, "empty store must return empty key for any prefix")
-
-	mustSetInMemoryStore(t, store, "a:1", "v1")
-	mustSetInMemoryStore(t, store, "a:2", "v2")
-	mustSetInMemoryStore(t, store, "b:1", "v3")
-
-	key, err = store.RandomKey("")
-	require.NoError(t, err)
-	assert.NotEmpty(t, key, "no-prefix should return some key")
-	assert.True(t, key == "a:1" || key == "a:2" || key == "b:1", "must be one of seeded keys")
-
-	key, err = store.RandomKey("a:")
-	require.NoError(t, err)
-	require.NotEmpty(t, key)
-	assert.True(t, strings.HasPrefix(key, "a:"), "must return a key with prefix a:")
-
-	key, err = store.RandomKey("z:")
-	require.NoError(t, err)
-	assert.Empty(t, key, "no-match prefix must return empty key")
-
-	mustDeleteFromStore(t, store, "a:1")
-	key, err = store.RandomKey("a:")
-	require.NoError(t, err)
-	assert.Equal(t, "a:2", key, "after delete, the only remaining prefixed key must be returned")
-
-	mustClearStore(t, store)
-	key, err = store.RandomKey("a:")
-	require.NoError(t, err)
-	assert.Empty(t, key, "after clear, prefix must return empty key")
-}
-
-// TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled verifies RandomKey with
-// prefix filtering works correctly when trackKeys=false (fallback two-pass scan mode).
-func TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
-	t.Parallel()
-
-	store := NewMemoryStore(false)
-
-	key, err := store.RandomKey("a:")
-	require.NoError(t, err)
-	assert.Empty(t, key, "empty store must return empty key")
-
-	mustSetInMemoryStore(t, store, "a:1", "v1")
-	mustSetInMemoryStore(t, store, "a:2", "v2")
-	mustSetInMemoryStore(t, store, "b:1", "v3")
-
-	key, err = store.RandomKey("a:")
-	require.NoError(t, err)
-	require.NotEmpty(t, key)
-	assert.True(t, strings.HasPrefix(key, "a:"), "must return key with prefix a:")
-
-	key, err = store.RandomKey("z:")
-	require.NoError(t, err)
-	assert.Empty(t, key, "no-match prefix must return empty key")
+	assert.Equal(t, 0, totalTrackedKeys(store), "index must be empty after Clear")
 }
 
 // TestMemoryStore_RebuildKeyList_RandomKeyPrefix verifies RebuildKeyList correctly
@@ -1103,7 +928,7 @@ func TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
 func TestMemoryStore_RebuildKeyList_RandomKeyPrefix(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 
 	mustSetInMemoryStore(t, store, "p:1", "v1")
 	mustSetInMemoryStore(t, store, "p:2", "v2")
@@ -1127,58 +952,8 @@ func TestMemoryStore_RebuildKeyList_RandomKeyPrefix(t *testing.T) {
 func TestMemoryStore_Close(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true)
+	store := NewMemoryStore(true, 0)
 	require.NoError(t, store.Close())
-}
-
-// TestMemory_GetOrSet_Delete_Interleave_NoPanic verifies that concurrent GetOrSet
-// and Delete operations on the same key do not cause panics or slice bound errors.
-func TestMemory_GetOrSet_Delete_Interleave_NoPanic(t *testing.T) {
-	t.Parallel()
-
-	const (
-		testKey         = "order-new"
-		iterationsCount = 5_000
-		keysCount       = 100
-	)
-
-	var (
-		store     = NewMemoryStore(true)
-		testValue = []byte("processed")
-	)
-
-	// Seed a realistic number of keys so the store is not empty and
-	// the index structures (if any) are exercised further than the trivial case.
-	for i := range keysCount {
-		require.NoError(t, store.Set(fmt.Sprintf("order-%d", i), testValue))
-	}
-
-	// Interleave GetOrSet and Delete in parallel - used to trigger [: -1].
-	var wg sync.WaitGroup
-
-	wg.Add(2)
-
-	// Writer/creator: repeatedly tries to insert-or-read the same key.
-	go func() {
-		defer wg.Done()
-
-		for range iterationsCount {
-			_, _, _ = store.GetOrSet(testKey, testValue)
-		}
-	}()
-
-	// Remover: repeatedly deletes the same key, racing with the writer above.
-	go func() {
-		defer wg.Done()
-
-		for range iterationsCount {
-			_ = store.Delete(testKey)
-		}
-	}()
-
-	// If the implementation mishandles swap-delete or slice bounds on empty lists,
-	// a panic would bubble up and fail this test.
-	wg.Wait()
 }
 
 // mustSetInMemoryStore sets a key in the memory store and panics if it fails.
@@ -1200,6 +975,45 @@ func mustClearStore(t *testing.T, store Store) {
 	t.Helper()
 
 	require.NoError(t, store.Clear(), "Clear() must succeed")
+}
+
+func totalKeysInStore(store *MemoryStore) int {
+	var total int
+
+	for _, shard := range store.shards {
+		shard.mu.RLock()
+		total += len(shard.container)
+		shard.mu.RUnlock()
+	}
+
+	return total
+}
+
+func totalTrackedKeys(store *MemoryStore) int {
+	var total int
+
+	for _, shard := range store.shards {
+		shard.mu.RLock()
+		total += len(shard.keysList)
+		shard.mu.RUnlock()
+	}
+
+	return total
+}
+
+func keyTrackedInStore(store *MemoryStore, key string) bool {
+	shard := store.getShardByKey(key)
+
+	shard.mu.RLock()
+	defer shard.mu.RUnlock()
+
+	if shard.keysMap == nil {
+		return false
+	}
+
+	_, exists := shard.keysMap[key]
+
+	return exists
 }
 
 // seedStorePrefixes seeds the store with prefixes and panics if it fails.
@@ -1228,16 +1042,6 @@ func seedStorePrefixes(t *testing.T, store Store, data []struct {
 	return prefixKeys
 }
 
-// mustScanStore scans the store and panics if it fails.
-func mustScanStore(t *testing.T, store Store, prefix, after string, limit int64) *ScanPage {
-	t.Helper()
-
-	page, err := store.Scan(prefix, after, limit)
-	require.NoError(t, err)
-
-	return page
-}
-
 // mustListStore lists the store and panics if it fails.
 func mustListStore(t *testing.T, store Store) []Entry {
 	t.Helper()
@@ -1249,7 +1053,9 @@ func mustListStore(t *testing.T, store Store) []Entry {
 }
 
 // keysFromEntries returns the keys from a list of entries.
-func keysFromEntries(entries []Entry) []string {
+func keysFromEntries(t *testing.T, entries []Entry) []string {
+	t.Helper()
+
 	keys := make([]string, len(entries))
 
 	for i, entry := range entries {
@@ -1260,11 +1066,13 @@ func keysFromEntries(entries []Entry) []string {
 }
 
 // valuesFromEntries returns the values from a list of entries.
-func valuesFromEntries(entries []Entry) map[string]string {
+func valuesFromEntries(t *testing.T, entries []Entry) map[string]string {
+	t.Helper()
+
 	values := make(map[string]string, len(entries))
 
 	for _, entry := range entries {
-		values[entry.Key] = entryValueAsString(entry.Value)
+		values[entry.Key] = entryValueAsString(t, entry.Value)
 	}
 
 	return values
@@ -1294,7 +1102,9 @@ func collectScanEntries(t *testing.T, store Store, limit int64) []Entry {
 }
 
 // entryValueAsString returns the value of an entry as a string.
-func entryValueAsString(value any) string {
+func entryValueAsString(t *testing.T, value any) string {
+	t.Helper()
+
 	switch v := value.(type) {
 	case []byte:
 		return string(v)

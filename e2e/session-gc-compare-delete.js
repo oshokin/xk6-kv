@@ -32,8 +32,11 @@ const SESSION_KEY_POOL_SIZE = parseInt(__ENV.SESSION_KEY_POOL_SIZE || '500', 10)
 // Session TTL in milliseconds (used in session payload metadata).
 const SESSION_TTL_MS = parseInt(__ENV.SESSION_TTL_MS || '30000', 10);
 
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'session-gc-compare-delete';
+
 // kv is the shared store client used throughout the scenario.
-const kv = createKv();
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -49,7 +52,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv);
+export const teardown = createTeardown(kv, TEST_NAME);
 
 // sessionGcCompareDelete seeds a session, runs Promise.all compareAndDelete calls,
 // and verifies that exactly one worker succeeded and the session vanished.

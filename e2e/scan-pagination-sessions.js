@@ -1,6 +1,6 @@
 import { check } from 'k6';
 import exec from 'k6/execution';
-import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
+import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
 // REAL-WORLD SCENARIO: PAGINATED SESSION ANALYTICS
@@ -34,6 +34,9 @@ import { VUS, ITERATIONS, createKv, createTeardown } from './common.js';
 // - Read-heavy, cursor-based workloads.
 // - Sensitive to ordering regressions and missed prefixes.
 
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'scan-pagination-sessions';
+
 // Session key prefix used for seeding and scanning.
 const SESSION_PREFIX = __ENV.SESSION_PREFIX || 'session:';
 
@@ -53,7 +56,7 @@ const SESSION_KEY_PAD_WIDTH = 6;
 const SESSIONS_PER_USER = 5;
 
 // kv is the shared store client used throughout the scenario.
-const kv = createKv();
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -67,7 +70,8 @@ export const options = {
 
 // setup seeds deterministic sessions so we can assert exact counts later.
 export async function setup() {
-  await kv.clear();
+  const standardSetup = createSetup(kv);
+  await standardSetup();
 
   for (let i = 0; i < TOTAL_SESSIONS; i += 1) {
     const paddedIndex = String(i).padStart(SESSION_KEY_PAD_WIDTH, '0');
@@ -84,7 +88,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv);
+export const teardown = createTeardown(kv, TEST_NAME);
 
 // scanPaginatedSessions performs repeated scans until `done` is true, verifying
 // prefix ordering invariants.

@@ -2,14 +2,11 @@ package store
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -42,10 +39,13 @@ type DiskStore struct {
 	// ost is an order-statistics index (lexicographic; used for prefix random).
 	ost *OSTree
 	// opened is a flag to track whether the store is open.
+	// Uses atomic to allow lock-free reads in ensureOpen().
 	opened atomic.Bool
 	// refCount is a counter to track the number of openers.
+	// Incremented on each Open(), decremented on Close(). DB closes when it reaches 0.
 	refCount atomic.Int64
 	// lock is a mutex to serialize open/close transitions.
+	// Prevents race conditions during state changes.
 	lock sync.Mutex
 }
 
@@ -90,41 +90,6 @@ func NewDiskStore(trackKeys bool, path string) (*DiskStore, error) {
 	}, nil
 }
 
-// ResolveDiskPath normalizes user-provided paths and applies fast-fail defaults.
-// Empty strings revert to the default DB file path.
-func ResolveDiskPath(dbPath string) (string, error) {
-	trimmedPath := strings.TrimSpace(dbPath)
-	if trimmedPath == "" {
-		defaultPath, err := filepath.Abs(DefaultDiskStorePath)
-		if err != nil {
-			return "", fmt.Errorf("%w: default path %q: %w", ErrDiskPathResolveFailed, DefaultDiskStorePath, err)
-		}
-
-		return defaultPath, nil
-	}
-
-	cleanedPath := filepath.Clean(trimmedPath)
-
-	absPath, err := filepath.Abs(cleanedPath)
-	if err != nil {
-		return "", fmt.Errorf("%w: path %q: %w", ErrDiskPathResolveFailed, cleanedPath, err)
-	}
-
-	info, err := os.Stat(absPath)
-	switch {
-	case err == nil:
-		if info.IsDir() {
-			return absPath, fmt.Errorf("%w: %q", ErrDiskPathIsDirectory, absPath)
-		}
-
-		return absPath, nil
-	case errors.Is(err, os.ErrNotExist):
-		return absPath, nil
-	default:
-		return absPath, fmt.Errorf("%w: %q: %w", ErrDiskPathResolveFailed, absPath, err)
-	}
-}
-
 // Open initializes the underlying BoltDB handle when needed and increments the
 // reference counter for each caller. It is safe for concurrent use.
 func (s *DiskStore) Open() error {
@@ -132,7 +97,8 @@ func (s *DiskStore) Open() error {
 	defer s.lock.Unlock()
 
 	if s.opened.Load() {
-		// Increment the reference counter for each caller.
+		// Already open: just increment reference counter for this caller.
+		// Multiple Open() calls are allowed and tracked via refCount.
 		s.refCount.Add(1)
 
 		return nil
@@ -183,7 +149,8 @@ func (s *DiskStore) Open() error {
 		}
 	}
 
-	// We open store once, so we can't increment the reference counter.
+	// Mark as opened and initialize refCount to 1 (this Open() call).
+	// Subsequent Open() calls will just increment refCount without reopening.
 	s.opened.Store(true)
 	s.refCount.Store(1)
 
@@ -244,6 +211,7 @@ func (s *DiskStore) Set(key string, value any) error {
 	if s.trackKeys {
 		// Lightweight existence check to decide whether to update indexes later.
 		// We check before the transaction to avoid holding keysLock during disk I/O.
+		// This optimization reduces lock contention by minimizing lock duration.
 		s.keysLock.RLock()
 		_, existed = s.keysMap[key]
 		s.keysLock.RUnlock()
@@ -297,6 +265,7 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 		currentValue := bucket.Get([]byte(key))
 
 		// Parse current value or start from 0.
+		// Absent keys are treated as having value 0 for increment operations.
 		var parsedCurrentValue int64
 
 		if currentValue != nil {
@@ -307,6 +276,7 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 				return fmt.Errorf("%w: key %q: %w", ErrValueParseFailed, key, err)
 			}
 		} else {
+			// Key doesn't exist: will create it with value delta.
 			wasNew = true
 		}
 
@@ -358,13 +328,14 @@ func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, er
 		// Check if key exists.
 		if got := bucket.Get([]byte(key)); got != nil {
 			exists = true
-
+			// Clone to avoid aliasing BoltDB's internal memory buffers.
 			result = slices.Clone(got)
 
 			return nil
 		}
 
 		// Key doesn't exist, set it.
+		// This happens atomically within the Update transaction.
 		return bucket.Put([]byte(key), valueBytes)
 	})
 	if err != nil {
@@ -480,18 +451,20 @@ func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool
 
 		switch {
 		case expectAbsent:
+			// CAS with nil oldValue: only succeed if key doesn't exist.
 			if current != nil {
 				return nil
 			}
 
 			inserted = true
 		default:
+			// CAS with non-nil oldValue: compare byte-for-byte.
 			if current == nil || !bytes.Equal(current, oldBytes) {
 				return nil
 			}
 		}
 
-		// Values match, perform swap.
+		// Values match (or key absent as expected), perform swap.
 		swapped = true
 
 		return bucket.Put([]byte(key), newBytes)
@@ -552,12 +525,15 @@ func (s *DiskStore) Exists(key string) (bool, error) {
 	}
 
 	// When tracking is enabled, check in-memory index first for fast-path.
+	// This avoids disk I/O for most Exists() calls when keys are present.
 	if s.trackKeys {
 		s.keysLock.RLock()
 		_, exists := s.keysMap[key]
 		s.keysLock.RUnlock()
 
 		// Trust positive hits from index (key definitely exists).
+		// For negative results, we must check disk to handle potential index drift
+		// (e.g., if RebuildKeyList hasn't been called after manual DB edits).
 		if exists {
 			return true, nil
 		}
@@ -651,7 +627,8 @@ func (s *DiskStore) CompareAndDelete(key string, oldValue any) (bool, error) {
 		// Get current value.
 		current := bucket.Get([]byte(key))
 
-		// Compare current with old.
+		// Compare current with old: must match exactly (both nil or both equal bytes).
+		// Three cases: both nil (match), one nil (mismatch), both non-nil (compare bytes).
 		if (current == nil && oldValue != nil) ||
 			(current != nil && oldValue == nil) ||
 			(current != nil && oldValue != nil && !bytes.Equal(current, oldBytes)) {
@@ -691,13 +668,14 @@ func (s *DiskStore) Clear() error {
 	}
 
 	err := s.handle.Update(func(tx *bolt.Tx) error {
-		// Drop whole bucket.
+		// Drop whole bucket: faster than deleting keys one-by-one.
+		// BoltDB optimizes bucket deletion as a single operation.
 		err := tx.DeleteBucket(s.bucket)
 		if err != nil {
 			return fmt.Errorf("%w: bucket %s: %w", ErrDiskStoreDeleteFailed, s.bucket, err)
 		}
 
-		// Recreate it empty.
+		// Recreate it empty: ensures bucket exists for subsequent operations.
 		_, err = tx.CreateBucket(s.bucket)
 		if err != nil {
 			return fmt.Errorf("%w: bucket %s: %w", ErrDiskStoreWriteFailed, s.bucket, err)
@@ -752,36 +730,6 @@ func (s *DiskStore) Size() (int64, error) {
 	return size, nil
 }
 
-// Scan returns a page of key-value pairs, ordered lexicographically.
-// If prefix is non-empty, only keys starting with prefix are considered.
-// If afterKey is non-empty, scanning starts strictly after it; otherwise from the first key.
-// If limit > 0, at most limit entries are returned; if limit <= 0, all matching entries are returned.
-// Returns a ScanPage with Entries and NextKey (set to the last key when more results exist; empty when done).
-func (s *DiskStore) Scan(prefix, afterKey string, limit int64) (*ScanPage, error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
-	}
-
-	page := &ScanPage{
-		Entries: make([]Entry, 0),
-	}
-
-	err := s.handle.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(s.bucket)
-		if bucket == nil {
-			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
-		}
-
-		return s.fillDiskScanPage(page, bucket.Cursor(), prefix, afterKey, limit)
-	})
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrDiskStoreScanFailed, err)
-	}
-
-	return page, nil
-}
-
 // List returns key-value pairs filtered by prefix and limited by count.
 // Keys are returned in lexicographical order (Bolt cursor order).
 // If prefix == "", Seek("") positions at the first key.
@@ -792,25 +740,6 @@ func (s *DiskStore) List(prefix string, limit int64) ([]Entry, error) {
 	}
 
 	return page.Entries, nil
-}
-
-// RandomKey returns a random key, optionally filtered by prefix.
-// Empty store or no matching prefix => "", nil.
-// Paths:
-//   - trackKeys = true:
-//     prefix==""  -> O(1) from keysList.
-//     prefix!=""  -> O(log n) via OSTree.
-//   - trackKeys = false -> two-pass scan over BoltDB cursor.
-func (s *DiskStore) RandomKey(prefix string) (string, error) {
-	if err := s.ensureOpen(); err != nil {
-		return "", err
-	}
-
-	if s.trackKeys {
-		return s.randomKeyWithTracking(prefix)
-	}
-
-	return s.randomKeyWithoutTracking(prefix)
 }
 
 // RebuildKeyList re-scans all keys from BoltDB to rebuild the in-memory key index.
@@ -875,303 +804,4 @@ func (s *DiskStore) ensureOpen() error {
 	}
 
 	return ErrDiskStoreClosed
-}
-
-// addKeyIndexLocked inserts key into in-memory indexes (O(1)).
-// Precondition: caller holds keysLock.
-func (s *DiskStore) addKeyIndexLocked(key string) {
-	// Check if key exists.
-	if _, exists := s.keysMap[key]; exists {
-		return
-	}
-
-	// New key: append to keysList and record its index in keysMap.
-	s.keysMap[key] = len(s.keysList)
-	s.keysList = append(s.keysList, key)
-
-	// Update prefix index.
-	if s.ost != nil {
-		s.ost.Insert(key)
-	}
-}
-
-// removeKeyIndexLocked removes key from in-memory indexes using swap-delete.
-// Precondition: caller holds keysLock.
-func (s *DiskStore) removeKeyIndexLocked(key string) {
-	// Check if key exists.
-	idx, exists := s.keysMap[key]
-	if !exists {
-		return
-	}
-
-	// Swap-with-last deletion to avoid shifting array elements (O(1) instead of O(n)).
-	lastIndex := len(s.keysList) - 1
-	if idx != lastIndex {
-		// Swap target with last element.
-		moved := s.keysList[lastIndex]
-
-		s.keysList[idx] = moved
-		s.keysMap[moved] = idx
-	}
-
-	// Truncate list and remove from map.
-	s.keysList = s.keysList[:lastIndex]
-	delete(s.keysMap, key)
-
-	// Update OST for prefix-based operations.
-	if s.ost != nil {
-		s.ost.Delete(key)
-	}
-}
-
-// fillDiskScanPage populates page with cursor results that match prefix/afterKey/limit constraints.
-func (s *DiskStore) fillDiskScanPage(page *ScanPage, cursor *bolt.Cursor, prefix, afterKey string, limit int64) error {
-	startKey := s.chooseDiskScanStart(prefix, afterKey)
-
-	k, v := s.seekDiskCursor(cursor, startKey)
-	if k == nil {
-		return nil
-	}
-
-	var (
-		prefixBytes = []byte(prefix)
-		afterBytes  = []byte(afterKey)
-		hasLimit    = limit > 0
-	)
-
-	for ; k != nil; k, v = cursor.Next() {
-		if len(afterBytes) > 0 && bytes.Compare(k, afterBytes) <= 0 {
-			continue
-		}
-
-		if len(prefixBytes) > 0 && !bytes.HasPrefix(k, prefixBytes) {
-			break
-		}
-
-		lastKey := string(k)
-		page.Entries = append(page.Entries, Entry{
-			Key:   lastKey,
-			Value: slices.Clone(v),
-		})
-
-		if hasLimit && int64(len(page.Entries)) >= limit {
-			s.setDiskNextKey(page, cursor, prefixBytes, lastKey)
-			break
-		}
-	}
-
-	return nil
-}
-
-// chooseDiskScanStart returns the lexicographic starting point for a scan given prefix and afterKey.
-func (s *DiskStore) chooseDiskScanStart(prefix, afterKey string) string {
-	if prefix == "" {
-		return afterKey
-	}
-
-	if afterKey == "" || afterKey <= prefix {
-		return prefix
-	}
-
-	return afterKey
-}
-
-// seekDiskCursor positions cursor at startKey (or the first key when empty).
-func (s *DiskStore) seekDiskCursor(cursor *bolt.Cursor, startKey string) ([]byte, []byte) {
-	if startKey == "" {
-		return cursor.First()
-	}
-
-	return cursor.Seek([]byte(startKey))
-}
-
-// setDiskNextKey determines whether another key with the same prefix exists and records lastKey as NextKey.
-func (s *DiskStore) setDiskNextKey(page *ScanPage, cursor *bolt.Cursor, prefix []byte, lastKey string) {
-	if len(page.Entries) == 0 {
-		return
-	}
-
-	nextKey, _ := cursor.Next()
-	if nextKey == nil {
-		return
-	}
-
-	if len(prefix) == 0 || bytes.HasPrefix(nextKey, prefix) {
-		page.NextKey = lastKey
-	}
-}
-
-// randomKeyWithTracking picks a random key using in-memory structures.
-//   - No prefix: O(1) from keysList.
-//   - With prefix: O(log n) via OSTree range + Kth selection.
-func (s *DiskStore) randomKeyWithTracking(prefix string) (string, error) {
-	s.keysLock.RLock()
-	defer s.keysLock.RUnlock()
-
-	// No prefix: uniform from the whole set.
-	if prefix == "" {
-		if len(s.keysList) == 0 {
-			return "", nil
-		}
-
-		return s.keysList[rand.IntN(len(s.keysList))], nil //nolint:gosec // math/rand/v2 is safe.
-	}
-
-	// Prefix form: consult OSTree index.
-	if s.ost == nil || s.ost.Len() == 0 {
-		return "", nil
-	}
-
-	// OSTree provides O(log n) range bounds for prefix.
-	l, r := s.ost.RangeBounds(prefix)
-	if r <= l {
-		return "", nil
-	}
-
-	// Pick random index in range and retrieve Kth element.
-	idx := l + rand.IntN(r-l) //nolint:gosec // math/rand/v2 is safe.
-	if key, ok := s.ost.Kth(idx); ok {
-		return key, nil
-	}
-
-	// Kth failed - extremely unlikely unless concurrent delete raced us.
-	return "", nil
-}
-
-// randomKeyWithoutTracking performs a two-pass prefix scan over Bolt:
-// 1) count matching keys;
-// 2) pick the r-th and iterate again to select it.
-func (s *DiskStore) randomKeyWithoutTracking(prefix string) (string, error) {
-	// Pass 1: count.
-	count, err := s.countKeys(prefix)
-	if err != nil || count == 0 {
-		return "", err
-	}
-
-	// Pass 2: pick and return the r-th.
-	target := rand.Int64N(count) //nolint:gosec // math/rand/v2 is safe
-
-	return s.getKeyByIndex(prefix, target)
-}
-
-// countKeys counts how many keys match a given prefix using a BoltDB cursor.
-// When prefix == "", we can return KeyN directly from stats.
-func (s *DiskStore) countKeys(prefix string) (int64, error) {
-	var count int64
-
-	err := s.handle.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(s.bucket)
-		if b == nil {
-			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
-		}
-
-		if prefix == "" {
-			count = int64(b.Stats().KeyN)
-
-			return nil
-		}
-
-		c := b.Cursor()
-		p := []byte(prefix)
-
-		for k, _ := c.Seek([]byte(prefix)); k != nil; k, _ = c.Next() {
-			if !bytes.HasPrefix(k, p) {
-				break
-			}
-
-			count++
-		}
-
-		return nil
-	})
-	if err != nil {
-		return 0, fmt.Errorf("%w: %w", ErrDiskStoreCountFailed, err)
-	}
-
-	return count, nil
-}
-
-// getKeyByIndex returns the key at the given zero-based position among
-// keys that match prefix. If the index is out of range due to races,
-// it returns "" and nil to preserve the "no error when empty" contract.
-func (s *DiskStore) getKeyByIndex(prefix string, index int64) (string, error) {
-	var (
-		key     string
-		found   bool
-		current int64
-	)
-
-	err := s.handle.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(s.bucket)
-		if b == nil {
-			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
-		}
-
-		c := b.Cursor()
-		p := []byte(prefix)
-
-		for k, _ := c.Seek([]byte(prefix)); k != nil; k, _ = c.Next() {
-			if prefix != "" && !bytes.HasPrefix(k, p) {
-				break
-			}
-
-			if current == index {
-				key = string(k)
-				found = true
-
-				return nil
-			}
-
-			current++
-		}
-
-		return nil
-	})
-	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrDiskStoreRandomAccessFailed, err)
-	}
-
-	if !found {
-		return "", nil
-	}
-
-	return key, nil
-}
-
-// rebuildKeyListLocked scans Bolt and rebuilds keysList/keysMap and the OSTree.
-// Caller must hold keysLock.
-func (s *DiskStore) rebuildKeyListLocked() error {
-	newKeys := []string{}
-	newMap := make(map[string]int)
-
-	err := s.handle.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(s.bucket)
-		if bucket == nil {
-			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
-		}
-
-		return bucket.ForEach(func(k, _ []byte) error {
-			keyStr := string(k)
-			newMap[keyStr] = len(newKeys)
-			newKeys = append(newKeys, keyStr)
-
-			return nil
-		})
-	})
-	if err != nil {
-		return err
-	}
-
-	s.keysList = newKeys
-	s.keysMap = newMap
-
-	if s.ost != nil {
-		s.ost = NewOSTree()
-
-		for _, k := range newKeys {
-			s.ost.Insert(k)
-		}
-	}
-
-	return nil
 }

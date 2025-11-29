@@ -30,8 +30,11 @@ const KEYS_PER_BATCH = parseInt(__ENV.KEYS_PER_BATCH || '80', 10);
 // Iteration interval for maintenance cycles (every Nth iteration).
 const MAINTENANCE_INTERVAL = parseInt(__ENV.MAINTENANCE_INTERVAL || '10', 10);
 
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'admin-clear-size-drill';
+
 // kv is the shared store client used throughout the scenario.
-const kv = createKv();
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -46,7 +49,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv);
+export const teardown = createTeardown(kv, TEST_NAME);
 
 // adminClearSizeDrill writes scratch keys and occasionally executes coordinated
 // clear()+size() probes to verify promise resolution under heavy churn.

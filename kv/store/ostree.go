@@ -20,6 +20,7 @@ type ostNode struct {
 }
 
 // nodeSize gracefully handles nil nodes to avoid nil checks in recursive functions.
+// Returns 0 for nil nodes, which represents an empty subtree.
 func nodeSize(n *ostNode) int {
 	if n == nil {
 		return 0
@@ -29,7 +30,8 @@ func nodeSize(n *ostNode) int {
 }
 
 // pull recalculates subtree size after structural changes.
-// Must be called after any rotation or child modification.
+// Must be called after any rotation or child modification to maintain
+// correct order-statistics. Size = 1 (self) + left subtree + right subtree.
 func pull(n *ostNode) {
 	if n == nil {
 		return
@@ -48,6 +50,7 @@ func rotateRight(n *ostNode) *ostNode {
 
 	// Update sizes bottom-up: child n first (now has fewer descendants),
 	// then parent l (gains n's original right subtree).
+	// Must update child before parent because parent's size depends on child's size.
 	pull(n)
 	pull(l)
 
@@ -81,6 +84,7 @@ func insert(n *ostNode, key string, prio int) *ostNode {
 	if key == n.key {
 		// Key already exists: no duplicates allowed in this tree.
 		// Treat as idempotent: return existing node unchanged.
+		// This ensures Insert() can be called multiple times safely.
 		return n
 	}
 
@@ -132,13 +136,16 @@ func deleteKey(n *ostNode, key string) *ostNode {
 		// Two children: use rotations to sink the target node down to a leaf position
 		// while preserving the treap heap property (higher priority = closer to root).
 		// Choose rotation direction based on which child has higher priority.
+		// Rotate so the higher-priority child becomes the new root, then recurse.
 		if n.left.priority > n.right.priority {
 			n = rotateRight(n)
 			// After right rotation, target moved to right subtree.
+			// Continue deletion in the subtree where target now resides.
 			n.right = deleteKey(n.right, key)
 		} else {
 			n = rotateLeft(n)
 			// After left rotation, target moved to left subtree.
+			// Continue deletion in the subtree where target now resides.
 			n.left = deleteKey(n.left, key)
 		}
 	}
@@ -161,13 +168,14 @@ func rankLess(n *ostNode, k string) int {
 
 	// When k <= n.key: target is in left subtree or equals n.key.
 	// We don't count n or the right subtree because they're >= k.
+	// Recurse into left subtree to find keys strictly less than k.
 	if k <= n.key {
 		return rankLess(n.left, k)
 	}
 
 	// When k > n.key: count everything in left subtree + n itself,
 	// then recurse into right subtree for additional matches.
-	// This avoids visiting nodes we know are < k.
+	// This avoids visiting nodes we know are < k, leveraging BST ordering.
 	return 1 + nodeSize(n.left) + rankLess(n.right, k)
 }
 
@@ -183,13 +191,16 @@ func kth(n *ostNode, k int) (string, bool) {
 	switch {
 	case k < leftSize:
 		// Target is in left subtree: delegate without adjustment.
+		// Index k in left subtree is the same as index k in full tree.
 		return kth(n.left, k)
 	case k == leftSize:
 		// Current node is exactly the k-th in sorted order.
+		// All left subtree nodes come before, so this node is at position leftSize.
 		return n.key, true
 	default:
 		// Target is in right subtree: subtract left subtree size + current node
 		// to convert global index k into a right-subtree-local index.
+		// Right subtree starts at index (leftSize + 1), so subtract that offset.
 		return kth(n.right, k-leftSize-1)
 	}
 }
@@ -263,6 +274,7 @@ func nextPrefix(prefix string) string {
 
 		// Found a byte < 0xFF: increment it and truncate everything after.
 		// Example: "abc" → "abd", "ab\xFF" → "ac"
+		// Truncation ensures we get the lexicographically smallest key > prefix.
 		b[i]++
 
 		return string(b[:i+1])
@@ -280,16 +292,18 @@ func (t *OSTree) RangeBounds(prefix string) (int, int) {
 		return 0, t.Len()
 	}
 
-	// First key >= prefix.
+	// First key >= prefix: rank counts keys < prefix, so l is the first index >= prefix.
 	l := t.Rank(prefix)
 
 	up := nextPrefix(prefix)
 	if up == "" {
 		// No upper bound: range extends to end of tree.
+		// This happens when prefix ends with all 0xFF bytes.
 		return l, t.Len()
 	}
 
 	// First key >= nextPrefix is the exclusive end.
+	// All keys with prefix are in range [l, r).
 	r := t.Rank(up)
 
 	return l, r

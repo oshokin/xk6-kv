@@ -57,14 +57,14 @@ func NewKV(vu modules.VU, s store.Store) *KV {
 
 // getOrSetResult is the JS-facing result of getOrSet().
 type getOrSetResult struct {
-	Value  any  `json:"value"`
-	Loaded bool `json:"loaded"`
+	Value  any  `js:"value"`
+	Loaded bool `js:"loaded"`
 }
 
 // swapResult is the JS-facing result of swap().
 type swapResult struct {
-	Previous any  `json:"previous"`
-	Loaded   bool `json:"loaded"`
+	Previous any  `js:"previous"`
+	Loaded   bool `js:"loaded"`
 }
 
 // Get returns a Promise that resolves to the value stored under the provided key.
@@ -346,14 +346,6 @@ func (k *KV) Scan(options sobek.Value) *sobek.Promise {
 				return nil, unexpectedStoreOutput("store.Scan")
 			}
 
-			jsEntries := make([]ListEntry, len(page.Entries))
-			for i, entry := range page.Entries {
-				jsEntries[i] = ListEntry{
-					Key:   entry.Key,
-					Value: entry.Value,
-				}
-			}
-
 			var (
 				cursor string
 				done   bool
@@ -368,7 +360,7 @@ func (k *KV) Scan(options sobek.Value) *sobek.Promise {
 			}
 
 			return ScanResult{
-				Entries: jsEntries,
+				Entries: page.Entries,
 				Cursor:  cursor,
 				Done:    done,
 			}, nil
@@ -396,17 +388,7 @@ func (k *KV) List(options sobek.Value) *sobek.Promise {
 				return nil, unexpectedStoreOutput("store.List")
 			}
 
-			// Convert entries to the JS-facing struct.
-			// ToValue will map it to an array of objects.
-			jsEntries := make([]ListEntry, len(entries))
-			for i, entry := range entries {
-				jsEntries[i] = ListEntry{
-					Key:   entry.Key,
-					Value: entry.Value,
-				}
-			}
-
-			return jsEntries, nil
+			return entries, nil
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -467,14 +449,7 @@ func (k *KV) Backup(options sobek.Value) *sobek.Promise {
 				return nil, unexpectedStoreOutput("store.Backup")
 			}
 
-			// If we return a struct, the fields will be converted to snake_case.
-			// I couldn't really find out why, let's return a map[string]any instead.
-			return map[string]any{
-				"totalEntries": storeSummary.TotalEntries,
-				"bytesWritten": storeSummary.BytesWritten,
-				"bestEffort":   storeSummary.BestEffort,
-				"warning":      storeSummary.Warning,
-			}, nil
+			return storeSummary, nil
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -504,11 +479,7 @@ func (k *KV) Restore(options sobek.Value) *sobek.Promise {
 				return nil, unexpectedStoreOutput("store.Restore")
 			}
 
-			// If we return a struct, the fields will be converted to snake_case.
-			// I couldn't really find out why, let's return a map[string]any instead.
-			return map[string]any{
-				"totalEntries": storeSummary.TotalEntries,
-			}, nil
+			return storeSummary, nil
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -516,27 +487,18 @@ func (k *KV) Restore(options sobek.Value) *sobek.Promise {
 	)
 }
 
-// ListEntry is the JS-facing representation of a key-value pair returned by list().
-type ListEntry struct {
-	// Key is the entry key (List results are lexicographically ordered by this).
-	Key string `json:"key"`
-
-	// Value is the stored value (type depends on the store's serializer).
-	Value any `json:"value"`
-}
-
 // ScanOptions holds optional filters for scan().
 type ScanOptions struct {
 	// Prefix selects only keys that start with the given string.
-	Prefix string `json:"prefix"`
+	Prefix string `js:"prefix"`
 
 	// Limit is the maximum number of entries to return in a single page;
 	// <= 0 means "no limit" (effectively behaves like list()).
-	Limit int64 `json:"limit"`
+	Limit int64 `js:"limit"`
 
 	// Cursor is an opaque continuation token previously returned from Scan().
 	// It is a base64-encoded representation of the last key in the previous page.
-	Cursor string `json:"cursor"`
+	Cursor string `js:"cursor"`
 
 	// isLimitSet indicates whether Limit was explicitly provided from JS.
 	isLimitSet bool
@@ -544,16 +506,16 @@ type ScanOptions struct {
 
 // ScanResult is the JS-facing result of scan().
 type ScanResult struct {
-	// Entries holds the page of key/value pairs.
-	Entries []ListEntry `json:"entries"`
+	// Entries holds the page of key/value pairs (using store.Entry directly).
+	Entries []store.Entry `js:"entries"`
 
 	// Cursor is an opaque continuation token. The first call should pass an
 	// empty cursor (or omit it); subsequent calls should pass the cursor from
 	// the previous result. When Cursor is empty, the scan is complete.
-	Cursor string `json:"cursor"`
+	Cursor string `js:"cursor"`
 
 	// Done is true when the scan is complete (i.e., Cursor == "").
-	Done bool `json:"done"`
+	Done bool `js:"done"`
 }
 
 // ImportScanOptions converts a Sobek value into ScanOptions.
@@ -567,11 +529,18 @@ func ImportScanOptions(rt *sobek.Runtime, options sobek.Value) ScanOptions {
 
 	optionsObj := options.ToObject(rt)
 
-	scanOptions.Prefix = optionsObj.Get("prefix").String()
-	scanOptions.Cursor = optionsObj.Get("cursor").String()
+	prefixValue := optionsObj.Get("prefix")
+	if !common.IsNullish(prefixValue) {
+		scanOptions.Prefix = prefixValue.String()
+	}
+
+	cursorValue := optionsObj.Get("cursor")
+	if !common.IsNullish(cursorValue) {
+		scanOptions.Cursor = cursorValue.String()
+	}
 
 	limitValue := optionsObj.Get("limit")
-	if limitValue == nil {
+	if common.IsNullish(limitValue) {
 		return scanOptions
 	}
 
@@ -590,10 +559,10 @@ func ImportScanOptions(rt *sobek.Runtime, options sobek.Value) ScanOptions {
 // ListOptions describes filters for list() operations, all fields are optional.
 type ListOptions struct {
 	// Prefix selects only keys that start with the given string.
-	Prefix string `json:"prefix"`
+	Prefix string `js:"prefix"`
 
 	// Limit is the maximum number of entries to return; <= 0 means "no limit".
-	Limit int64 `json:"limit"`
+	Limit int64 `js:"limit"`
 
 	// limitSet indicates whether Limit was explicitly provided from JS.
 	limitSet bool
@@ -637,7 +606,7 @@ func ImportListOptions(rt *sobek.Runtime, options sobek.Value) ListOptions {
 // RandomKeyOptions holds the optional prefix filter for randomKey().
 type RandomKeyOptions struct {
 	// Prefix restricts random selection to keys beginning with this string.
-	Prefix string `json:"prefix"`
+	Prefix string `js:"prefix"`
 }
 
 // ImportRandomKeyOptions converts a Sobek value into RandomKeyOptions.
@@ -660,8 +629,8 @@ func ImportRandomKeyOptions(rt *sobek.Runtime, options sobek.Value) RandomKeyOpt
 
 // BackupOptions is the JS-facing result of backup().
 type BackupOptions struct {
-	FileName              string `json:"fileName"`
-	AllowConcurrentWrites bool   `json:"allowConcurrentWrites"`
+	FileName              string `js:"fileName"`
+	AllowConcurrentWrites bool   `js:"allowConcurrentWrites"`
 }
 
 // ImportBackupOptions converts JS values into BackupOptions.
@@ -691,9 +660,9 @@ func ImportBackupOptions(rt *sobek.Runtime, options sobek.Value) BackupOptions {
 
 // RestoreOptions is the JS-facing result of restore().
 type RestoreOptions struct {
-	FileName   string `json:"fileName"`
-	MaxEntries int    `json:"maxEntries"`
-	MaxBytes   int64  `json:"maxBytes"`
+	FileName   string `js:"fileName"`
+	MaxEntries int    `js:"maxEntries"`
+	MaxBytes   int64  `js:"maxBytes"`
 }
 
 // ImportRestoreOptions converts JS values into RestoreOptions.
@@ -728,7 +697,7 @@ func ImportRestoreOptions(rt *sobek.Runtime, options sobek.Value) RestoreOptions
 }
 
 // databaseNotOpenError produces a consistent error when the backing store is nil.
-func (k *KV) databaseNotOpenError() error {
+func (k *KV) databaseNotOpenError() *Error {
 	return NewError(DatabaseNotOpenError, "database is not open")
 }
 
@@ -762,7 +731,7 @@ func (k *KV) runAsyncWithStore(
 	go func() {
 		if k.store == nil {
 			runOnEventLoop(func() error {
-				return reject(k.databaseNotOpenError())
+				return reject(k.databaseNotOpenError().ToSobekValue(rt))
 			})
 
 			return
@@ -773,7 +742,7 @@ func (k *KV) runAsyncWithStore(
 		goResult, err := operation(k.store)
 		if err != nil {
 			runOnEventLoop(func() error {
-				return reject(classifyError(err))
+				return reject(classifyError(err).ToSobekValue(rt))
 			})
 
 			return

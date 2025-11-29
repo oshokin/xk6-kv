@@ -180,17 +180,17 @@ tasks:
   # -------------------------------
 
   build-k6:
-    desc: "Build k6 with local xk6-kv from current directory into ./bin/k6"
+    desc: "Build k6 with local xk6-kv and xk6-file extensions into ./bin/k6"
     deps: [install-xk6, _ensure-bin]
     cmds:
       - |
         {{if eq OS "windows"}}
           echo "Note: Building k6 requires CGO. If this fails, install gcc (MinGW-w64) or use WSL."
-          powershell.exe -Command "\$env:CGO_ENABLED = '1'; \$MODULE_NAME = go list -m; Write-Host \"Building k6 with local \$MODULE_NAME...\"; & '{{.XK6_BIN}}' build --with \"\$MODULE_NAME=.\" -o '{{.K6_BIN}}'"
+          powershell.exe -Command "\$env:CGO_ENABLED = '1'; \$MODULE_NAME = go list -m; Write-Host \"Building k6 with local \$MODULE_NAME and xk6-file...\"; & '{{.XK6_BIN}}' build --with \"\$MODULE_NAME=.\" --with \"github.com/avitalique/xk6-file@latest\" -o '{{.K6_BIN}}'"
         {{else}}
           MODULE_NAME=$(go list -m)
-          echo "Building k6 with local $MODULE_NAME..."
-          "{{.XK6_BIN}}" build --with "$MODULE_NAME=." -o "{{.K6_BIN}}"
+          echo "Building k6 with local $MODULE_NAME and xk6-file..."
+          "{{.XK6_BIN}}" build --with "$MODULE_NAME=." --with "github.com/avitalique/xk6-file@latest" -o "{{.K6_BIN}}"
         {{end}}
     env:
       CGO_ENABLED: "1"

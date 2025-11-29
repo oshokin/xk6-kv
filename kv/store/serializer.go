@@ -11,6 +11,9 @@ type Serializer interface {
 	Serialize(value any) ([]byte, error)
 
 	// Deserialize converts a byte slice back to a value.
+	// The input data slice MUST NOT be modified by the implementation.
+	// Stores already return defensive copies of data, so implementations
+	// should treat data as read-only and avoid unnecessary cloning.
 	Deserialize(data []byte) (any, error)
 }
 
@@ -39,6 +42,7 @@ func (s *JSONSerializer) Serialize(value any) ([]byte, error) {
 func (s *JSONSerializer) Deserialize(data []byte) (any, error) {
 	var err error
 
+	// Empty data represents nil/null value in JSON.
 	if len(data) == 0 {
 		return nil, err
 	}
@@ -68,12 +72,14 @@ func NewStringSerializer() *StringSerializer {
 // This allows storing numbers, booleans, etc. as human-readable strings.
 func (s *StringSerializer) Serialize(value any) ([]byte, error) {
 	// Fast path for strings: direct byte conversion without formatting overhead.
+	// Avoids fmt overhead for the most common case.
 	if str, ok := value.(string); ok {
 		return []byte(str), nil
 	}
 
 	// Fallback for non-strings: use %v formatting (e.g., numbers, booleans).
-	// fmt.Appendf is allocation-efficient compared to fmt.Sprintf.
+	// fmt.Appendf is allocation-efficient compared to fmt.Sprintf because it
+	// appends to a nil slice, allowing the formatter to allocate exactly what's needed.
 	return fmt.Appendf(nil, "%v", value), nil
 }
 

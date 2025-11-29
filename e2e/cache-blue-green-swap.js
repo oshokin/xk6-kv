@@ -34,8 +34,11 @@ const CONCURRENT_SWAPS = parseInt(__ENV.CONCURRENT_SWAPS || '24', 10);
 // Number of region shards for synthetic config generation.
 const REGION_COUNT = parseInt(__ENV.REGION_COUNT || '5', 10);
 
+// Test name used for generating test-specific database and snapshot paths.
+const TEST_NAME = 'cache-blue-green-swap';
+
 // kv is the shared store client used throughout the scenario.
-const kv = createKv();
+const kv = createKv(TEST_NAME);
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -51,7 +54,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv);
+export const teardown = createTeardown(kv, TEST_NAME);
 
 // buildConfigPayload crafts a synthetic config blob for the current iterator.
 function buildConfigPayload(iteration, idx) {

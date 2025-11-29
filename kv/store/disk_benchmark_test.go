@@ -184,55 +184,6 @@ func BenchmarkDiskStore_CompareAndSwap_Contention(b *testing.B) {
 	}
 }
 
-// BenchmarkDiskStore_RandomKey: cost of picking any random key in a large dataset.
-// Compares tracking index vs no-tracking path.
-func BenchmarkDiskStore_RandomKey(b *testing.B) {
-	for _, trackKeys := range []bool{true, false} {
-		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
-			b.ReportAllocs()
-
-			const genericKeys = 10_000
-
-			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-random-key-*.db")
-
-			b.StopTimer()
-			seedDiskStore(b, store, genericKeys, "key-")
-			b.StartTimer()
-
-			for b.Loop() {
-				_, _ = store.RandomKey("")
-			}
-		})
-	}
-}
-
-// BenchmarkDiskStore_RandomKey_WithPrefix: select a random key from a subset (prefix).
-// Compares indexed prefix selection (tracking) vs scan (no tracking).
-func BenchmarkDiskStore_RandomKey_WithPrefix(b *testing.B) {
-	for _, trackKeys := range []bool{true, false} {
-		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
-			b.ReportAllocs()
-
-			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-random-key-with-prefix-*.db")
-
-			// Seed 10k generic + 2k with "pfx-".
-			b.StopTimer()
-
-			seedDiskStore(b, store, 10_000, "key-")
-
-			for index := range 2_000 {
-				require.NoError(b, store.Set(fmt.Sprintf("pfx-%d", index), "value"))
-			}
-
-			b.StartTimer()
-
-			for b.Loop() {
-				_, _ = store.RandomKey("pfx-")
-			}
-		})
-	}
-}
-
 // BenchmarkDiskStore_Delete: delete throughput across varying store sizes and tracking modes.
 // Re-seeding is excluded from timing to isolate Delete cost.
 func BenchmarkDiskStore_Delete(b *testing.B) {
@@ -329,44 +280,6 @@ func BenchmarkDiskStore_CompareAndDelete(b *testing.B) {
 				require.NoError(b, store.Set("k", "v"))
 				b.StartTimer()
 			}
-		})
-	}
-}
-
-// BenchmarkDiskStore_Scan measures paginated scans across large datasets with and without tracking.
-func BenchmarkDiskStore_Scan(b *testing.B) {
-	const (
-		totalPerPrefix = 10_000
-		pageLimit      = 100
-		resumeLimit    = 32
-	)
-
-	prefixes := []string{"user:", "order:", "misc:"}
-
-	for _, trackKeys := range []bool{true, false} {
-		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
-			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-scan-*.db")
-
-			b.StopTimer()
-
-			for _, prefix := range prefixes {
-				seedDiskStore(b, store, totalPerPrefix, prefix)
-			}
-
-			b.StartTimer()
-
-			b.Run("PrefixUserLimit100", func(b *testing.B) {
-				runScanBenchmark(b, store, "user:", "", pageLimit)
-			})
-
-			b.Run("PrefixUserUnlimited", func(b *testing.B) {
-				runScanBenchmark(b, store, "user:", "", 0)
-			})
-
-			b.Run("PrefixOrderResume", func(b *testing.B) {
-				startAfter := fmt.Sprintf("order:%05d", totalPerPrefix/2)
-				runScanBenchmark(b, store, "order:", startAfter, resumeLimit)
-			})
 		})
 	}
 }
