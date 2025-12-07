@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -432,25 +433,77 @@ func TestDiskStore_Exists_IgnoresStaleIndex(t *testing.T) {
 }
 
 // TestDiskStore_IncrementBy_Basic checks IncrementBy on absent key (start at 0), positive/negative
-// increments, and that non-integer payloads cause an error.
+// increments, rejects non-integer payloads, and can parse JSON-encoded (quoted) string values.
 func TestDiskStore_IncrementBy_Basic(t *testing.T) {
 	t.Parallel()
 
 	store := newTestDiskStore(t, true, "", true)
 
+	// Basic positive increment: absent key should start at 0 and increment to 5.
 	newValue, err := store.IncrementBy("ctr", 5)
-
 	require.NoError(t, err)
 	assert.EqualValues(t, 5, newValue)
 
+	// Negative increment: decrement existing counter from 5 to 3.
 	newValue, err = store.IncrementBy("ctr", -2)
 	require.NoError(t, err)
 	assert.EqualValues(t, 3, newValue)
 
+	// Non-integer stored value rejection: incrementing a non-numeric value must fail.
 	require.NoError(t, store.Set("bad", "not-an-int"))
-
 	_, err = store.IncrementBy("bad", 1)
 	require.Error(t, err, "non-integer value must cause IncrementBy error")
+
+	// Positive overflow guard: increment max int64 by +1 must fail and leave value untouched.
+	require.NoError(t, store.Set("max", testMaxInt64String))
+	_, err = store.IncrementBy("max", 1)
+	require.ErrorContains(t, err, "integer overflow")
+	requireStoredStringValue(t, store, "max", testMaxInt64String)
+
+	// Boundary check at max: zero delta (+0) is allowed (no-op increment).
+	newValue, err = store.IncrementBy("max", 0)
+	require.NoError(t, err)
+	assert.EqualValues(t, math.MaxInt64, newValue)
+
+	// Boundary check at max: negative delta (-1) is allowed (stays within bounds).
+	newValue, err = store.IncrementBy("max", -1)
+	require.NoError(t, err)
+	assert.EqualValues(t, math.MaxInt64-1, newValue)
+	require.NoError(t, store.Set("max", testMaxInt64String))
+
+	// Negative overflow guard: decrement min int64 by -1 must fail and leave value untouched.
+	require.NoError(t, store.Set("min", testMinInt64String))
+	_, err = store.IncrementBy("min", -1)
+	require.ErrorContains(t, err, "integer overflow")
+	requireStoredStringValue(t, store, "min", testMinInt64String)
+
+	// Boundary check at min: zero delta (+0) is allowed (no-op increment).
+	newValue, err = store.IncrementBy("min", 0)
+	require.NoError(t, err)
+	assert.EqualValues(t, math.MinInt64, newValue)
+
+	// Non-numeric stored values must be rejected without mutation.
+	require.NoError(t, store.Set("nonint", testNonNumeric))
+	_, err = store.IncrementBy("nonint", 1)
+	require.ErrorContains(t, err, "value parse failed")
+	requireStoredStringValue(t, store, "nonint", testNonNumeric)
+
+	// Float strings must be rejected and leave value untouched.
+	require.NoError(t, store.Set("float-string", "1.5"))
+	_, err = store.IncrementBy("float-string", 1)
+	require.ErrorContains(t, err, "value parse failed")
+	requireStoredStringValue(t, store, "float-string", "1.5")
+
+	// JSON-encoded (quoted) strings must be parsed correctly.
+	require.NoError(t, store.Set("json-string", strconv.Quote("41")))
+	newValue, err = store.IncrementBy("json-string", 1)
+	require.NoError(t, err)
+	assert.EqualValues(t, 42, newValue)
+
+	// Success path: increment absent key with MAX_SAFE_INT must succeed.
+	newValue, err = store.IncrementBy("safe", testMaxSafeJSInt)
+	require.NoError(t, err)
+	assert.Equal(t, testMaxSafeJSInt, newValue)
 }
 
 // TestDiskStore_IncrementBy_Concurrent verifies concurrent increments produce the exact sum.

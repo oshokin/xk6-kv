@@ -14,15 +14,7 @@ type MemoryOptions struct {
 
 // Equal checks if two MemoryOptions are equal.
 func (mo *MemoryOptions) Equal(other *MemoryOptions) bool {
-	if mo == nil && other == nil {
-		return true
-	}
-
-	if mo == nil || other == nil {
-		return false
-	}
-
-	return mo.ShardCount == other.ShardCount
+	return mo.getShardCount() == other.getShardCount()
 }
 
 // ToMemoryConfig converts MemoryOptions into a store-level MemoryConfig.
@@ -35,4 +27,13 @@ func (mo *MemoryOptions) ToMemoryConfig() (*store.MemoryConfig, error) {
 	return &store.MemoryConfig{
 		ShardCount: mo.ShardCount,
 	}, nil
+}
+
+// getShardCount collapses automatic shard selection into a single comparable value.
+func (mo *MemoryOptions) getShardCount() int {
+	if mo == nil || mo.ShardCount <= 0 {
+		return 0
+	}
+
+	return mo.ShardCount
 }

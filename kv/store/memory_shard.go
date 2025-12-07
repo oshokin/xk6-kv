@@ -74,7 +74,7 @@ func selectShardHashFunc(strategy shardHashStrategy) shardHashFunc {
 func sumBytesShardHash(key string) uint64 {
 	var sum uint64
 
-	for i := 0; i < len(key); i++ {
+	for i := range len(key) {
 		sum += uint64(key[i])
 	}
 
@@ -90,7 +90,7 @@ func xxhashShardHash(key string) uint64 {
 func fnvShardHash(key string) uint64 {
 	hash := uint64(fnv1aOffset64)
 
-	for i := 0; i < len(key); i++ {
+	for i := range len(key) {
 		hash ^= uint64(key[i])
 		hash *= fnv1aPrime64
 	}
@@ -114,12 +114,13 @@ func (s *MemoryStore) hashKey(key string) int {
 		hashFn = selectShardHashFunc(defaultShardHashStrategy)
 	}
 
+	//nolint:gosec // s.shardCount is always positive (>= 1) and used only for sharding distribution.
 	return int(hashFn(key) % uint64(s.shardCount))
 }
 
 // lockAllShardReaders locks all the shard readers.
 func (s *MemoryStore) lockAllShardReaders() {
-	for i := 0; i < s.shardCount; i++ {
+	for i := range s.shardCount {
 		s.shards[i].mu.RLock()
 	}
 }

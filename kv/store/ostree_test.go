@@ -103,7 +103,7 @@ func TestOSTree_RangeBounds(t *testing.T) {
 		)
 
 		// Verify Kth over [l, r) equals the expected list in order.
-		for offset := range len(expectedKeysWithPrefix) {
+		for offset := range expectedKeysWithPrefix {
 			keyAtIndex, ok := tree.Kth(leftBoundIndex + offset)
 
 			require.Truef(t, ok, "Kth(%d) must exist for prefix %q", leftBoundIndex+offset, prefixUnderTest)

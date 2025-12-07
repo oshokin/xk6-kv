@@ -134,6 +134,7 @@ func (s *MemoryStore) selectKeyFromShardByIndex(prefix string, counts []int, idx
 	for i, count := range counts {
 		if idx >= count {
 			idx -= count
+
 			continue
 		}
 
@@ -145,6 +146,7 @@ func (s *MemoryStore) selectKeyFromShardByIndex(prefix string, counts []int, idx
 		// Verify shard still has enough keys (may have changed due to concurrent deletes).
 		if currentCount == 0 || idx >= currentCount {
 			shard.mu.RUnlock()
+
 			return "", false
 		}
 

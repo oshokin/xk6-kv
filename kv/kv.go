@@ -2,6 +2,7 @@ package kv
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/grafana/sobek"
 	"go.k6.io/k6/js/modules"
@@ -108,6 +109,7 @@ func (k *KV) runAsyncWithStore(
 		// the Go value and resolves the promise on the event loop thread.
 		runOnEventLoop(func() error {
 			jsValue := toJS(rt, goResult)
+
 			return resolve(jsValue)
 		})
 	}()
@@ -119,6 +121,13 @@ func (k *KV) runAsyncWithStore(
 // into int64 WITHOUT using rt.ExportTo in worker goroutines.
 // This accepts a few numeric shapes commonly produced by JS -> Go marshaling.
 func exportToInt64(v sobek.Value) (int64, error) {
+	const (
+		// maxInt64Float is the maximum float64 value that can be converted to int64 without overflow.
+		maxInt64Float = float64(int64(^uint64(0) >> 1))
+		// minInt64Float is the minimum float64 value that can be converted to int64 without overflow.
+		minInt64Float = -maxInt64Float - 1
+	)
+
 	switch x := v.Export().(type) {
 	case int64:
 		return x, nil
@@ -127,8 +136,29 @@ func exportToInt64(v sobek.Value) (int64, error) {
 	case int:
 		return int64(x), nil
 	case float64:
+		// Check for non-finite numbers and out of int64 range.
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			return 0, fmt.Errorf("non-finite number: %v", x)
+		}
+
+		// Check for out of int64 range.
+		if x > maxInt64Float || x < minInt64Float {
+			return 0, fmt.Errorf("number out of int64 range: %v", x)
+		}
+
 		return int64(x), nil
 	case float32:
+		// Check for non-finite numbers and out of int64 range.
+		if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
+			return 0, fmt.Errorf("non-finite number: %v", x)
+		}
+
+		// Check for out of int64 range.
+		// Note: float32 is converted to float64 to avoid overflow.
+		if float64(x) > maxInt64Float || float64(x) < minInt64Float {
+			return 0, fmt.Errorf("number out of int64 range: %v", x)
+		}
+
 		return int64(x), nil
 	default:
 		return 0, fmt.Errorf("unsupported numeric type: %T", x)

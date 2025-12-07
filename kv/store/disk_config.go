@@ -77,7 +77,8 @@ func buildBBoltOptions(cfg *DiskConfig) (*bolt.Options, error) {
 		return nil, nil
 	}
 
-	if err := cfg.validate(); err != nil {
+	err := cfg.validate()
+	if err != nil {
 		return nil, err
 	}
 

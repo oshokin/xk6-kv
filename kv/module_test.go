@@ -62,6 +62,7 @@ func TestOpenKV_ConcurrentInitializationSharesStore(t *testing.T) {
 	results := make(chan *ModuleInstance, 2)
 
 	var wg sync.WaitGroup
+
 	wg.Add(2)
 
 	go func() {

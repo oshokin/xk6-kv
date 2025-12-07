@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/grafana/sobek"
-	"go.k6.io/k6/js/promises"
 
 	"github.com/oshokin/xk6-kv/kv/store"
 )
@@ -83,11 +82,19 @@ func (k *KV) IncrementBy(key sobek.Value, delta sobek.Value) *sobek.Promise {
 	// We instead use sobek.Value.Export(), then coerce to int64 synchronously before we spawn the goroutine.
 	deltaInt, err := exportToInt64(delta)
 	if err != nil {
-		// No promises.Reject(...) in this environment; create a promise and reject it immediately.
-		p, _, reject := promises.New(k.vu)
-		reject(NewError(ValueNumberRequiredError, fmt.Sprintf("delta must be a number: %v", err)))
+		// We are still on the VU's thread when exportToInt64() rejects the delta,
+		// so we have to hand craft a promise and enqueue its rejection back onto the event loop.
+		rt := k.vu.Runtime()
+		promise, _, reject := rt.NewPromise()
+		callback := k.vu.RegisterCallback()
 
-		return p
+		kvErr := NewError(ValueNumberRequiredError, fmt.Sprintf("delta must be a number: %v", err))
+
+		callback(func() error {
+			return reject(kvErr.ToSobekValue(rt))
+		})
+
+		return promise
 	}
 
 	return k.runAsyncWithStore(

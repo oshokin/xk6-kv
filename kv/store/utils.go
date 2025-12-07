@@ -2,11 +2,13 @@ package store
 
 import (
 	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -62,4 +64,34 @@ func normalizeToBytes(value any) ([]byte, error) {
 // Used to cap preallocation sizes to prevent OOM while avoiding tiny allocations.
 func clamp[T cmp.Ordered](value, low, high T) T {
 	return max(low, min(value, high))
+}
+
+// parseCounterValue converts raw bytes persisted by the store into an int64
+// suitable for IncrementBy.
+// IncrementBy bypasses the serializer entirely (it operates on already-stored bytes),
+// so we need to understand every encoding the serializer might have produced earlier.
+// This helper accepts the formats emitted by the built-in JSON and string serializers:
+// plain decimal ASCII, JSON numbers, and JSON strings containing decimal ASCII.
+func parseCounterValue(raw []byte) (int64, error) {
+	if len(raw) == 0 {
+		return 0, errors.New("empty value")
+	}
+
+	if value, err := strconv.ParseInt(string(raw), 10, 64); err == nil {
+		return value, nil
+	}
+
+	var jsonNumber json.Number
+	if err := json.Unmarshal(raw, &jsonNumber); err == nil {
+		if value, convErr := jsonNumber.Int64(); convErr == nil {
+			return value, nil
+		}
+	}
+
+	var quoted string
+	if err := json.Unmarshal(raw, &quoted); err == nil {
+		return strconv.ParseInt(quoted, 10, 64)
+	}
+
+	return 0, errors.New("unsupported counter encoding")
 }

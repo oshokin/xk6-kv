@@ -4,6 +4,9 @@ import file from 'k6/x/file';
 // Storage backend to use: 'memory' (default) or 'disk'.
 export const BACKEND = __ENV.KV_BACKEND || 'memory';
 
+// Optional serialization override: 'json' (default) or 'string'.
+export const SERIALIZATION = __ENV.KV_SERIALIZATION;
+
 // Enable key tracking for selected backend.
 export const TRACK_KEYS = __ENV.KV_TRACK_KEYS !== 'false';
 
@@ -31,11 +34,23 @@ export function getSnapshotPath(testName) {
 // createKv initializes KV store with standard configuration.
 // Returns a configured KV store instance ready for use in tests.
 // testName: Optional test name for database path isolation (.e2e-{test-name}.kv).
-export function createKv(testName) {
-  return openKv({
+export function createKv(testName, overrides = {}) {
+  const options = {
     backend: BACKEND,
-    path: BACKEND === 'disk' && testName ? getTestPath(testName) : undefined,
     trackKeys: TRACK_KEYS
+  };
+
+  if (BACKEND === 'disk' && testName) {
+    options.path = getTestPath(testName);
+  }
+
+  if (SERIALIZATION) {
+    options.serialization = SERIALIZATION;
+  }
+
+  return openKv({
+    ...options,
+    ...overrides
   });
 }
 

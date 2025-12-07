@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"sync"
@@ -147,12 +148,17 @@ func (s *MemoryStore) IncrementBy(key string, delta int64) (int64, error) {
 	var current int64
 
 	if b, exists := shard.container[key]; exists && len(b) > 0 {
-		v, err := strconv.ParseInt(string(b), 10, 64)
+		v, err := parseCounterValue(b)
 		if err != nil {
 			return 0, fmt.Errorf("%w: key %q: %w", ErrValueParseFailed, key, err)
 		}
 
 		current = v
+	}
+
+	// Calculate new value with overflow guard.
+	if (delta > 0 && current > math.MaxInt64-delta) || (delta < 0 && current < math.MinInt64-delta) {
+		return 0, fmt.Errorf("%w: key %q: integer overflow", ErrValueParseFailed, key)
 	}
 
 	current += delta
@@ -307,6 +313,7 @@ func (s *MemoryStore) Delete(key string) error {
 
 	if _, existed := shard.container[key]; !existed {
 		shard.mu.Unlock()
+
 		return nil
 	}
 

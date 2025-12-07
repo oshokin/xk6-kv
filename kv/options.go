@@ -51,7 +51,8 @@ func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
 		return opts, nil
 	}
 
-	if err := vu.Runtime().ExportTo(options, &opts); err != nil {
+	err := vu.Runtime().ExportTo(options, &opts)
+	if err != nil {
 		return opts, fmt.Errorf("%w: %w", store.ErrKVOptionsInvalid, err)
 	}
 
@@ -66,7 +67,8 @@ func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
 
 		opts.Path = canonicalPath
 		if opts.DiskOptions != nil {
-			if err := opts.DiskOptions.Validate(); err != nil {
+			err := opts.DiskOptions.Validate()
+			if err != nil {
 				return opts, err
 			}
 		}

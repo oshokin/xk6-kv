@@ -73,6 +73,7 @@ func (s *DiskStore) fillDiskScanPage(page *ScanPage, cursor *bolt.Cursor, prefix
 
 		if hasLimit && int64(len(page.Entries)) >= limit {
 			s.setDiskNextKey(page, cursor, prefixBytes, lastKey)
+
 			break
 		}
 	}

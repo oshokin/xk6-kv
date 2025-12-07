@@ -209,6 +209,8 @@ func classifyError(err error) *Error {
 		return NewError(DiskStoreOpenError, err.Error())
 	case errors.Is(err, store.ErrDiskStoreReadFailed):
 		return NewError(DiskStoreReadError, err.Error())
+	case errors.Is(err, store.ErrValueParseFailed):
+		return NewError(ValueParseError, err.Error())
 	case errors.Is(err, store.ErrDiskStoreWriteFailed),
 		errors.Is(err, store.ErrDiskStoreIncrementFailed),
 		errors.Is(err, store.ErrDiskStoreGetOrSetFailed),
@@ -273,8 +275,6 @@ func classifyError(err error) *Error {
 	case errors.Is(err, store.ErrSerializerEncodeFailed),
 		errors.Is(err, store.ErrSerializerDecodeFailed):
 		return NewError(SerializerError, err.Error())
-	case errors.Is(err, store.ErrValueParseFailed):
-		return NewError(ValueParseError, err.Error())
 	case errors.Is(err, ErrUnexpectedStoreOutput):
 		return NewError(UnexpectedStoreOutputError, err.Error())
 	}

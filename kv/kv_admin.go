@@ -139,7 +139,9 @@ func ImportBackupOptions(rt *sobek.Runtime, options sobek.Value) BackupOptions {
 	allowValue := optionsObj.Get("allowConcurrentWrites")
 	if !common.IsNullish(allowValue) {
 		var allow bool
-		if err := rt.ExportTo(allowValue, &allow); err == nil {
+
+		err := rt.ExportTo(allowValue, &allow)
+		if err == nil {
 			backupOptions.AllowConcurrentWrites = allow
 		}
 	}
@@ -169,14 +171,18 @@ func ImportRestoreOptions(rt *sobek.Runtime, options sobek.Value) RestoreOptions
 
 	if maxEntriesValue := optionsObj.Get("maxEntries"); !common.IsNullish(maxEntriesValue) {
 		var parsedValue int64
-		if err := rt.ExportTo(maxEntriesValue, &parsedValue); err == nil {
+
+		err := rt.ExportTo(maxEntriesValue, &parsedValue)
+		if err == nil {
 			restoreOptions.MaxEntries = parsedValue
 		}
 	}
 
 	if maxBytesValue := optionsObj.Get("maxBytes"); !common.IsNullish(maxBytesValue) {
 		var parsedValue int64
-		if err := rt.ExportTo(maxBytesValue, &parsedValue); err == nil {
+
+		err := rt.ExportTo(maxBytesValue, &parsedValue)
+		if err == nil {
 			restoreOptions.MaxBytes = parsedValue
 		}
 	}

@@ -300,6 +300,7 @@ func (it *untrackedShardIterator) Next() (Entry, bool) {
 
 		if !it.fillBuffer() {
 			it.exhausted = true
+
 			return Entry{}, false
 		}
 	}
@@ -373,6 +374,7 @@ func (it *untrackedShardIterator) fillBuffer() bool {
 
 	if len(buffer) == 0 {
 		it.buffer = it.buffer[:0]
+
 		return false
 	}
 

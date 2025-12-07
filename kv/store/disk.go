@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -281,7 +282,7 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 		if currentValue != nil {
 			var err error
 
-			parsedCurrentValue, err = strconv.ParseInt(string(currentValue), 10, 64)
+			parsedCurrentValue, err = parseCounterValue(currentValue)
 			if err != nil {
 				return fmt.Errorf("%w: key %q: %w", ErrValueParseFailed, key, err)
 			}
@@ -290,7 +291,12 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 			wasNew = true
 		}
 
-		// Calculate new value.
+		// Calculate new value with overflow guard.
+		if (delta > 0 && parsedCurrentValue > math.MaxInt64-delta) ||
+			(delta < 0 && parsedCurrentValue < math.MinInt64-delta) {
+			return fmt.Errorf("%w: key %q: integer overflow", ErrValueParseFailed, key)
+		}
+
 		parsedCurrentValue += delta
 		newValue = parsedCurrentValue
 

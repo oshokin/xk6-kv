@@ -126,7 +126,7 @@ func (do *DiskOptions) Validate() error {
 
 // Equal checks if two DiskOptions are equal.
 func (do *DiskOptions) Equal(other *DiskOptions) bool {
-	if do == nil && other == nil {
+	if do.areDefault() && other.areDefault() {
 		return true
 	}
 
@@ -213,4 +213,21 @@ func (do *DiskOptions) ToDiskConfig() (*store.DiskConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// areDefault returns true when no disk-specific knobs are provided.
+func (do *DiskOptions) areDefault() bool {
+	if do == nil {
+		return true
+	}
+
+	return do.Timeout == nil &&
+		do.NoSync == nil &&
+		do.NoGrowSync == nil &&
+		do.NoFreelistSync == nil &&
+		do.PreLoadFreelist == nil &&
+		do.FreelistType == nil &&
+		do.ReadOnly == nil &&
+		do.InitialMmapSize == nil &&
+		do.Mlock == nil
 }

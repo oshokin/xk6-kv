@@ -105,12 +105,14 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 	options, err := NewOptionsFrom(mi.vu, opts)
 	if err != nil {
 		common.Throw(mi.vu.Runtime(), err)
+
 		return nil
 	}
 
 	backingStore, isNewlyCreated, err := mi.rm.getOrCreateStore(options)
 	if err != nil {
 		common.Throw(mi.vu.Runtime(), err)
+
 		return nil
 	}
 

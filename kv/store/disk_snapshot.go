@@ -125,6 +125,7 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 		return nil
 	}); err != nil {
 		exportErr = fmt.Errorf("%w: %w", ErrSnapshotExportFailed, err)
+
 		return nil, exportErr
 	}
 
@@ -133,23 +134,27 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 	// WriteTo and Rename. Without sync, buffered writes might be lost on crash.
 	if err := tempHandle.Sync(); err != nil {
 		exportErr = fmt.Errorf("%w: %w", ErrSnapshotExportFailed, err)
+
 		return nil, exportErr
 	}
 
 	if err := tempHandle.Close(); err != nil {
 		exportErr = fmt.Errorf("%w: %w", ErrBackupTempFileFailed, err)
+
 		return nil, exportErr
 	}
 
 	info, err := os.Stat(tempFile)
 	if err != nil {
 		exportErr = fmt.Errorf("%w: %w", ErrBBoltSnapshotStatFailed, err)
+
 		return nil, exportErr
 	}
 
 	//nolint:forbidigo // file I/O is required for renaming the temporary file to the destination file.
 	if err := os.Rename(tempFile, destination); err != nil {
 		exportErr = fmt.Errorf("%w: %w", ErrBackupFinalizeFailed, err)
+
 		return nil, exportErr
 	}
 

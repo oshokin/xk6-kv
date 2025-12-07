@@ -140,6 +140,7 @@ func TestDiskStore_Scan_PrefixPagination(t *testing.T) {
 							"unexpected prefix entry: %s",
 							entry.Key,
 						)
+
 						prefixCollected = append(prefixCollected, entry.Key)
 					}
 
@@ -209,6 +210,7 @@ func TestDiskStore_Scan_ConcurrentMutations(t *testing.T) {
 			}
 
 			var wg sync.WaitGroup
+
 			wg.Add(3)
 
 			// Global scanner.
@@ -219,6 +221,7 @@ func TestDiskStore_Scan_ConcurrentMutations(t *testing.T) {
 					page, err := store.Scan("", "", pageSize)
 					if err != nil {
 						t.Errorf("global scan failed: %v", err)
+
 						return
 					}
 
@@ -244,6 +247,7 @@ func TestDiskStore_Scan_ConcurrentMutations(t *testing.T) {
 					page, err := store.Scan(prefix+":", "", pageSize)
 					if err != nil {
 						t.Errorf("prefix scan failed: %v", err)
+
 						return
 					}
 
@@ -261,13 +265,17 @@ func TestDiskStore_Scan_ConcurrentMutations(t *testing.T) {
 					key := fmt.Sprintf(prefixFormat, prefix, i%initialKeys)
 
 					if i%2 == 0 {
-						if err := store.Delete(key); err != nil {
+						err := store.Delete(key)
+						if err != nil {
 							t.Errorf("delete failed: %v", err)
+
 							return
 						}
 					} else {
-						if err := store.Set(key, fmt.Sprintf("value-updated-%d", i)); err != nil {
+						err := store.Set(key, fmt.Sprintf("value-updated-%d", i))
+						if err != nil {
 							t.Errorf("set failed: %v", err)
+
 							return
 						}
 					}

@@ -16,7 +16,8 @@ import (
 //     prefix!=""  -> O(log n) via OSTree.
 //   - trackKeys = false -> two-pass scan over bbolt cursor.
 func (s *DiskStore) RandomKey(prefix string) (string, error) {
-	if err := s.ensureOpen(); err != nil {
+	err := s.ensureOpen()
+	if err != nil {
 		return "", err
 	}
 

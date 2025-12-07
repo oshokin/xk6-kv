@@ -171,7 +171,7 @@ interface OpenKvOptions {
     noFreelistSync?: boolean          // rebuild freelist on open; default false
     preLoadFreelist?: boolean         // load freelist into memory; default false
     freelistType?: "" | "array" | "map" // freelist representation; default "array"
-    readOnly?: boolean                // open DB read-only; default false
+    readOnly?: boolean                // open DB read-only; requires pre-existing DB/bucket; default false
     initialMmapSize?: number | string // initial mmap size; number=bytes, string supports SI ("MB") and IEC ("MiB"); 0 keeps default/no preallocation (default)
     mlock?: boolean                   // mlock pages (UNIX); default false
     // when omitted: bbolt defaults are applied
@@ -187,6 +187,7 @@ interface OpenKvOptions {
 - `path`: (Disk only) Override bbolt file location
 - `memory.shardCount`: (Memory only) Number of shards for concurrent performance. If `<= 0` or omitted, defaults to `runtime.NumCPU()` (automatic, recommended). If `> 65536`, automatically capped at 65536. Ignored by disk backend. When `memory` is omitted, defaults are applied.
 - `disk`: (Disk only) Optional bbolt tuning. When `disk` is omitted, bbolt defaults apply (1s lock timeout, syncs enabled, array freelist, etc.).
+- `disk.readOnly`: Requires the bbolt file (and `k6` bucket) to already exist; opening in read-only mode cannot create the bucket and will fail if the file is missing or empty.
 
 **Memory Backend Sharding:**
 

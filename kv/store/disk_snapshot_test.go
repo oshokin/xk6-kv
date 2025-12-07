@@ -47,6 +47,7 @@ func TestDiskStore_Backup_ProducesSnapshot(t *testing.T) {
 
 		return bucket.ForEach(func(k, v []byte) error {
 			collected[string(k)] = slices.Clone(v)
+
 			return nil
 		})
 	})
@@ -252,6 +253,7 @@ func TestDiskStore_Restore_BlocksMutationsDuringRestore(t *testing.T) {
 		if errors.Is(err, ErrRestoreInProgress) {
 			// Successfully observed the blocking behavior.
 			require.NoError(t, <-done)
+
 			return
 		}
 	}
@@ -274,6 +276,7 @@ func TestDiskStore_Restore_BlocksConcurrentBackup(t *testing.T) {
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
+
 	wg.Add(2)
 
 	// Goroutine 1: Restore (takes time to parse stream).
@@ -319,6 +322,7 @@ func TestDiskStore_Restore_PreventsDataLoss(t *testing.T) {
 	require.NoError(t, store.Set("k2", "v2"))
 
 	var wg sync.WaitGroup
+
 	wg.Add(2)
 
 	importDone := make(chan struct{})
@@ -459,6 +463,7 @@ func TestDiskStore_Restore_ConcurrentOperations_Serialized(t *testing.T) {
 	for _, succeeded := range importSucceeded {
 		if succeeded {
 			anySucceeded = true
+
 			break
 		}
 	}
