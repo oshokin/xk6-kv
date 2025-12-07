@@ -27,7 +27,7 @@ func newTestDiskStore(t *testing.T, trackKeys bool, path string, autoOpen bool) 
 		diskPath = filepath.Join(t.TempDir(), DefaultDiskStorePath)
 	}
 
-	store, err := NewDiskStore(trackKeys, diskPath)
+	store, err := NewDiskStore(trackKeys, diskPath, nil)
 	require.NoError(t, err, "NewDiskStore() must succeed for test path %q", diskPath)
 
 	if autoOpen {
@@ -46,7 +46,7 @@ func newTestDiskStore(t *testing.T, trackKeys bool, path string, autoOpen bool) 
 func TestNewDiskStore(t *testing.T) {
 	t.Parallel()
 
-	store, err := NewDiskStore(true, "")
+	store, err := NewDiskStore(true, "", nil)
 
 	require.NoError(t, err, "NewDiskStore() must not fail with empty path")
 	require.NotNil(t, store, "NewDiskStore() must not return nil")
@@ -77,7 +77,7 @@ func TestNewDiskStore_PathHandling(t *testing.T) {
 	t.Run("empty path", func(t *testing.T) {
 		t.Parallel()
 
-		store, err := NewDiskStore(true, "")
+		store, err := NewDiskStore(true, "", nil)
 		require.NoError(t, err, "NewDiskStore() must not fail when path is empty")
 		require.NotNil(t, store, "NewDiskStore() must not return nil")
 
@@ -90,7 +90,7 @@ func TestNewDiskStore_PathHandling(t *testing.T) {
 		t.Parallel()
 
 		tempDir := t.TempDir()
-		store, err := NewDiskStore(true, tempDir)
+		store, err := NewDiskStore(true, tempDir, nil)
 		require.ErrorIs(t, err, ErrDiskPathIsDirectory, "directories must be rejected during validation")
 		assert.Nil(t, store, "store must not be created when path is a directory")
 	})
@@ -388,7 +388,7 @@ func TestDiskStore_GetReturnsCopy(t *testing.T) {
 	assert.Equal(t, []byte("value"), again.([]byte), "mutating returned slice must not affect stored value")
 }
 
-// TestDiskStore_Get_IgnoresStaleIndex ensures Get falls back to Bolt when
+// TestDiskStore_Get_IgnoresStaleIndex ensures Get falls back to bbolt when
 // the tracking index temporarily misses a key.
 func TestDiskStore_Get_IgnoresStaleIndex(t *testing.T) {
 	t.Parallel()
@@ -411,7 +411,7 @@ func TestDiskStore_Get_IgnoresStaleIndex(t *testing.T) {
 	assert.Equal(t, []byte("value"), raw.([]byte))
 }
 
-// TestDiskStore_Exists_IgnoresStaleIndex ensures Exists rechecks Bolt before
+// TestDiskStore_Exists_IgnoresStaleIndex ensures Exists rechecks bbolt before
 // returning false when the tracking map misses a key.
 func TestDiskStore_Exists_IgnoresStaleIndex(t *testing.T) {
 	t.Parallel()
@@ -428,7 +428,7 @@ func TestDiskStore_Exists_IgnoresStaleIndex(t *testing.T) {
 
 	exists, err := store.Exists(key)
 	require.NoError(t, err, "Exists must not fail when rebuilding view")
-	assert.True(t, exists, "Exists must fall back to Bolt when index misses key")
+	assert.True(t, exists, "Exists must fall back to bbolt when index misses key")
 }
 
 // TestDiskStore_IncrementBy_Basic checks IncrementBy on absent key (start at 0), positive/negative

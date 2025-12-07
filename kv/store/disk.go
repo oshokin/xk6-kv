@@ -13,20 +13,22 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// DiskStore is a persistent key-value store backed by BoltDB. It optionally
+// DiskStore is a persistent key-value store backed by bbolt. It optionally
 // maintains in-memory key indexes for efficient random sampling.
 //
 // Concurrency:
 //   - All exported methods are safe for concurrent use.
-//   - Disk operations use a Bolt write transaction to guarantee atomicity.
+//   - Disk operations use a bbolt write transaction to guarantee atomicity.
 //   - When trackKeys is enabled, we maintain keysList/keysMap and an OSTree
 //     to keep RandomKey() fast and consistent under concurrent edits.
 type DiskStore struct {
-	// path is the filesystem path to the BoltDB file.
+	// path is the filesystem path to the bbolt file.
 	path string
-	// handle is the underlying BoltDB handle.
+	// handle is the underlying bbolt handle.
 	handle *bolt.DB
-	// bucket is the internal BoltDB bucket name.
+	// boltOptions holds user-provided bbolt options (nil when defaults are used).
+	boltOptions *bolt.Options
+	// bucket is the internal bbolt bucket name.
 	bucket []byte
 	// trackKeys is a flag to track whether in-memory key tracking is enabled.
 	trackKeys bool
@@ -50,22 +52,22 @@ type DiskStore struct {
 }
 
 const (
-	// DefaultDiskStorePath is the default filesystem path to the BoltDB file.
+	// DefaultDiskStorePath is the default filesystem path to the bbolt file.
 	DefaultDiskStorePath = ".k6.kv"
 
-	// DefaultBoltDBBucket is the default BoltDB bucket name we use inside the file.
-	DefaultBoltDBBucket = "k6"
+	// DefaultBBoltBucket is the default bbolt bucket name we use inside the file.
+	DefaultBBoltBucket = "k6"
 )
 
-// defaultBoltDBBucketBytes is the default bucket name for the BoltDB file.
+// defaultBBoltBucketBytes is the default bucket name for the bbolt file.
 //
 //nolint:gochecknoglobals // readonly constant is used for default bucket name.
-var defaultBoltDBBucketBytes = []byte(DefaultBoltDBBucket)
+var defaultBBoltBucketBytes = []byte(DefaultBBoltBucket)
 
-// NewDiskStore constructs a DiskStore using the provided filesystem path and DefaultBoltDBBucket.
+// NewDiskStore constructs a DiskStore using the provided filesystem path and DefaultBBoltBucket.
 // When path is empty, DefaultDiskStorePath is used to preserve backwards compatibility.
 // If trackKeys is true, an in-memory index is initialized to accelerate RandomKey().
-func NewDiskStore(trackKeys bool, path string) (*DiskStore, error) {
+func NewDiskStore(trackKeys bool, path string, cfg *DiskConfig) (*DiskStore, error) {
 	var idx *OSTree
 	if trackKeys {
 		idx = NewOSTree()
@@ -76,21 +78,27 @@ func NewDiskStore(trackKeys bool, path string) (*DiskStore, error) {
 		return nil, err
 	}
 
+	boltOpts, err := buildBBoltOptions(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	return &DiskStore{
-		path:      diskPath,
-		handle:    new(bolt.DB),
-		opened:    atomic.Bool{},
-		refCount:  atomic.Int64{},
-		lock:      sync.Mutex{},
-		trackKeys: trackKeys,
-		keysMap:   make(map[string]int),
-		keysList:  []string{},
-		keysLock:  sync.RWMutex{},
-		ost:       idx,
+		path:        diskPath,
+		handle:      new(bolt.DB),
+		boltOptions: boltOpts,
+		opened:      atomic.Bool{},
+		refCount:    atomic.Int64{},
+		lock:        sync.Mutex{},
+		trackKeys:   trackKeys,
+		keysMap:     make(map[string]int),
+		keysList:    []string{},
+		keysLock:    sync.RWMutex{},
+		ost:         idx,
 	}, nil
 }
 
-// Open initializes the underlying BoltDB handle when needed and increments the
+// Open initializes the underlying bbolt handle when needed and increments the
 // reference counter for each caller. It is safe for concurrent use.
 func (s *DiskStore) Open() error {
 	s.lock.Lock()
@@ -112,21 +120,22 @@ func (s *DiskStore) Open() error {
 	}
 
 	// Open the database file.
-	handler, err := bolt.Open(s.path, 0o600, nil)
+	handler, err := bolt.Open(s.path, 0o600, s.boltOptions)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
 	// Create the internal bucket if it doesn't exist.
 	err = handler.Update(func(tx *bolt.Tx) error {
-		_, bucketErr := tx.CreateBucketIfNotExists(defaultBoltDBBucketBytes)
+		_, bucketErr := tx.CreateBucketIfNotExists(defaultBBoltBucketBytes)
 		if bucketErr != nil {
-			return fmt.Errorf("%w: internal bucket %q: %w", ErrBoltDBBucketCreateFailed, DefaultBoltDBBucket, bucketErr)
+			return fmt.Errorf("%w: internal bucket %q: %w", ErrBBoltBucketCreateFailed, DefaultBBoltBucket, bucketErr)
 		}
 
 		return nil
 	})
 	if err != nil {
+		// Close failure here only adds context-creation already failed-so treat it as best-effort.
 		_ = handler.Close()
 
 		return err
@@ -134,7 +143,7 @@ func (s *DiskStore) Open() error {
 
 	// Set the handle and bucket.
 	s.handle = handler
-	s.bucket = defaultBoltDBBucketBytes
+	s.bucket = defaultBBoltBucketBytes
 
 	// Rebuild the key list if tracking is enabled.
 	if s.trackKeys {
@@ -143,6 +152,7 @@ func (s *DiskStore) Open() error {
 		s.keysLock.Unlock()
 
 		if rebuildErr != nil {
+			// Same as above: closing best-effort since the handler never became visible.
 			_ = handler.Close()
 
 			return fmt.Errorf("%w: %w", ErrDiskStoreRebuildKeysFailed, rebuildErr)
@@ -166,7 +176,7 @@ func (s *DiskStore) Get(key string) (any, error) {
 
 	var value []byte
 
-	// Get the value from the database within a BoltDB transaction.
+	// Get the value from the database within a bbolt transaction.
 	err := s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
@@ -217,7 +227,7 @@ func (s *DiskStore) Set(key string, value any) error {
 		s.keysLock.RUnlock()
 	}
 
-	// Update the value in the database within a BoltDB transaction.
+	// Update the value in the database within a bbolt transaction.
 	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
@@ -254,7 +264,7 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 		wasNew   bool
 	)
 
-	// Update the value in the database within a BoltDB transaction.
+	// Update the value in the database within a bbolt transaction.
 	err := s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
@@ -328,7 +338,7 @@ func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, er
 		// Check if key exists.
 		if got := bucket.Get([]byte(key)); got != nil {
 			exists = true
-			// Clone to avoid aliasing BoltDB's internal memory buffers.
+			// Clone to avoid aliasing bbolt's internal memory buffers.
 			result = slices.Clone(got)
 
 			return nil
@@ -492,7 +502,7 @@ func (s *DiskStore) Delete(key string) error {
 		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
-	// Remove from BoltDB.
+	// Remove from bbolt.
 	err := s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
@@ -517,7 +527,7 @@ func (s *DiskStore) Delete(key string) error {
 
 // Exists checks if a given key exists.
 // With tracking enabled, we trust positive hits from the in-memory index but
-// fall back to BoltDB for negative results to avoid stale reads.
+// fall back to bbolt for negative results to avoid stale reads.
 func (s *DiskStore) Exists(key string) (bool, error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
@@ -669,7 +679,7 @@ func (s *DiskStore) Clear() error {
 
 	err := s.handle.Update(func(tx *bolt.Tx) error {
 		// Drop whole bucket: faster than deleting keys one-by-one.
-		// BoltDB optimizes bucket deletion as a single operation.
+		// bbolt optimizes bucket deletion as a single operation.
 		err := tx.DeleteBucket(s.bucket)
 		if err != nil {
 			return fmt.Errorf("%w: bucket %s: %w", ErrDiskStoreDeleteFailed, s.bucket, err)
@@ -704,7 +714,7 @@ func (s *DiskStore) Clear() error {
 	return nil
 }
 
-// Size returns the number of keys in the store (O(1) from Bolt stats).
+// Size returns the number of keys in the store (O(1) from bbolt stats).
 func (s *DiskStore) Size() (int64, error) {
 	// Ensure the store is open.
 	if err := s.ensureOpen(); err != nil {
@@ -731,7 +741,7 @@ func (s *DiskStore) Size() (int64, error) {
 }
 
 // List returns key-value pairs filtered by prefix and limited by count.
-// Keys are returned in lexicographical order (Bolt cursor order).
+// Keys are returned in lexicographical order (bbolt cursor order).
 // If prefix == "", Seek("") positions at the first key.
 func (s *DiskStore) List(prefix string, limit int64) ([]Entry, error) {
 	page, err := s.Scan(prefix, "", limit)
@@ -742,7 +752,7 @@ func (s *DiskStore) List(prefix string, limit int64) ([]Entry, error) {
 	return page.Entries, nil
 }
 
-// RebuildKeyList re-scans all keys from BoltDB to rebuild the in-memory key index.
+// RebuildKeyList re-scans all keys from bbolt to rebuild the in-memory key index.
 // Useful after crashes or manual intervention. No-op if tracking is disabled.
 func (s *DiskStore) RebuildKeyList() error {
 	if !s.trackKeys {
@@ -796,8 +806,8 @@ func (s *DiskStore) Close() error {
 	return nil
 }
 
-// ensureOpen checks whether the store is already opened. It is invoked by all
-// operations that require an active Bolt handle.
+// ensureOpen checks whether the store is already opened.
+// It is invoked by all operations that require an active bbolt handle.
 func (s *DiskStore) ensureOpen() error {
 	if s.opened.Load() {
 		return nil

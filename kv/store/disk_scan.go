@@ -60,7 +60,7 @@ func (s *DiskStore) fillDiskScanPage(page *ScanPage, cursor *bolt.Cursor, prefix
 		}
 
 		// Once we've passed the prefix range, stop iterating.
-		// BoltDB cursor maintains lexicographic order, so this is safe.
+		// bbolt cursor maintains lexicographic order, so this is safe.
 		if len(prefixBytes) > 0 && !bytes.HasPrefix(k, prefixBytes) {
 			break
 		}

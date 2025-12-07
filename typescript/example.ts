@@ -5,11 +5,10 @@ import { openKv } from 'k6/x/kv';
 
 // Open store in init context (outside default function).
 const kv = openKv({
-  backend: 'memory',      // Use 'disk' for persistent storage.
-  serialization: 'json',  // Or 'string' for raw bytes.
-  trackKeys: true,        // Enable O(1) randomKey() performance.
-  shardCount: 0           // 0 = auto-detect (default, recommended).
-  // Set to 1-65536 for manual control.
+  backend: 'memory',        // Use 'disk' for persistent storage.
+  serialization: 'json',    // Or 'string' for raw bytes.
+  trackKeys: true,          // Enable O(1) randomKey() performance.
+  memory: { shardCount: 0 } // Set to 1-65536 for manual control.
 });
 
 export default async function () {

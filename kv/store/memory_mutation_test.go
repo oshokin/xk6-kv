@@ -14,7 +14,8 @@ import (
 func TestMemoryStore_BlockMutationsAPI(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 
 	require.NoError(t, store.blockMutations(errors.New("custom block")))
 
@@ -38,7 +39,8 @@ func TestMemoryStore_BlockMutationsAPI(t *testing.T) {
 func TestMemoryStore_BlockMutations_WaitGroupRace(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(false, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: false}
+	store := NewMemoryStore(memoryCfg)
 
 	// Trigger many concurrent writes + blocks to hit the race.
 	for range 100 {

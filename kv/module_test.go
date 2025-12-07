@@ -10,9 +10,9 @@ import (
 	"go.k6.io/k6/js/modulestest"
 )
 
-// TestOpenKvConcurrentInitializationSharesStore tests that
+// TestOpenKV_ConcurrentInitializationSharesStore tests that
 // concurrent openKv calls share the same store.
-func TestOpenKvConcurrentInitializationSharesStore(t *testing.T) {
+func TestOpenKV_ConcurrentInitializationSharesStore(t *testing.T) {
 	t.Parallel()
 
 	rootModule := newTestRootModule(t)
@@ -104,9 +104,9 @@ func TestOpenKvConcurrentInitializationSharesStore(t *testing.T) {
 	})
 }
 
-// TestOpenKvRejectsConflictingOptions tests that openKv
+// TestOpenKV_RejectsConflictingOptions tests that openKv
 // rejects conflicting options by panicking.
-func TestOpenKvRejectsConflictingOptions(t *testing.T) {
+func TestOpenKV_RejectsConflictingOptions(t *testing.T) {
 	t.Parallel()
 
 	rootModule := newTestRootModule(t)
@@ -139,9 +139,9 @@ func TestOpenKvRejectsConflictingOptions(t *testing.T) {
 	})
 }
 
-// TestOpenKvAllowsEquivalentDiskPaths tests that openKv allows
+// TestOpenKV_AllowsEquivalentDiskPaths tests that openKv allows
 // equivalent disk paths by not panicking.
-func TestOpenKvAllowsEquivalentDiskPaths(t *testing.T) {
+func TestOpenKV_AllowsEquivalentDiskPaths(t *testing.T) {
 	t.Parallel()
 
 	rootModule := newTestRootModule(t)
@@ -159,25 +159,25 @@ func TestOpenKvAllowsEquivalentDiskPaths(t *testing.T) {
 		}
 	})
 
-	absPath := filepath.Join(tempDir, "kv.db")
-	extraSegmentsPath := filepath.Join(absPath, "..", filepath.Base(absPath))
+	absolutePath := filepath.Join(tempDir, "kv.db")
+	extraSegmentsPath := filepath.Join(absolutePath, "..", filepath.Base(absolutePath))
 
-	absOptions := runtime.VU.Runtime().ToValue(map[string]any{
+	absolutePathOptions := runtime.VU.Runtime().ToValue(map[string]any{
 		"backend": BackendDisk,
-		"path":    absPath,
+		"path":    absolutePath,
 	})
 
-	relOptions := runtime.VU.Runtime().ToValue(map[string]any{
+	relativePathOptions := runtime.VU.Runtime().ToValue(map[string]any{
 		"backend": BackendDisk,
 		"path":    extraSegmentsPath,
 	})
 
 	require.NotPanics(t, func() {
-		moduleInstance.OpenKv(absOptions)
+		moduleInstance.OpenKv(absolutePathOptions)
 	})
 
 	require.NotPanics(t, func() {
-		moduleInstance.OpenKv(relOptions)
+		moduleInstance.OpenKv(relativePathOptions)
 	})
 }
 

@@ -18,7 +18,7 @@ import (
 func TestNewMemoryStore(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
 	require.NotNil(t, store, "NewMemoryStore() must not return nil")
 	require.NotNil(t, store.shards, "shards slice must be allocated")
@@ -35,7 +35,7 @@ func TestMemoryStore_Get_ReturnsCopy(t *testing.T) {
 
 	const key = "immutable"
 
-	store := NewMemoryStore(false, 0)
+	store := NewMemoryStore(nil)
 
 	require.NoError(t, store.Set(key, []byte("original")))
 
@@ -60,7 +60,7 @@ func TestMemoryStore_Get_ReturnsCopy(t *testing.T) {
 func TestMemoryStore_GetSet_RoundtripAndTypes(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
 	// Missing key must error.
 	_, err := store.Get("does-not-exist")
@@ -95,7 +95,7 @@ func TestMemoryStore_GetSet_Concurrency(t *testing.T) {
 	t.Parallel()
 
 	var (
-		store = NewMemoryStore(true, 0)
+		store = NewMemoryStore(&MemoryConfig{TrackKeys: true})
 		wg    sync.WaitGroup
 	)
 
@@ -125,7 +125,7 @@ func TestMemoryStore_GetSet_Concurrency(t *testing.T) {
 func TestMemoryStore_IncrementBy_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
 	newValue, err := store.IncrementBy("ctr", 5)
 	require.NoError(t, err)
@@ -151,7 +151,7 @@ func TestMemoryStore_IncrementBy_Concurrent(t *testing.T) {
 	)
 
 	var (
-		store = NewMemoryStore(true, 0)
+		store = NewMemoryStore(&MemoryConfig{TrackKeys: true})
 		wg    sync.WaitGroup
 	)
 
@@ -182,7 +182,7 @@ func TestMemoryStore_IncrementBy_Concurrent(t *testing.T) {
 func TestMemoryStore_GetOrSet_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 	value, loaded, err := store.GetOrSet("k", "v1")
 
 	require.NoError(t, err)
@@ -202,7 +202,7 @@ func TestMemoryStore_GetOrSet_ReturnsCopy(t *testing.T) {
 
 	const key = "copy-key"
 
-	store := NewMemoryStore(false, 0)
+	store := NewMemoryStore(nil)
 	require.NoError(t, store.Set(key, []byte("persisted")))
 
 	actual, loaded, err := store.GetOrSet(key, "ignored")
@@ -223,7 +223,7 @@ func TestMemoryStore_GetOrSet_InsertReturnsCopy(t *testing.T) {
 
 	const key = "insert-copy"
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
 	actual, loaded, err := store.GetOrSet(key, []byte("fresh"))
 	require.NoError(t, err)
@@ -251,7 +251,7 @@ func TestMemoryStore_GetOrSet_Concurrent(t *testing.T) {
 	}
 
 	var (
-		store     = NewMemoryStore(true, 0)
+		store     = NewMemoryStore(&MemoryConfig{TrackKeys: true})
 		resultsCh = make(chan goroutineResult, concurrencyLevel)
 		wg        sync.WaitGroup
 	)
@@ -328,7 +328,7 @@ func TestMemory_GetOrSet_Delete_Interleave_NoPanic(t *testing.T) {
 	)
 
 	var (
-		store     = NewMemoryStore(true, 0)
+		store     = NewMemoryStore(&MemoryConfig{TrackKeys: true})
 		testValue = []byte("processed")
 	)
 
@@ -371,7 +371,7 @@ func TestMemory_GetOrSet_Delete_Interleave_NoPanic(t *testing.T) {
 func TestMemoryStore_Swap_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
 	prev, loaded, err := store.Swap("k", "v1")
 	require.NoError(t, err)
@@ -393,7 +393,7 @@ func TestMemoryStore_Swap_Basic(t *testing.T) {
 func TestMemoryStore_CompareAndSwap_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 	require.NoError(t, store.Set("k", "old"))
 
 	ok, err := store.CompareAndSwap("k", "BAD", "new")
@@ -418,7 +418,7 @@ func TestMemoryStore_CompareAndSwap_Basic(t *testing.T) {
 func TestMemoryStore_CompareAndSwap_InsertWhenAbsent(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
 	ok, err := store.CompareAndSwap("lock", nil, "holder")
 	require.NoError(t, err)
@@ -441,7 +441,7 @@ func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 	const concurrencyLevel = 200
 
 	var (
-		store = NewMemoryStore(true, 0)
+		store = NewMemoryStore(&MemoryConfig{TrackKeys: true})
 		okCh  = make(chan bool, concurrencyLevel)
 		wg    sync.WaitGroup
 	)
@@ -484,7 +484,7 @@ func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 func TestMemoryStore_Delete(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 	require.NoError(t, store.Set("test-key", "test-value"))
 
 	require.NoError(t, store.Delete("test-key"))
@@ -504,7 +504,7 @@ func TestMemoryStore_Delete(t *testing.T) {
 func TestMemoryStore_Exists(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
 	exists, err := store.Exists("non-existent")
 	require.NoError(t, err)
@@ -522,7 +522,7 @@ func TestMemoryStore_Exists(t *testing.T) {
 func TestMemoryStore_DeleteIfExists_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
 	ok, err := store.DeleteIfExists("k")
 	require.NoError(t, err)
@@ -546,7 +546,7 @@ func TestMemoryStore_DeleteIfExists_ConcurrentSingleWinner(t *testing.T) {
 	const concurrencyLevel = 128
 
 	var (
-		store = NewMemoryStore(true, 0)
+		store = NewMemoryStore(&MemoryConfig{TrackKeys: true})
 		wins  int
 		mu    sync.Mutex
 		wg    sync.WaitGroup
@@ -586,7 +586,7 @@ func TestMemoryStore_DeleteIfExists_ConcurrentSingleWinner(t *testing.T) {
 func TestMemoryStore_CompareAndDelete_Basic(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 	require.NoError(t, store.Set("k", "v1"))
 
 	ok, err := store.CompareAndDelete("k", "BAD")
@@ -612,7 +612,7 @@ func TestMemoryStore_CompareAndDelete_ConcurrentSingleWinner(t *testing.T) {
 	const concurrencyLevel = 120
 
 	var (
-		store        = NewMemoryStore(true, 0)
+		store        = NewMemoryStore(&MemoryConfig{TrackKeys: true})
 		successCount int
 		mu           sync.Mutex
 		wg           sync.WaitGroup
@@ -652,7 +652,7 @@ func TestMemoryStore_AtomicOps_DoNotChangeBytesUnexpectedly(t *testing.T) {
 	t.Parallel()
 
 	var (
-		store         = NewMemoryStore(true, 0)
+		store         = NewMemoryStore(&MemoryConfig{TrackKeys: true})
 		originalBytes = []byte("payload")
 	)
 
@@ -675,7 +675,7 @@ func TestMemoryStore_AtomicOps_DoNotChangeBytesUnexpectedly(t *testing.T) {
 func TestMemoryStore_Clear(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
 	entries := []struct{ key, value string }{
 		{"key1", "value1"},
@@ -695,7 +695,7 @@ func TestMemoryStore_Clear(t *testing.T) {
 func TestMemoryStore_Size(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
 	size, err := store.Size()
 	require.NoError(t, err)
@@ -716,7 +716,7 @@ func TestMemoryStore_Size(t *testing.T) {
 }
 
 // TestMemoryStore_Scan_PrefixPagination verifies Scan correctly handles prefix filtering,
-// pagination with limits, limit<=0 semantics, and stays consistent with List() results
+// pagination with limits, limit <= 0 semantics, and stays consistent with List() results
 // across both tracking modes (trackKeys on/off).
 func TestMemoryStore_Scan_PrefixPagination(t *testing.T) {
 	t.Parallel()
@@ -734,7 +734,7 @@ func TestMemoryStore_Scan_PrefixPagination(t *testing.T) {
 		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
 			t.Parallel()
 
-			store := NewMemoryStore(trackKeys, 0)
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
 			prefixKeys := seedStorePrefixes(t, store, prefixData)
 
 			// Collect full scan with pagination and compare to List results (keys and values).
@@ -845,7 +845,7 @@ func TestMemoryStore_Scan_PrefixPagination(t *testing.T) {
 func TestMemoryStore_List(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
 	// Empty store.
 	entries, err := store.List("", 0)
@@ -900,7 +900,7 @@ func TestMemoryStore_List(t *testing.T) {
 func TestMemoryStore_KeyTrackingConsistency(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 	keys := []string{"key1", "key2", "key3"}
 
 	for _, key := range keys {
@@ -928,7 +928,7 @@ func TestMemoryStore_KeyTrackingConsistency(t *testing.T) {
 func TestMemoryStore_RebuildKeyList_RandomKeyPrefix(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
 	mustSetInMemoryStore(t, store, "p:1", "v1")
 	mustSetInMemoryStore(t, store, "p:2", "v2")
@@ -952,7 +952,7 @@ func TestMemoryStore_RebuildKeyList_RandomKeyPrefix(t *testing.T) {
 func TestMemoryStore_Close(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 	require.NoError(t, store.Close())
 }
 

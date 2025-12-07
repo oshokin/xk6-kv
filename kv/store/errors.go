@@ -17,16 +17,16 @@ var (
 	ErrBackupFinalizeFailed = errors.New("snapshot finalize failed")
 	// ErrSnapshotExportFailed indicates a failure while exporting snapshot data.
 	ErrSnapshotExportFailed = errors.New("snapshot export failed")
-	// ErrBoltDBBucketCreateFailed indicates creating a BoltDB bucket failed.
-	ErrBoltDBBucketCreateFailed = errors.New("bolt bucket create failed")
-	// ErrBoltDBSnapshotCloseFailed indicates closing a BoltDB snapshot failed.
-	ErrBoltDBSnapshotCloseFailed = errors.New("bolt snapshot close failed")
-	// ErrBoltDBSnapshotOpenFailed indicates opening a BoltDB snapshot failed.
-	ErrBoltDBSnapshotOpenFailed = errors.New("bolt snapshot open failed")
-	// ErrBoltDBSnapshotStatFailed indicates statting a BoltDB snapshot failed.
-	ErrBoltDBSnapshotStatFailed = errors.New("bolt snapshot stat failed")
-	// ErrBoltDBWriteFailed indicates writing to BoltDB failed.
-	ErrBoltDBWriteFailed = errors.New("bolt write failed")
+	// ErrBBoltBucketCreateFailed indicates creating a bbolt bucket failed.
+	ErrBBoltBucketCreateFailed = errors.New("bolt bucket create failed")
+	// ErrBBoltSnapshotCloseFailed indicates closing a bbolt snapshot failed.
+	ErrBBoltSnapshotCloseFailed = errors.New("bolt snapshot close failed")
+	// ErrBBoltSnapshotOpenFailed indicates opening a bbolt snapshot failed.
+	ErrBBoltSnapshotOpenFailed = errors.New("bolt snapshot open failed")
+	// ErrBBoltSnapshotStatFailed indicates statting a bbolt snapshot failed.
+	ErrBBoltSnapshotStatFailed = errors.New("bolt snapshot stat failed")
+	// ErrBBoltWriteFailed indicates writing to bbolt failed.
+	ErrBBoltWriteFailed = errors.New("bolt write failed")
 	// ErrBucketNotFound is returned when the requested bucket does not exist.
 	ErrBucketNotFound = errors.New("bucket not found")
 	// ErrDiskDirectoryCreateFailed indicates disk directory creation failed.
@@ -97,6 +97,12 @@ var (
 	ErrRestoreInProgress = errors.New("restore in progress")
 	// ErrRestoreOptionsNil is returned when Restore is invoked with nil options.
 	ErrRestoreOptionsNil = errors.New("restore options are nil")
+	// ErrSerializerEncodeFailed indicates serializing a value failed.
+	ErrSerializerEncodeFailed = errors.New("serializer encode failed")
+	// ErrSerializerDecodeFailed indicates deserializing a value failed.
+	ErrSerializerDecodeFailed = errors.New("serializer decode failed")
+	// ErrSnapshotKeyMissing indicates a key was missing during snapshot operation.
+	ErrSnapshotKeyMissing = errors.New("snapshot key missing")
 	// ErrSnapshotNotFound is returned when a snapshot file cannot be located.
 	ErrSnapshotNotFound = errors.New("snapshot file not found")
 	// ErrSnapshotOpenFailed is returned when a snapshot file cannot be opened.
@@ -107,10 +113,6 @@ var (
 	ErrSnapshotPathResolveFailed = errors.New("snapshot path resolve failed")
 	// ErrSnapshotReadFailed indicates a failure while reading snapshot contents.
 	ErrSnapshotReadFailed = errors.New("snapshot read failed")
-	// ErrSerializerEncodeFailed indicates serializing a value failed.
-	ErrSerializerEncodeFailed = errors.New("serializer encode failed")
-	// ErrSerializerDecodeFailed indicates deserializing a value failed.
-	ErrSerializerDecodeFailed = errors.New("serializer decode failed")
 	// ErrUnsupportedValueType is returned when a value of an unsupported type is set.
 	ErrUnsupportedValueType = errors.New("unsupported value type (want []byte or string)")
 	// ErrUnexpectedHeapType indicates an unexpected type was encountered in the iterator heap.

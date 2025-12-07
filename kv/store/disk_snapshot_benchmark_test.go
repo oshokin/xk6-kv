@@ -9,7 +9,7 @@ import (
 )
 
 // BenchmarkDiskStore_Backup: measures snapshot backup throughput across tracking
-// and concurrency modes. For disk backend, BoltDB transactions always provide
+// and concurrency modes. For disk backend, bbolt transactions always provide
 // consistent snapshots, so allowConcurrentWrites doesn't affect consistency but
 // may still be tested for API completeness.
 func BenchmarkDiskStore_Backup(b *testing.B) {

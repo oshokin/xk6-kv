@@ -209,7 +209,7 @@ func (s *SerializedStore) RebuildKeyList() error {
 	return s.store.RebuildKeyList()
 }
 
-// Backup streams the underlying store contents into a BoltDB snapshot.
+// Backup streams the underlying store contents into a bbolt snapshot.
 func (s *SerializedStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 	return s.store.Backup(opts)
 }

@@ -94,6 +94,9 @@ const (
 	// SnapshotIOError is emitted when low-level snapshot IO operations fail.
 	SnapshotIOError ErrorName = "SnapshotIOError"
 
+	// SnapshotKeyMissingError is emitted when a snapshot key is missing.
+	SnapshotKeyMissingError ErrorName = "SnapshotKeyMissingError"
+
 	// SnapshotNotFoundError is emitted when the snapshot file cannot be located.
 	SnapshotNotFoundError ErrorName = "SnapshotNotFoundError"
 
@@ -247,16 +250,18 @@ func classifyError(err error) *Error {
 		errors.Is(err, store.ErrBackupFinalizeFailed),
 		errors.Is(err, store.ErrSnapshotExportFailed):
 		return NewError(SnapshotExportError, err.Error())
-	case errors.Is(err, store.ErrBoltDBSnapshotOpenFailed),
-		errors.Is(err, store.ErrBoltDBSnapshotCloseFailed),
-		errors.Is(err, store.ErrBoltDBSnapshotStatFailed),
-		errors.Is(err, store.ErrBoltDBBucketCreateFailed),
-		errors.Is(err, store.ErrBoltDBWriteFailed),
+	case errors.Is(err, store.ErrBBoltSnapshotOpenFailed),
+		errors.Is(err, store.ErrBBoltSnapshotCloseFailed),
+		errors.Is(err, store.ErrBBoltSnapshotStatFailed),
+		errors.Is(err, store.ErrBBoltBucketCreateFailed),
+		errors.Is(err, store.ErrBBoltWriteFailed),
 		errors.Is(err, store.ErrSnapshotOpenFailed):
 		return NewError(SnapshotIOError, err.Error())
 	case errors.Is(err, store.ErrSnapshotReadFailed),
 		errors.Is(err, store.ErrSnapshotPathResolveFailed):
 		return NewError(SnapshotReadError, err.Error())
+	case errors.Is(err, store.ErrSnapshotKeyMissing):
+		return NewError(SnapshotKeyMissingError, err.Error())
 	case errors.Is(err, store.ErrBucketNotFound):
 		return NewError(BucketNotFoundError, err.Error())
 	case errors.Is(err, store.ErrKeyNotFound):

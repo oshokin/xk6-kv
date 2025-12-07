@@ -11,19 +11,19 @@ import (
 
 type (
 
-	// boltDBBatchWriter buffers entries and flushes them in bounded BoltDB transactions.
-	boltDBBatchWriter struct {
-		// db is the underlying BoltDB database.
+	// bboltBatchWriter buffers entries and flushes them in bounded bbolt transactions.
+	bboltBatchWriter struct {
+		// db is the underlying bbolt database.
 		db *bolt.DB
 
-		// pending is a slice of key/value pairs staged for writing to the BoltDB database.
+		// pending is a slice of key/value pairs staged for writing to the bbolt database.
 		pending []*snapshotPair
 
 		// pendingBytes is the total size of the pending key/value pairs.
 		pendingBytes int
 	}
 
-	// snapshotPair represents a key/value pair staged for BoltDB writes.
+	// snapshotPair represents a key/value pair staged for bbolt writes.
 	snapshotPair struct {
 		// key is the key of the key/value pair.
 		key []byte
@@ -41,10 +41,10 @@ const (
 	// maxMapPreallocationCapacity caps map preallocation to keep memory bounded.
 	maxMapPreallocationCapacity = 10_000_000
 
-	// boltDBSnapshotMaxBatchEntries caps how many entries we write per BoltDB transaction.
+	// boltDBSnapshotMaxBatchEntries caps how many entries we write per bbolt transaction.
 	boltDBSnapshotMaxBatchEntries = 50_000
 
-	// boltDBSnapshotMaxBatchBytes caps the total key/value payload per BoltDB transaction (~64MB).
+	// boltDBSnapshotMaxBatchBytes caps the total key/value payload per bbolt transaction (~64MB).
 	boltDBSnapshotMaxBatchBytes = 64 << 20
 
 	// allowConcurrentWritesWarning is a warning message about the best-effort
@@ -60,7 +60,7 @@ const (
 //nolint:gochecknoglobals // this is a test hook.
 var streamSnapshotChunkObserver func(chunkLen int)
 
-// Backup writes the entire memory store into a Bolt snapshot file.
+// Backup writes the entire memory store into a bbolt snapshot file.
 // When AllowConcurrentWrites is enabled the snapshot is best-effort: new writes that
 // arrive after the key snapshot are excluded and deletes committed after the snapshot
 // may reappear in the backed-up data.
@@ -97,17 +97,19 @@ func (s *MemoryStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 		return nil, fmt.Errorf("%w: %w", ErrBackupTempFileFailed, err)
 	}
 
-	summary, backupErr := s.backupToBolt(tempFile, opts)
+	summary, backupErr := s.backupToBBolt(tempFile, opts)
 	if backupErr != nil {
-		//nolint:forbidigo // clean up temporary file on error.
+		//nolint:forbidigo // file I/O is required for removing the temporary file on error.
+		// Cleanup is best-effort-the caller already has backupErr to act on.
 		_ = os.Remove(tempFile)
 
 		return nil, backupErr
 	}
 
-	//nolint:forbidigo // rename required for atomic replacement.
+	//nolint:forbidigo // file I/O is required for renaming the temporary file to the destination file.
 	if err := os.Rename(tempFile, opts.FileName); err != nil {
-		//nolint:forbidigo // clean up temporary file on error.
+		//nolint:forbidigo // file I/O is required for removing the temporary file on error.
+		// Same logic: if the rename failed, removing the temporary file is a courtesy.
 		_ = os.Remove(tempFile)
 
 		return nil, fmt.Errorf("%w: %w", ErrBackupFinalizeFailed, err)
@@ -116,11 +118,11 @@ func (s *MemoryStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 	return summary, nil
 }
 
-// backupToBolt backs up a snapshot to a BoltDB file using one of two strategies:
+// backupToBBolt backs up a snapshot to a bbolt file using one of two strategies:
 //  1. Concurrent mode (AllowConcurrentWrites): blocks writers only during key capture,
 //     then streams values while writers proceed. Best-effort consistency.
 //  2. Blocking mode: holds mutation lock for entire backup. Strict consistency.
-func (s *MemoryStore) backupToBolt(tempFile string, opts *BackupOptions) (*BackupSummary, error) {
+func (s *MemoryStore) backupToBBolt(tempFile string, opts *BackupOptions) (*BackupSummary, error) {
 	if opts.AllowConcurrentWrites {
 		return s.backupConcurrent(tempFile)
 	}
@@ -157,7 +159,7 @@ func (s *MemoryStore) backupConcurrent(tempFile string) (*BackupSummary, error) 
 
 	blockReleased = true
 
-	return s.writeBoltSnapshot(tempFile, true, func(yield func(string, []byte) error) error {
+	return s.writeBBoltSnapshot(tempFile, true, func(yield func(string, []byte) error) error {
 		return s.streamKeysWithClonedValues(keys, yield)
 	})
 }
@@ -175,7 +177,7 @@ func (s *MemoryStore) backupBlocking(tempFile string) (*BackupSummary, error) {
 	// Capture keys while holding the mutation block.
 	keys := s.snapshotKeys()
 
-	return s.writeBoltSnapshot(tempFile, false, func(yield func(string, []byte) error) error {
+	return s.writeBBoltSnapshot(tempFile, false, func(yield func(string, []byte) error) error {
 		for _, key := range keys {
 			shard := s.getShardByKey(key)
 			shard.mu.RLock()
@@ -184,7 +186,7 @@ func (s *MemoryStore) backupBlocking(tempFile string) (*BackupSummary, error) {
 
 			if !exists {
 				// Should never happen in blocking mode - indicates a bug.
-				return fmt.Errorf("key %q missing during snapshot", key)
+				return fmt.Errorf("%w: %q", ErrSnapshotKeyMissing, key)
 			}
 
 			// Writers are blocked for the duration of this backup, so we can stream the
@@ -200,19 +202,19 @@ func (s *MemoryStore) backupBlocking(tempFile string) (*BackupSummary, error) {
 	})
 }
 
-// writeBoltSnapshot writes a snapshot to a BoltDB file using batched transactions.
+// writeBBoltSnapshot writes a snapshot to a bbolt file using batched transactions.
 // The iterate callback provides key/value pairs via a yield function, which are
 // buffered and written in bounded batches to prevent unbounded transaction sizes.
 // Returns a summary with entry count, file size, and consistency guarantees.
-func (s *MemoryStore) writeBoltSnapshot(
+func (s *MemoryStore) writeBBoltSnapshot(
 	tempFile string,
 	bestEffort bool,
 	iterate func(yield func(string, []byte) error) error,
 ) (*BackupSummary, error) {
-	// Open BoltDB file with restrictive permissions (owner read/write only).
+	// Open bbolt file with restrictive permissions (owner read/write only).
 	db, err := bolt.Open(tempFile, 0o600, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrBoltDBSnapshotOpenFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrBBoltSnapshotOpenFailed, err)
 	}
 
 	// Track whether we successfully closed to avoid double-close in defer.
@@ -220,16 +222,18 @@ func (s *MemoryStore) writeBoltSnapshot(
 
 	defer func() {
 		if !closed {
+			// The restore failed before we returned the DB to callers, so closing
+			// it is purely best-effort - the original error is what users need.
 			_ = db.Close()
 		}
 	}()
 
 	// Batch writer handles transaction size limits automatically.
-	writer := newBoltBatchWriter(db)
+	writer := newBBoltBatchWriter(db)
 
-	var written int
+	var written int64
 
-	// Stream entries from iterator into batched BoltDB writes.
+	// Stream entries from iterator into batched bbolt writes.
 	if err := iterate(func(key string, value []byte) error {
 		written++
 
@@ -245,7 +249,7 @@ func (s *MemoryStore) writeBoltSnapshot(
 
 	// Explicit close to detect write errors before returning success.
 	if err := db.Close(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrBoltDBSnapshotCloseFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrBBoltSnapshotCloseFailed, err)
 	}
 
 	closed = true
@@ -253,7 +257,7 @@ func (s *MemoryStore) writeBoltSnapshot(
 	// Stat file to report final on-disk size.
 	info, err := os.Stat(tempFile)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrBoltDBSnapshotStatFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrBBoltSnapshotStatFailed, err)
 	}
 
 	summary := &BackupSummary{
@@ -269,7 +273,7 @@ func (s *MemoryStore) writeBoltSnapshot(
 	return summary, nil
 }
 
-// Restore replaces the store contents with entries from a Bolt snapshot.
+// Restore replaces the store contents with entries from a bbolt snapshot.
 // All existing data is atomically replaced with the snapshot contents.
 func (s *MemoryStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 	if opts == nil {
@@ -313,9 +317,9 @@ func (s *MemoryStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 	}
 
 	if err := db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(defaultBoltDBBucketBytes)
+		bucket := tx.Bucket(defaultBBoltBucketBytes)
 		if bucket == nil {
-			return fmt.Errorf("%w: %q", ErrBucketNotFound, defaultBoltDBBucketBytes)
+			return fmt.Errorf("%w: %q", ErrBucketNotFound, defaultBBoltBucketBytes)
 		}
 
 		return bucket.ForEach(func(k, v []byte) error {
@@ -324,7 +328,7 @@ func (s *MemoryStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 				return err
 			}
 
-			// Clone value bytes to avoid aliasing BoltDB's internal memory.
+			// Clone value bytes to avoid aliasing bbolt's internal memory.
 			builder[string(k)] = slices.Clone(v)
 
 			return nil
@@ -337,7 +341,9 @@ func (s *MemoryStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 	// ensuring no concurrent writes can interfere with the restore operation.
 	s.applySnapshot(builder)
 
-	summary := &RestoreSummary{TotalEntries: len(builder)}
+	summary := &RestoreSummary{
+		TotalEntries: int64(len(builder)),
+	}
 
 	// Unblock mutations after successful restore. Set flag to prevent double-unlock in defer.
 	s.unblockMutations()
@@ -385,7 +391,7 @@ func (s *MemoryStore) applySnapshot(container map[string][]byte) {
 
 // getPreallocationCapacity calculates the optimal map capacity for restore preallocation.
 // Balances between memory efficiency and avoiding repeated reallocations.
-func (s *MemoryStore) getPreallocationCapacity(totalEntries, maxEntries int) int {
+func (s *MemoryStore) getPreallocationCapacity(totalEntries, maxEntries int64) int64 {
 	switch {
 	case maxEntries > 0:
 		return clamp(maxEntries, defaultMapPreallocationCapacity, maxMapPreallocationCapacity)
@@ -484,7 +490,7 @@ func (s *MemoryStore) streamKeysWithClonedValues(keys []string, yield func(strin
 		chunkBytes += len(key) + len(cloned)
 
 		// Notify the test hook whenever we reach the same thresholds used by the
-		// BoltDB batch writer so tests can assert chunking behavior without peeking
+		// bbolt batch writer so tests can assert chunking behavior without peeking
 		// inside the writer itself. This allows tests to verify that streaming
 		// produces expected batch boundaries.
 		if chunkEntries >= boltDBSnapshotMaxBatchEntries ||
@@ -499,11 +505,11 @@ func (s *MemoryStore) streamKeysWithClonedValues(keys []string, yield func(strin
 	return nil
 }
 
-// newBoltBatchWriter creates a new boltDBBatchWriter that buffers writes
+// newBBoltBatchWriter creates a new bboltBatchWriter that buffers writes
 // into bounded transactions to prevent memory exhaustion and transaction timeouts.
 // Preallocates buffer capacity to reduce allocations during streaming.
-func newBoltBatchWriter(db *bolt.DB) *boltDBBatchWriter {
-	return &boltDBBatchWriter{
+func newBBoltBatchWriter(db *bolt.DB) *bboltBatchWriter {
+	return &bboltBatchWriter{
 		db:      db,
 		pending: make([]*snapshotPair, 0, boltDBSnapshotMaxBatchEntries),
 	}
@@ -512,7 +518,7 @@ func newBoltBatchWriter(db *bolt.DB) *boltDBBatchWriter {
 // append adds a key/value pair to the pending batch buffer.
 // Automatically flushes when batch size limits are reached (entry count or byte size).
 // This prevents unbounded transaction growth and memory usage during large backups.
-func (b *boltDBBatchWriter) append(key string, value []byte) error {
+func (b *bboltBatchWriter) append(key string, value []byte) error {
 	kv := &snapshotPair{
 		key:   []byte(key),
 		value: value,
@@ -529,11 +535,11 @@ func (b *boltDBBatchWriter) append(key string, value []byte) error {
 	return nil
 }
 
-// flush writes all buffered entries to BoltDB in a single transaction.
+// flush writes all buffered entries to bbolt in a single transaction.
 // After successful write, resets the buffer for the next batch.
 // The slice aliasing (batch = b.pending) is safe because the backup pipeline
 // is single-threaded - no concurrent appends can occur during the transaction.
-func (b *boltDBBatchWriter) flush() error {
+func (b *bboltBatchWriter) flush() error {
 	if len(b.pending) == 0 {
 		return nil
 	}
@@ -549,15 +555,15 @@ func (b *boltDBBatchWriter) flush() error {
 	// Write entire batch in single transaction for atomicity and performance.
 	if err := b.db.Update(func(tx *bolt.Tx) error {
 		// Create bucket if first write, or get existing bucket.
-		bucket, err := tx.CreateBucketIfNotExists(defaultBoltDBBucketBytes)
+		bucket, err := tx.CreateBucketIfNotExists(defaultBBoltBucketBytes)
 		if err != nil {
-			return fmt.Errorf("%w: %w", ErrBoltDBBucketCreateFailed, err)
+			return fmt.Errorf("%w: %w", ErrBBoltBucketCreateFailed, err)
 		}
 
 		// Write all buffered entries within this transaction.
 		for _, entry := range batch {
 			if err := bucket.Put(entry.key, entry.value); err != nil {
-				return fmt.Errorf("%w: %w", ErrBoltDBWriteFailed, err)
+				return fmt.Errorf("%w: %w", ErrBBoltWriteFailed, err)
 			}
 		}
 

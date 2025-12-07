@@ -10,9 +10,9 @@ import (
 	boltErrors "go.etcd.io/bbolt/errors"
 )
 
-// Backup writes the on-disk Bolt database to a standalone snapshot file.
+// Backup writes the on-disk bbolt database to a standalone snapshot file.
 // Unlike MemoryStore, DiskStore already persists data, so Backup simply copies
-// the existing Bolt file using a consistent View transaction.
+// the existing bbolt file using a consistent View transaction.
 func (s *DiskStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 	if opts == nil {
 		return nil, ErrBackupOptionsNil
@@ -80,23 +80,27 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 	}
 
 	tempFile := tempHandle.Name()
-	// Track export error for defer cleanup: only remove temp file if operation failed.
-	// On success, temp file is renamed to final destination, so cleanup would be wrong.
+	// Track export error for defer cleanup: only remove temporary file if operation failed.
+	// On success, temporary file is renamed to final destination, so cleanup would be wrong.
 	// Using a named return variable allows defer to inspect the final error state.
 	var exportErr error
 
 	defer func() {
-		// Only clean up temp file if an error occurred. On success, Rename() moves
-		// the temp file to the final destination, so removing it would delete the backup.
+		// Only clean up temporary file if an error occurred. On success, Rename() moves
+		// the temporary file to the final destination, so removing it would delete the backup.
 		// This pattern ensures atomic backup: either complete file exists or nothing.
 		if exportErr != nil {
+			// Best-effort close for the temp handle; failure here just adds context
+			// to the original export error.
 			_ = tempHandle.Close()
-			//nolint:forbidigo // clean up temporary file on error.
+			//nolint:forbidigo // file I/O is required for removing the temporary file on error.
+			// Cleanup is likewise best-effort; even if removal fails we still return
+			// the root exportErr to tell the caller the backup didn't finish.
 			_ = os.Remove(tempFile)
 		}
 	}()
 
-	var totalEntries int
+	var totalEntries int64
 
 	// Use a read-only View transaction to atomically copy the entire database.
 	// tx.WriteTo streams the database file format directly, preserving all buckets,
@@ -109,9 +113,9 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 
 		// Capture entry count before WriteTo (Stats() is only valid during transaction).
 		// Must read stats while transaction is active, before WriteTo consumes it.
-		totalEntries = bucket.Stats().KeyN
+		totalEntries = int64(bucket.Stats().KeyN)
 
-		// WriteTo streams the entire BoltDB file format to the writer.
+		// WriteTo streams the entire bbolt file format to the writer.
 		// This includes all buckets, pages, and metadata in a consistent snapshot.
 		// More efficient than iterating entries: copies raw database pages directly.
 		if _, err := tx.WriteTo(tempHandle); err != nil {
@@ -139,11 +143,11 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 
 	info, err := os.Stat(tempFile)
 	if err != nil {
-		exportErr = fmt.Errorf("%w: %w", ErrBoltDBSnapshotStatFailed, err)
+		exportErr = fmt.Errorf("%w: %w", ErrBBoltSnapshotStatFailed, err)
 		return nil, exportErr
 	}
 
-	//nolint:forbidigo // rename required for atomic replacement.
+	//nolint:forbidigo // file I/O is required for renaming the temporary file to the destination file.
 	if err := os.Rename(tempFile, destination); err != nil {
 		exportErr = fmt.Errorf("%w: %w", ErrBackupFinalizeFailed, err)
 		return nil, exportErr
@@ -157,7 +161,7 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 }
 
 // Restore replaces the disk store contents with entries from a snapshot file.
-// The restore is performed inside a single Bolt write transaction for atomicity.
+// The restore is performed inside a single bbolt write transaction for atomicity.
 func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 	if opts == nil {
 		return nil, ErrRestoreOptionsNil
@@ -173,13 +177,8 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 
 	// Fast path: if restoring from the same file (self-reference), return metadata
 	// without copying. This avoids unnecessary work when snapshot path matches store path.
-	if absSnapshotPath, err := filepath.Abs(opts.FileName); err == nil && absSnapshotPath == s.path {
-		totalEntries, err := s.diskKeyCount()
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrDiskStoreCountFailed, err)
-		}
-
-		return &RestoreSummary{TotalEntries: totalEntries}, nil
+	if summary, done := s.tryDiskSelfRestore(opts.FileName); done {
+		return summary, nil
 	}
 
 	snapshotDB, err := bolt.Open(opts.FileName, 0o600, &bolt.Options{ReadOnly: true})
@@ -189,12 +188,48 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 
 	defer snapshotDB.Close()
 
+	totalEntries, err := s.restoreFromSnapshotDB(snapshotDB, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.trackKeys {
+		if err := s.RebuildKeyList(); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrKeyListRebuildFailed, err)
+		}
+	}
+
+	return &RestoreSummary{
+		TotalEntries: totalEntries,
+	}, nil
+}
+
+// tryDiskSelfRestore checks if the snapshot path matches the store path.
+// Returns (summary, true) if self-restore, (nil, false) otherwise.
+func (s *DiskStore) tryDiskSelfRestore(snapshotPath string) (*RestoreSummary, bool) {
+	absSnapshotPath, err := filepath.Abs(snapshotPath)
+	if err != nil || absSnapshotPath != s.path {
+		return nil, false
+	}
+
+	totalEntries, err := s.diskKeyCount()
+	if err != nil {
+		return nil, false
+	}
+
+	return &RestoreSummary{
+		TotalEntries: totalEntries,
+	}, true
+}
+
+// restoreFromSnapshotDB performs the actual restore from an opened snapshot database.
+func (s *DiskStore) restoreFromSnapshotDB(snapshotDB *bolt.DB, opts *RestoreOptions) (int64, error) {
 	budget := &restoreBudget{
 		maxEntries: opts.MaxEntries,
 		maxBytes:   opts.MaxBytes,
 	}
 
-	var totalEntries int
+	var totalEntries int64
 
 	// Perform restore in a single write transaction for atomicity.
 	// If restore fails partway through, the entire operation rolls back.
@@ -213,12 +248,12 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 
 		// Nested transaction pattern: read from snapshot DB (read-only View)
 		// while writing to destination DB (write Update). This is safe because
-		// BoltDB allows concurrent read transactions from different DB handles.
+		// bbolt allows concurrent read transactions from different DB handles.
 		// The snapshot DB is opened read-only, so no write conflicts can occur.
 		return snapshotDB.View(func(snapshotTx *bolt.Tx) error {
-			srcBucket := snapshotTx.Bucket(defaultBoltDBBucketBytes)
+			srcBucket := snapshotTx.Bucket(defaultBBoltBucketBytes)
 			if srcBucket == nil {
-				return fmt.Errorf("%w: %q", ErrBucketNotFound, defaultBoltDBBucketBytes)
+				return fmt.Errorf("%w: %q", ErrBucketNotFound, defaultBBoltBucketBytes)
 			}
 
 			// Copy all entries from snapshot bucket to destination bucket.
@@ -238,23 +273,15 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 			})
 		})
 	}); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSnapshotReadFailed, err)
+		return 0, fmt.Errorf("%w: %w", ErrSnapshotReadFailed, err)
 	}
 
-	if s.trackKeys {
-		if err := s.RebuildKeyList(); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrKeyListRebuildFailed, err)
-		}
-	}
-
-	return &RestoreSummary{
-		TotalEntries: totalEntries,
-	}, nil
+	return totalEntries, nil
 }
 
 // diskKeyCount returns the number of keys in the disk store's bucket.
-// Uses BoltDB's Stats().KeyN for O(1) counting without iterating entries.
-func (s *DiskStore) diskKeyCount() (int, error) {
+// Uses bbolt's Stats().KeyN for O(1) counting without iterating entries.
+func (s *DiskStore) diskKeyCount() (int64, error) {
 	var count int
 
 	err := s.handle.View(func(tx *bolt.Tx) error {
@@ -271,5 +298,5 @@ func (s *DiskStore) diskKeyCount() (int, error) {
 		return 0, err
 	}
 
-	return count, nil
+	return int64(count), nil
 }

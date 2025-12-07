@@ -13,7 +13,7 @@
 >
 > All code is licensed under **GNU AGPL v3.0**.
 
-A k6 extension providing a persistent key-value store to share state across Virtual Users (VUs). Supports both **in-memory** and **persistent BoltDB** backends, deterministic `list()` ordering, and high-level atomic helpers designed for safe concurrent access in load tests.
+A k6 extension providing a persistent key-value store to share state across Virtual Users (VUs). Supports both **in-memory** and **persistent bbolt** backends, deterministic `list()` ordering, and high-level atomic helpers designed for safe concurrent access in load tests.
 
 ## Features
 
@@ -23,13 +23,14 @@ A k6 extension providing a persistent key-value store to share state across Virt
 - 🎲 **Random Key Selection**: Uniform sampling with optional prefix filtering
 - 🔍 **Key Tracking**: Optional O(1) random key access via in-memory indexing
 - 🏷️ **Prefix Support**: Filter operations by key prefixes
-- 📦 **Stable Bolt Bucket**: Disk backend always uses the `k6` bucket (**original upstream bug tied it to the DB path and could orphan data - now fixed**)
+- 📦 **Stable bbolt Bucket**: Disk backend always uses the `k6` bucket (**original upstream bug tied it to the DB path and could orphan data - now fixed**)
 - 🧭 **Cursor Scanning**: Stream large datasets via `scan()` with continuation tokens
 - 📝 **Serialization**: JSON or string serialization
-- 💾 **Snapshots**: Export/import Bolt files for backups and data seeding
+- 💾 **Snapshots**: Export/import bbolt files for backups and data seeding
 - 📘 **TypeScript Support**: Full type declarations for IntelliSense and type safety
 - ⚡ **High Performance**: Optimized for concurrent workloads
 - 🔀 **Automatic Sharding**: Memory backend automatically shards data across CPU cores for 2-3.5x performance gains on multi-core systems
+- 🧰 **bbolt tuning knobs**: Exposes timeout, noSync/noGrowSync/noFreelistSync, freelist type, preLoadFreelist, initial mmap size, and mlock so advanced users can dial back fsync overhead when durability trade-offs are acceptable
 
 ## Installation
 
@@ -136,9 +137,9 @@ try {
 
 High-level categories:
 
-- **Options & inputs** – typed guards such as `BackupOptionsRequiredError`, `ValueNumberRequiredError`, `UnsupportedValueTypeError`.
-- **Concurrency & lifecycle** – e.g. `BackupInProgressError`, `RestoreInProgressError`, `StoreClosedError`.
-- **Disk & snapshot IO** – precise signals for path issues, permission problems, Bolt failures, or restore budget overruns.
+- **Options & inputs** - typed guards such as `BackupOptionsRequiredError`, `ValueNumberRequiredError`, `UnsupportedValueTypeError`.
+- **Concurrency & lifecycle** - e.g. `BackupInProgressError`, `RestoreInProgressError`, `StoreClosedError`.
+- **Disk & snapshot IO** - precise signals for path issues, permission problems, bbolt failures, or restore budget overruns.
 
 📚 A complete catalogue with root causes and remediation tips lives in [`examples/README.md`](./examples/README.md#error-manual).
 
@@ -159,30 +160,46 @@ interface OpenKvOptions {
   path?: string                      // default: "./.k6.kv" (disk only)
   serialization?: "json" | "string"  // default: "json"
   trackKeys?: boolean                // default: false
-  shardCount?: number                // default: 0 (auto-detect, memory only)
+  memory?: {
+    shardCount?: number              // default: 0 (auto-detect, memory only)
+    // when omitted: defaults are applied
+  }
+  disk?: {
+    timeout?: number | string         // wait for file lock; number=ms, string=Go duration (e.g. "1s"); default 1s
+    noSync?: boolean                  // disable fsync on commit; default false
+    noGrowSync?: boolean              // skip fsync on growth; default false
+    noFreelistSync?: boolean          // rebuild freelist on open; default false
+    preLoadFreelist?: boolean         // load freelist into memory; default false
+    freelistType?: "" | "array" | "map" // freelist representation; default "array"
+    readOnly?: boolean                // open DB read-only; default false
+    initialMmapSize?: number | string // initial mmap size; number=bytes, string supports SI ("MB") and IEC ("MiB"); 0 keeps default/no preallocation (default)
+    mlock?: boolean                   // mlock pages (UNIX); default false
+    // when omitted: bbolt defaults are applied
+  }
 }
 ```
 
 **Options:**
 
-- `backend`: `"memory"` (ephemeral, fastest) or `"disk"` (persistent BoltDB)
+- `backend`: `"memory"` (ephemeral, fastest) or `"disk"` (persistent bbolt)
 - `serialization`: `"json"` (structured) or `"string"` (raw bytes)
 - `trackKeys`: Enable in-memory key indexing for O(1) `randomKey()` performance
-- `path`: (Disk only) Override BoltDB file location
-- `shardCount`: (Memory only) Number of shards for concurrent performance. If `<= 0` or omitted, defaults to `runtime.NumCPU()` (automatic, recommended). If `> 65536`, automatically capped at 65536. Ignored by disk backend.
+- `path`: (Disk only) Override bbolt file location
+- `memory.shardCount`: (Memory only) Number of shards for concurrent performance. If `<= 0` or omitted, defaults to `runtime.NumCPU()` (automatic, recommended). If `> 65536`, automatically capped at 65536. Ignored by disk backend. When `memory` is omitted, defaults are applied.
+- `disk`: (Disk only) Optional bbolt tuning. When `disk` is omitted, bbolt defaults apply (1s lock timeout, syncs enabled, array freelist, etc.).
 
 **Memory Backend Sharding:**
 
 The memory backend shards data across multiple internal partitions to improve concurrent performance by reducing lock contention:
 
-- **Automatic (recommended)**: Set `shardCount: 0` or omit it to auto-detect based on CPU count (e.g., 32 shards on a 32-core system)
-- **Manual**: Set `shardCount` to a specific value (1-65536) for fine-tuned control
+- **Automatic (recommended)**: Set `memory.shardCount: 0` (or omit) to auto-detect based on CPU count (e.g., 32 shards on a 32-core system)
+- **Manual**: Set `memory.shardCount` to a specific value (1-65536) for fine-tuned control
 - **Performance**: On high-core systems sharding delivers:
   - **3.5x faster** `set()` operations
   - **2x faster** `get()` operations
 - **How it works**: Keys are distributed across shards using a hash function, allowing concurrent operations on different shards to proceed in parallel
 - **Maximum**: Shard count is capped at 65536 (2^16) to provide excellent hash distribution while keeping memory overhead minimal (~5MB for empty shard structures)
-- **Memory-only**: Sharding applies only to the `"memory"` backend; disk backend uses BoltDB's transaction-based concurrency
+- **Memory-only**: Sharding applies only to the `"memory"` backend; disk backend uses bbolt's transaction-based concurrency
 
 ### KV Methods
 
@@ -248,7 +265,7 @@ All methods return Promises except `close()`.
 #### Snapshot Operations
 
 - **`backup(options?: BackupOptions): Promise<BackupSummary>`**  
-  Writes the current dataset to a BoltDB file. Always set `fileName` (leaving it blank points at the backend’s live Bolt file) and use `allowConcurrentWrites: true` for a best-effort dump that releases writers sooner (summary includes `bestEffort` + `warning` so you can alarm on it).
+  Writes the current dataset to a bbolt file. Always set `fileName` (leaving it blank points at the backend’s live bbolt file) and use `allowConcurrentWrites: true` for a best-effort dump that releases writers sooner (summary includes `bestEffort` + `warning` so you can alarm on it).
 
 - **`restore(options?: RestoreOptions): Promise<RestoreSummary>`**  
   Replaces the dataset with a snapshot produced by `backup()`. Optional `maxEntries` / `maxBytes` guards protect against oversized or corrupted inputs.
@@ -262,7 +279,7 @@ await kv.backup({
 await kv.restore({ fileName: "./backups/kv-latest.kv" });
 ```
 
-> **Disk backend note:** pointing `fileName` at the live BoltDB path is treated as a no-op (backup just returns metadata; restore leaves the DB untouched), so always write to / read from a different file.
+> **Disk backend note:** pointing `fileName` at the live bbolt path is treated as a no-op (backup just returns metadata; restore leaves the DB untouched), so always write to / read from a different file.
 
 - **`close(): void`** - Synchronously closes the store. Call in `teardown()`.
 

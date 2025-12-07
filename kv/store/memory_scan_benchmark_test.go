@@ -17,7 +17,8 @@ func BenchmarkMemoryStore_Scan(b *testing.B) {
 
 	for _, trackKeys := range []bool{true, false} {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 
 			b.StopTimer()
 

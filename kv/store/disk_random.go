@@ -14,7 +14,7 @@ import (
 //   - trackKeys = true:
 //     prefix==""  -> O(1) from keysList.
 //     prefix!=""  -> O(log n) via OSTree.
-//   - trackKeys = false -> two-pass scan over BoltDB cursor.
+//   - trackKeys = false -> two-pass scan over bbolt cursor.
 func (s *DiskStore) RandomKey(prefix string) (string, error) {
 	if err := s.ensureOpen(); err != nil {
 		return "", err
@@ -74,7 +74,7 @@ func (s *DiskStore) removeKeyIndexLocked(key string) {
 	}
 }
 
-// rebuildKeyListLocked scans Bolt and rebuilds keysList/keysMap and the OSTree.
+// rebuildKeyListLocked scans bbolt and rebuilds keysList/keysMap and the OSTree.
 // Caller must hold keysLock.
 func (s *DiskStore) rebuildKeyListLocked() error {
 	newKeys := []string{}
@@ -149,7 +149,7 @@ func (s *DiskStore) randomKeyWithTracking(prefix string) (string, error) {
 	return "", nil
 }
 
-// randomKeyWithoutTracking performs a two-pass prefix scan over Bolt:
+// randomKeyWithoutTracking performs a two-pass prefix scan over bbolt:
 // 1) count matching keys;
 // 2) pick the r-th and iterate again to select it.
 func (s *DiskStore) randomKeyWithoutTracking(prefix string) (string, error) {
@@ -165,7 +165,7 @@ func (s *DiskStore) randomKeyWithoutTracking(prefix string) (string, error) {
 	return s.getKeyByIndex(prefix, target)
 }
 
-// countKeys counts how many keys match a given prefix using a BoltDB cursor.
+// countKeys counts how many keys match a given prefix using a bbolt cursor.
 // When prefix == "", we can return KeyN directly from stats.
 func (s *DiskStore) countKeys(prefix string) (int64, error) {
 	var count int64
@@ -176,7 +176,7 @@ func (s *DiskStore) countKeys(prefix string) (int64, error) {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
-		// Fast path: no prefix means count all keys, use BoltDB stats (O(1)).
+		// Fast path: no prefix means count all keys, use bbolt stats (O(1)).
 		if prefix == "" {
 			count = int64(b.Stats().KeyN)
 
@@ -188,6 +188,8 @@ func (s *DiskStore) countKeys(prefix string) (int64, error) {
 
 		// Iterate from prefix start until we leave the prefix range.
 		// Cursor maintains lexicographic order, so we can break once prefix no longer matches.
+		// Cursor.Next/Seek return both key and value; this matcher only needs keys,
+		// so we intentionally ignore the value part of the tuple.
 		for k, _ := c.Seek([]byte(prefix)); k != nil; k, _ = c.Next() {
 			if !bytes.HasPrefix(k, p) {
 				break
@@ -225,6 +227,8 @@ func (s *DiskStore) getKeyByIndex(prefix string, index int64) (string, error) {
 		p := []byte(prefix)
 
 		// Iterate through matching keys until we reach the target index.
+		// Cursor iteration yields both key and value; the random selector only
+		// cares about keys, so the value is deliberately ignored.
 		for k, _ := c.Seek([]byte(prefix)); k != nil; k, _ = c.Next() {
 			if prefix != "" && !bytes.HasPrefix(k, p) {
 				break

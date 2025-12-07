@@ -162,7 +162,7 @@ export default async function backupRestoreConcurrencyTest() {
 
       console.log(`concurrent backup summary: ${JSON.stringify(concurrentSummary)}`);
 
-      // For disk backend, BoltDB transactions always provide consistent snapshots,
+      // For disk backend, bbolt transactions always provide consistent snapshots,
       // so bestEffort will be false even when allowConcurrentWrites=true.
       // For memory backend, bestEffort reflects the allowConcurrentWrites flag.
       check(concurrentSummary, {

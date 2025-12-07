@@ -21,11 +21,11 @@ type Serializer interface {
 type JSONSerializer struct{}
 
 // Ensure JSONSerializer implements the Serializer interface.
-var _ Serializer = &JSONSerializer{}
+var _ Serializer = new(JSONSerializer)
 
 // NewJSONSerializer creates a new JSONSerializer.
 func NewJSONSerializer() *JSONSerializer {
-	return &JSONSerializer{}
+	return new(JSONSerializer)
 }
 
 // Serialize converts a value to a JSON byte slice.
@@ -64,7 +64,7 @@ var _ Serializer = new(StringSerializer)
 
 // NewStringSerializer creates a new StringSerializer.
 func NewStringSerializer() *StringSerializer {
-	return &StringSerializer{}
+	return new(StringSerializer)
 }
 
 // Serialize converts a value to a string and then to bytes.

@@ -13,7 +13,8 @@ import (
 func TestMemoryStore_RandomKey_Distribution_WithTracking(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 
 	key, err := store.RandomKey("")
 	require.NoError(t, err)
@@ -44,7 +45,8 @@ func TestMemoryStore_RandomKey_Distribution_WithTracking(t *testing.T) {
 func TestMemoryStore_RandomKey_Distribution_NoTracking(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(false, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: false}
+	store := NewMemoryStore(memoryCfg)
 
 	key, err := store.RandomKey("")
 	require.NoError(t, err)
@@ -76,7 +78,8 @@ func TestMemoryStore_RandomKey_Distribution_NoTracking(t *testing.T) {
 func TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 
 	key, err := store.RandomKey("a:")
 	require.NoError(t, err)
@@ -116,7 +119,8 @@ func TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
 func TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(false, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: false}
+	store := NewMemoryStore(memoryCfg)
 
 	key, err := store.RandomKey("a:")
 	require.NoError(t, err)

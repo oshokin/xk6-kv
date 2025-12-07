@@ -1,4 +1,4 @@
-// Demonstrates how to capture a Bolt snapshot via kv.backup() and later
+// Demonstrates how to capture a bbolt snapshot via kv.backup() and later
 // kv.restore() it to roll the dataset back to a known-good state.
 //
 // Highlights:

@@ -23,7 +23,7 @@ declare module 'k6/x/kv' {
   /**
    * Storage backend type.
    * - `"memory"`: Fast, ephemeral storage shared across VUs (lost between runs)
-   * - `"disk"`: Persistent BoltDB-based storage (survives between runs)
+   * - `"disk"`: Persistent bbolt-based storage (survives between runs)
    */
   export type Backend = 'memory' | 'disk';
 
@@ -46,7 +46,7 @@ declare module 'k6/x/kv' {
     backend?: Backend;
 
     /**
-     * Path to the BoltDB file (disk backend only).
+     * Path to the bbolt file (disk backend only).
      * Ignored when backend is "memory".
      * @default "./.k6.kv"
      */
@@ -70,18 +70,83 @@ declare module 'k6/x/kv' {
     trackKeys?: boolean;
 
     /**
-     * Number of shards for the memory backend (memory backend only).
-     * - If <= 0 or omitted: defaults to runtime.NumCPU() (automatic, recommended)
-     * - If > 65536: automatically capped at 65536 (MaxShardCount)
-     * - Ignored by disk backend
-     * 
+     * Memory backend specific settings.
+     */
+    memory?: MemoryOptions;
+
+    /**
+     * Disk backend specific settings.
+     */
+    disk?: DiskOptions;
+  }
+
+  /**
+   * Memory backend configuration.
+   */
+  export interface MemoryOptions {
+    /**
+     * Number of shards for the memory backend.
+     * - If <= 0 or omitted: defaults to runtime.NumCPU() (automatic, recommended).
+     * - If > 65536: automatically capped at 65536 (MaxShardCount).
+     *
      * Sharding improves concurrent performance by reducing lock contention.
-     * On high-core systems (e.g., AMD Ryzen 9 9950X with 32 cores), 
+     * On high-core systems (e.g., AMD Ryzen 9 9950X with 32 cores),
      * automatic sharding delivers 3.5x faster writes and 2x faster reads.
-     * 
-     * @default 0 (auto-detect based on CPU count)
+     *
+     * @default 0 (auto-detect based on CPU count).
      */
     shardCount?: number;
+  }
+
+  /**
+   * Disk backend configuration (subset of bbolt options).
+   */
+  export interface DiskOptions {
+    /**
+     * How long to wait for the file lock.
+     * - number: milliseconds (e.g., 250, 1000).
+     * - string: Go duration with units like "ms", "s", "m", "h" (e.g., "500ms", "1s", "2m", "1h15m").
+     */
+    timeout?: number | string;
+    /**
+     * Skip fsync on each commit. Improves throughput but risks recent data on crash.
+     */
+    noSync?: boolean;
+    /**
+     * Skip fsync when the file grows. Performance vs durability trade-off.
+     */
+    noGrowSync?: boolean;
+    /**
+     * Rebuild freelist on open instead of syncing it. Faster writes; slower recovery.
+     */
+    noFreelistSync?: boolean;
+    /**
+     * Preload freelist into memory on open. Uses more RAM, speeds subsequent writes.
+     */
+    preLoadFreelist?: boolean;
+    /**
+     * Freelist representation.
+     * - "array" (default)
+     * - "map" for large/fragmented DBs
+     */
+    freelistType?: '' | 'array' | 'map';
+    /**
+     * Open database read-only.
+     */
+    readOnly?: boolean;
+    /**
+     * Initial mmap size in bytes. 
+     * Number = raw bytes. String supports human-friendly suffixes:
+     * - Decimal: KB/MB/GB/TB/PB/EB/ZB/YB (e.g., "64MB" = 64_000_000).
+     * - Binary: KiB/MiB/GiB/TiB/PiB/EiB/ZiB/YiB (e.g., "64MiB" = 67_108_864).
+     * Other examples: "1GiB", "512MiB", "1GB", "4TB", "256KiB".
+     * Use 0 to keep bbolt default (no preallocation).
+     */
+    initialMmapSize?: number | string;
+    /**
+     * Attempt to mlock the database pages (UNIX only).
+     */
+    mlock?: boolean;
   }
 
   /**
@@ -138,8 +203,8 @@ declare module 'k6/x/kv' {
    */
   export interface BackupOptions {
     /**
-     * Destination path for the Bolt snapshot file.
-     * Required unless you intentionally want to overwrite the backend's live Bolt file.
+     * Destination path for the bbolt snapshot file.
+     * Required unless you intentionally want to overwrite the backend's live bbolt file.
      */
     fileName?: string;
 
@@ -169,8 +234,8 @@ declare module 'k6/x/kv' {
    */
   export interface RestoreOptions {
     /**
-     * Path to the Bolt snapshot file produced by backup().
-     * Required unless you intentionally want to restore from the backend's live Bolt file.
+     * Path to the bbolt snapshot file produced by backup().
+     * Required unless you intentionally want to restore from the backend's live bbolt file.
      */
     fileName?: string;
 
@@ -574,7 +639,7 @@ declare module 'k6/x/kv' {
     // ==================== Snapshot Operations ====================
 
     /**
-     * Streams the current store contents into a BoltDB snapshot on disk.
+     * Streams the current store contents into a bbolt snapshot on disk.
      * When the disk backend is asked to back up to its own DB path the call
      * succeeds but only returns metadata (no copy is produced).
      *
@@ -598,7 +663,7 @@ declare module 'k6/x/kv' {
      * Synchronously closes the underlying store and releases resources.
      * Should be called in teardown() when done with the store.
      *
-     * - Disk backend: releases BoltDB file handle and in-memory indexes
+     * - Disk backend: releases bbolt file handle and in-memory indexes
      * - Memory backend: no-op (safe to call, does nothing)
      * - Safe to call multiple times
      * - Reference-counted: store closes only when last close() is called
@@ -633,8 +698,7 @@ declare module 'k6/x/kv' {
    * // In-memory backend with key tracking
    * const kv = openKv({
    *   backend: 'memory',
-   *   trackKeys: true,
-   *   shardCount: 0
+   *   trackKeys: true
    * });
    *
    * // Disk backend with custom path

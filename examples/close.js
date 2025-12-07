@@ -18,7 +18,7 @@ export default async function () {
 }
 
 export async function teardown() {
-  // Explicitly close to release BoltDB file handles and any in-memory indexes.
+  // Explicitly close to release bbolt file handles and any in-memory indexes.
   kv.close();
 
   // Optional: a second close() should be safe/no-op in a ref-counted scenario.

@@ -7,7 +7,7 @@
 import { openKv } from "k6/x/kv";
 import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";
 
-// Use the persistent BoltDB-backed store (data can persist between runs).
+// Use the persistent bbolt-backed store (data can persist between runs).
 const kv = openKv({ backend: "disk" });
 
 export async function setup() {

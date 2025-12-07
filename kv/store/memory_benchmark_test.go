@@ -19,7 +19,8 @@ func BenchmarkMemoryStore_Get(b *testing.B) {
 
 			const totalSeedKeys = 1000
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 
 			b.StopTimer()
 			seedMemoryStore(b, store, totalSeedKeys, "key-")
@@ -40,7 +41,8 @@ func BenchmarkMemoryStore_Set(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 
 			b.ResetTimer()
 
@@ -59,7 +61,8 @@ func BenchmarkMemoryStore_IncrementBy(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 
 			b.ResetTimer()
 
@@ -77,7 +80,8 @@ func BenchmarkMemoryStore_GetOrSet(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 
 			b.ResetTimer()
 
@@ -97,7 +101,8 @@ func BenchmarkMemoryStore_Swap(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 
 			b.ResetTimer()
 
@@ -115,7 +120,8 @@ func BenchmarkMemoryStore_CompareAndSwap(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 			require.NoError(b, store.Set("k", "0"))
 
 			b.ResetTimer()
@@ -132,7 +138,8 @@ func BenchmarkMemoryStore_CompareAndSwap(b *testing.B) {
 func BenchmarkMemoryStore_CompareAndSwap_Contention(b *testing.B) {
 	b.ReportAllocs()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 	require.NoError(b, store.Set("k", "v0"))
 
 	b.ResetTimer()
@@ -155,7 +162,12 @@ func BenchmarkMemoryStore_ShardsParallelSet(b *testing.B) {
 		b.Run(fmt.Sprintf("shards=%d", shardCount), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(false, shardCount)
+			memoryCfg := &MemoryConfig{
+				TrackKeys:  false,
+				ShardCount: shardCount,
+			}
+
+			store := NewMemoryStore(memoryCfg)
 
 			b.StopTimer()
 
@@ -192,7 +204,12 @@ func BenchmarkMemoryStore_ShardsParallelGet(b *testing.B) {
 		b.Run(fmt.Sprintf("shards=%d", shardCount), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(false, shardCount)
+			memoryCfg := &MemoryConfig{
+				TrackKeys:  false,
+				ShardCount: shardCount,
+			}
+
+			store := NewMemoryStore(memoryCfg)
 
 			b.StopTimer()
 
@@ -224,7 +241,8 @@ func BenchmarkMemoryStore_Delete(b *testing.B) {
 		b.Run(fmt.Sprintf("Size=%d", totalSize), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(true, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: true}
+			store := NewMemoryStore(memoryCfg)
 
 			b.StopTimer()
 			seedMemoryStore(b, store, totalSize, "key-")
@@ -257,7 +275,8 @@ func BenchmarkMemoryStore_Exists(b *testing.B) {
 
 			const totalSeedKeys = 1000
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 
 			b.StopTimer()
 			seedMemoryStore(b, store, totalSeedKeys, "key-")
@@ -279,7 +298,8 @@ func BenchmarkMemoryStore_DeleteIfExists(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 			require.NoError(b, store.Set("k", "v"))
 
 			b.ResetTimer()
@@ -305,7 +325,8 @@ func BenchmarkMemoryStore_CompareAndDelete(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 			require.NoError(b, store.Set("k", "v"))
 
 			b.ResetTimer()
@@ -331,7 +352,8 @@ func BenchmarkMemoryStore_List(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 
 			b.StopTimer()
 			seedMemoryStore(b, store, 1000, "key-")
@@ -385,7 +407,8 @@ func BenchmarkMemoryStore_List(b *testing.B) {
 func BenchmarkMemoryStore_Concurrent(b *testing.B) {
 	b.ReportAllocs()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 
 	b.StopTimer()
 	seedMemoryStore(b, store, 1000, "key-")
@@ -415,7 +438,8 @@ func BenchmarkMemoryStore_Concurrent(b *testing.B) {
 func BenchmarkMemoryStore_AtomicConcurrent(b *testing.B) {
 	b.ReportAllocs()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 
 	b.RunParallel(func(parallelBench *testing.PB) {
 		var i int

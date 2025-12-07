@@ -23,7 +23,8 @@ import (
 func TestMemoryStore_Backup_UsesUniqueTempFiles(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 	require.NoError(t, store.Set("key", "value"))
 
 	tempDir := t.TempDir()
@@ -32,7 +33,7 @@ func TestMemoryStore_Backup_UsesUniqueTempFiles(t *testing.T) {
 	_, err := store.Backup(&BackupOptions{FileName: target})
 	require.NoError(t, err)
 
-	//nolint:forbidigo // test needs to read directory.
+	//nolint:forbidigo // file I/O is required for reading the directory.
 	entries, err := os.ReadDir(tempDir)
 	require.NoError(t, err)
 
@@ -41,12 +42,13 @@ func TestMemoryStore_Backup_UsesUniqueTempFiles(t *testing.T) {
 	}
 }
 
-// TestMemoryStore_Backup_CreatesBoltSnapshot verifies that Backup creates a valid
-// BoltDB snapshot file containing all key-value pairs from the store.
-func TestMemoryStore_Backup_CreatesBoltSnapshot(t *testing.T) {
+// TestMemoryStore_Backup_CreatesBBoltSnapshot verifies that Backup creates a valid
+// bbolt snapshot file containing all key-value pairs from the store.
+func TestMemoryStore_Backup_CreatesBBoltSnapshot(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 	require.NoError(t, store.Set("alpha", "1"))
 	require.NoError(t, store.Set("beta", "2"))
 	require.NoError(t, store.Set("gamma", "3"))
@@ -55,7 +57,7 @@ func TestMemoryStore_Backup_CreatesBoltSnapshot(t *testing.T) {
 
 	summary, err := store.Backup(&BackupOptions{FileName: target})
 	require.NoError(t, err)
-	assert.Equal(t, 3, summary.TotalEntries)
+	assert.EqualValues(t, 3, summary.TotalEntries)
 	assert.FileExists(t, target)
 
 	db, err := bolt.Open(target, 0o600, &bolt.Options{ReadOnly: true})
@@ -66,7 +68,7 @@ func TestMemoryStore_Backup_CreatesBoltSnapshot(t *testing.T) {
 	collected := map[string][]byte{}
 
 	err = db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(defaultBoltDBBucketBytes)
+		bucket := tx.Bucket(defaultBBoltBucketBytes)
 		require.NotNil(t, bucket, "snapshot bucket should exist")
 
 		return bucket.ForEach(func(k, v []byte) error {
@@ -88,7 +90,8 @@ func TestMemoryStore_Backup_CreatesBoltSnapshot(t *testing.T) {
 func TestMemoryStore_Backup_BlocksMutations(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 	require.NoError(t, store.Set("initial", "value"))
 
 	target := filepath.Join(t.TempDir(), "blocking.kv")
@@ -120,7 +123,8 @@ func TestMemoryStore_Backup_BlocksMutations(t *testing.T) {
 func TestMemoryStore_Backup_AllowConcurrentWrites(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(false, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: false}
+	store := NewMemoryStore(memoryCfg)
 	require.NoError(t, store.Set("initial", "value"))
 
 	target := filepath.Join(t.TempDir(), "concurrent.kv")
@@ -139,13 +143,14 @@ func TestMemoryStore_Backup_AllowConcurrentWrites(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
-// TestMemoryStore_Backup_AllowConcurrentWritesWarningPropagated verifies that the
+// TestMemoryStore_Backup_AllowConcurrentWrites_WarningPropagated verifies that the
 // BestEffort flag and warning message are properly set in the summary when
 // AllowConcurrentWrites is enabled, and absent when disabled.
 func TestMemoryStore_Backup_AllowConcurrentWrites_WarningPropagated(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(false, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: false}
+	store := NewMemoryStore(memoryCfg)
 	require.NoError(t, store.Set("key", "value"))
 
 	bestEffortPath := filepath.Join(t.TempDir(), "best-effort.kv")
@@ -173,7 +178,8 @@ func TestMemoryStore_Backup_AllowConcurrentWrites_WarningPropagated(t *testing.T
 func TestMemoryStore_Backup_AllowConcurrentWrites_StreamingMemoryFootprint(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(false, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: false}
+	store := NewMemoryStore(memoryCfg)
 	payload := bytes.Repeat([]byte("x"), 64)
 
 	const keyCount = 120_000
@@ -213,7 +219,9 @@ func TestMemoryStore_Backup_AllowConcurrentWrites_StreamingMemoryFootprint(t *te
 func TestMemoryStore_Restore_HonorsMaxEntries(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(false, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: false}
+
+	store := NewMemoryStore(memoryCfg)
 	for i := range 3 {
 		require.NoError(t, store.Set(fmt.Sprintf("k%d", i), "v"))
 	}
@@ -222,8 +230,8 @@ func TestMemoryStore_Restore_HonorsMaxEntries(t *testing.T) {
 	_, err := store.Backup(&BackupOptions{FileName: target})
 	require.NoError(t, err)
 
-	dest := NewMemoryStore(false, 0)
-	_, err = dest.Restore(&RestoreOptions{
+	destination := NewMemoryStore(memoryCfg)
+	_, err = destination.Restore(&RestoreOptions{
 		FileName:   target,
 		MaxEntries: 2,
 	})
@@ -236,15 +244,16 @@ func TestMemoryStore_Restore_HonorsMaxEntries(t *testing.T) {
 func TestMemoryStore_Restore_HonorsMaxBytes(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(false, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: false}
+	store := NewMemoryStore(memoryCfg)
 	require.NoError(t, store.Set("k1", strings.Repeat("x", 4)))
 
 	target := filepath.Join(t.TempDir(), "max-bytes.kv")
 	_, err := store.Backup(&BackupOptions{FileName: target})
 	require.NoError(t, err)
 
-	dest := NewMemoryStore(false, 0)
-	_, err = dest.Restore(&RestoreOptions{
+	destination := NewMemoryStore(memoryCfg)
+	_, err = destination.Restore(&RestoreOptions{
 		FileName: target,
 		MaxBytes: 3, // smaller than key+value.
 	})
@@ -257,11 +266,12 @@ func TestMemoryStore_Restore_HonorsMaxBytes(t *testing.T) {
 func TestMemoryStore_Restore_InvalidSnapshot(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(false, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: false}
+	store := NewMemoryStore(memoryCfg)
 
 	target := filepath.Join(t.TempDir(), "invalid.kv")
 
-	//nolint:forbidigo // test needs to write invalid file.
+	//nolint:forbidigo // file I/O is required for writing the invalid file.
 	require.NoError(t, os.WriteFile(target, []byte("not a bolt file"), 0o644))
 
 	_, err := store.Restore(&RestoreOptions{FileName: target})
@@ -273,7 +283,8 @@ func TestMemoryStore_Restore_InvalidSnapshot(t *testing.T) {
 func TestMemoryStore_Restore_BlocksMutationsDuringRestore(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 	require.NoError(t, store.Set("k1", "v1"))
 
 	exportPath := filepath.Join(t.TempDir(), "snapshot.kv")
@@ -312,7 +323,8 @@ func TestMemoryStore_Restore_BlocksMutationsDuringRestore(t *testing.T) {
 func TestMemoryStore_Restore_BlocksConcurrentBackup(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 	require.NoError(t, store.Set("k1", "v1"))
 
 	exportPath := filepath.Join(t.TempDir(), "snapshot.kv")
@@ -353,7 +365,8 @@ func TestMemoryStore_Restore_BlocksConcurrentBackup(t *testing.T) {
 func TestMemoryStore_Restore_PreventsDataLoss(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 	require.NoError(t, store.Set("k1", "v1"))
 
 	exportPath := filepath.Join(t.TempDir(), "snapshot.kv")
@@ -421,54 +434,63 @@ func TestMemoryStore_Restore_PreventsDataLoss(t *testing.T) {
 func TestMemoryStore_Restore_ConcurrentOperations_Serialized(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 
 	// Create two different snapshots.
-	require.NoError(t, store.Set("k1", "v1"))
+	tempDir := t.TempDir()
+	snapshots := []struct {
+		id    string
+		key   string
+		value string
+		path  string
+	}{
+		{
+			id:    "snapshot1",
+			key:   "k1",
+			value: "v1",
+			path:  filepath.Join(tempDir, "snapshot1.kv"),
+		},
+		{
+			id:    "snapshot2",
+			key:   "k2",
+			value: "v2",
+			path:  filepath.Join(tempDir, "snapshot2.kv"),
+		},
+	}
 
-	exportPath1 := filepath.Join(t.TempDir(), "snapshot1.kv")
-	_, err := store.Backup(&BackupOptions{FileName: exportPath1})
-	require.NoError(t, err)
+	for i, snap := range snapshots {
+		require.NoError(t, store.Set(snap.key, snap.value))
 
-	require.NoError(t, store.Clear())
-	require.NoError(t, store.Set("k2", "v2"))
+		_, err := store.Backup(&BackupOptions{FileName: snap.path})
+		require.NoError(t, err)
 
-	exportPath2 := filepath.Join(t.TempDir(), "snapshot2.kv")
-	_, err = store.Backup(&BackupOptions{FileName: exportPath2})
-	require.NoError(t, err)
+		if i < len(snapshots)-1 {
+			require.NoError(t, store.Clear())
+		}
+	}
 
 	require.NoError(t, store.Clear())
 
 	var (
-		results = make(chan string, 2)
+		results = make(chan string, len(snapshots))
 		wg      sync.WaitGroup
 	)
 
-	wg.Add(2)
+	wg.Add(len(snapshots))
 
-	// Goroutine 1: Restore snapshot1.
-	go func() {
-		defer wg.Done()
+	for _, snap := range snapshots {
+		go func() {
+			defer wg.Done()
 
-		_, err := store.Restore(&RestoreOptions{FileName: exportPath1})
-		if err == nil {
-			results <- "import1"
-		} else if errors.Is(err, ErrRestoreInProgress) {
-			results <- "import1-blocked"
-		}
-	}()
-
-	// Goroutine 2: Restore snapshot2.
-	go func() {
-		defer wg.Done()
-
-		_, err := store.Restore(&RestoreOptions{FileName: exportPath2})
-		if err == nil {
-			results <- "import2"
-		} else if errors.Is(err, ErrRestoreInProgress) {
-			results <- "import2-blocked"
-		}
-	}()
+			_, err := store.Restore(&RestoreOptions{FileName: snap.path})
+			if err == nil {
+				results <- snap.id
+			} else if errors.Is(err, ErrRestoreInProgress) {
+				results <- snap.id + "-blocked"
+			}
+		}()
+	}
 
 	wg.Wait()
 	close(results)
@@ -481,40 +503,46 @@ func TestMemoryStore_Restore_ConcurrentOperations_Serialized(t *testing.T) {
 	}
 
 	// At least one import should succeed.
-	importSucceeded := map[string]bool{
-		"import1": false,
-		"import2": false,
+	importSucceeded := make(map[string]bool, len(snapshots))
+	for _, snap := range snapshots {
+		importSucceeded[snap.id] = false
 	}
 
 	for _, r := range importResults {
-		switch r {
-		case "import1":
-			importSucceeded["import1"] = true
-		case "import2":
-			importSucceeded["import2"] = true
+		if _, ok := importSucceeded[r]; ok {
+			importSucceeded[r] = true
 		}
 	}
 
-	assert.True(t, importSucceeded["import1"] || importSucceeded["import2"], "at least one import should succeed")
+	var anySucceeded bool
+
+	for _, succeeded := range importSucceeded {
+		if succeeded {
+			anySucceeded = true
+			break
+		}
+	}
+
+	assert.True(t, anySucceeded, "at least one import should succeed")
 
 	// Verify final state is consistent (not a mix of both imports).
-	keys := []string{"k1", "k2"}
-	expectedValues := []string{"v1", "v2"}
+	keys := []string{snapshots[0].key, snapshots[1].key}
+	expectedValues := []string{snapshots[0].value, snapshots[1].value}
 
-	errs := make([]error, len(keys))
+	errors := make([]error, len(keys))
 	values := make([]any, len(keys))
 
 	for i, key := range keys {
-		values[i], errs[i] = store.Get(key)
+		values[i], errors[i] = store.Get(key)
 	}
 
-	// Should have either k1 OR k2, not both.
-	if errs[0] == nil {
+	// Should have either the first or second snapshot, not both.
+	if errors[0] == nil {
 		assert.Equal(t, []byte(expectedValues[0]), values[0])
-		assert.Error(t, errs[1], "k2 should not exist if import1 won")
+		assert.Error(t, errors[1], "k2 should not exist if import1 won")
 	} else {
 		assert.Equal(t, []byte(expectedValues[1]), values[1])
-		assert.Error(t, errs[0], "k1 should not exist if import2 won")
+		assert.Error(t, errors[0], "k1 should not exist if import2 won")
 	}
 }
 
@@ -524,12 +552,13 @@ func TestMemoryStore_Restore_ConcurrentOperations_Serialized(t *testing.T) {
 func TestMemoryStore_Restore_CleanupOnFailure(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(true, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: true}
+	store := NewMemoryStore(memoryCfg)
 	require.NoError(t, store.Set("original", "data"))
 
 	// Create a corrupted snapshot file.
 	corruptedPath := filepath.Join(t.TempDir(), "corrupted.kv")
-	//nolint:forbidigo // test needs to create corrupted file.
+	//nolint:forbidigo // file I/O is required for writing the corrupted file.
 	err := os.WriteFile(corruptedPath, []byte("not a bolt db"), 0o644)
 	require.NoError(t, err)
 
@@ -552,7 +581,9 @@ func TestMemoryStore_Restore_CleanupOnFailure(t *testing.T) {
 func TestMemoryStore_Backup_Restore_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	store := NewMemoryStore(false, 0)
+	memoryCfg := &MemoryConfig{TrackKeys: false}
+
+	store := NewMemoryStore(memoryCfg)
 	for i := range 10 {
 		require.NoError(t, store.Set(
 			strings.Join([]string{"key", strconv.Itoa(i)}, "-"),
@@ -564,7 +595,7 @@ func TestMemoryStore_Backup_Restore_RoundTrip(t *testing.T) {
 	_, err := store.Backup(&BackupOptions{FileName: target})
 	require.NoError(t, err)
 
-	clone := NewMemoryStore(false, 0)
+	clone := NewMemoryStore(memoryCfg)
 	summary, err := clone.Restore(&RestoreOptions{FileName: target})
 	require.NoError(t, err)
 	assert.Equal(t, int64(10), func() int64 {
@@ -573,7 +604,7 @@ func TestMemoryStore_Backup_Restore_RoundTrip(t *testing.T) {
 
 		return size
 	}())
-	assert.Equal(t, 10, summary.TotalEntries)
+	assert.EqualValues(t, 10, summary.TotalEntries)
 
 	for i := range 10 {
 		key := strings.Join([]string{"key", strconv.Itoa(i)}, "-")

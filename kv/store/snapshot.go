@@ -9,7 +9,7 @@ import (
 )
 
 type (
-	// BackupOptions configure how Backup writes a BoltDB-based snapshot.
+	// BackupOptions configure how Backup writes a bbolt-based snapshot.
 	BackupOptions struct {
 		// FileName is the destination path for the snapshot. Required.
 		FileName string
@@ -32,7 +32,7 @@ type (
 	// Fields are tagged for JavaScript camelCase convention when exposed via Sobek.
 	BackupSummary struct {
 		// TotalEntries is the number of key/value pairs captured in the snapshot.
-		TotalEntries int `js:"totalEntries"`
+		TotalEntries int64 `js:"totalEntries"`
 
 		// BytesWritten is the final size of the snapshot file on disk.
 		BytesWritten int64 `js:"bytesWritten"`
@@ -48,12 +48,12 @@ type (
 
 	// RestoreOptions configure Restore behavior.
 	RestoreOptions struct {
-		// FileName is the path to the Bolt snapshot file. Required.
+		// FileName is the path to the bbolt snapshot file. Required.
 		FileName string
 
 		// MaxEntries limits how many entries may be loaded.
 		// Zero disables the cap.
-		MaxEntries int
+		MaxEntries int64
 
 		// MaxBytes limits the aggregate key/value payload hydrated during restore.
 		// Zero disables the cap.
@@ -64,20 +64,20 @@ type (
 	// Fields are tagged for JavaScript camelCase convention when exposed via Sobek.
 	RestoreSummary struct {
 		// TotalEntries is the number of key/value pairs hydrated from the snapshot.
-		TotalEntries int `js:"totalEntries"`
+		TotalEntries int64 `js:"totalEntries"`
 	}
 
 	// restoreBudget tracks safety limits during restore operations.
 	// Prevents OOM and excessive resource consumption during snapshot hydration.
 	restoreBudget struct {
 		// maxEntries is the maximum number of entries that can be restored.
-		maxEntries int
+		maxEntries int64
 
 		// maxBytes is the maximum number of bytes that can be restored.
 		maxBytes int64
 
 		// entries is the number of entries that have been restored.
-		entries int
+		entries int64
 
 		// bytesUsed is the number of bytes that have been restored.
 		bytesUsed int64
@@ -156,7 +156,7 @@ func wrapSnapshotOpenError(err error, path string) error {
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		return fmt.Errorf("%w: %s", ErrSnapshotNotFound, path)
-	case errors.Is(err, os.ErrPermission): //nolint:forbidigo // os.ErrPermission is necessary here.
+	case errors.Is(err, os.ErrPermission): //nolint:forbidigo // file I/O is required for checking the permission.
 		return fmt.Errorf("%w: %s", ErrSnapshotPermissionDenied, path)
 	default:
 		return fmt.Errorf("%w: %s: %w", ErrSnapshotOpenFailed, path, err)

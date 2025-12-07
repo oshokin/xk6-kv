@@ -83,7 +83,7 @@ func (s *MemoryStore) scanWithoutTracking(prefix, afterKey string, limit int64) 
 		}
 	}
 
-	return mergeIteratorHeap(iteratorHeap, limit)
+	return s.mergeIteratorHeap(iteratorHeap, limit)
 }
 
 // scanWithTracking merges shards using OST indexes without global read locks.
@@ -114,50 +114,11 @@ func (s *MemoryStore) scanWithTracking(prefix, afterKey string, limit int64) (*S
 		}
 	}
 
-	return mergeIteratorHeap(iteratorHeap, limit)
-}
-
-// Len returns the length of the heap.
-func (h shardIteratorHeap) Len() int {
-	return len(h)
-}
-
-// Less returns true if the entry in the heap is less than the entry in the other heap.
-func (h shardIteratorHeap) Less(i, j int) bool {
-	return h[i].entry.Key < h[j].entry.Key
-}
-
-// Swap swaps the entries in the heap.
-func (h shardIteratorHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-// Push pushes a new entry into the heap.
-func (h *shardIteratorHeap) Push(x any) {
-	item, ok := x.(*shardIteratorItem)
-	if !ok {
-		// container/heap interface doesn't allow us to return an error,
-		// so we panic if the type is unexpected.
-		panic(fmt.Errorf("%w: %T", ErrUnexpectedHeapType, x))
-	}
-
-	*h = append(*h, item)
-}
-
-// Pop pops the last entry from the heap.
-// Note: container/heap expects Pop to remove the element at index len-1,
-// not the root. The heap package handles reordering after Pop.
-func (h *shardIteratorHeap) Pop() any {
-	old := *h
-	n := len(old)
-	item := old[n-1]
-	*h = old[:n-1]
-
-	return item
+	return s.mergeIteratorHeap(iteratorHeap, limit)
 }
 
 // mergeIteratorHeap merges the iterator heap into a scan page.
-func mergeIteratorHeap(iteratorHeap shardIteratorHeap, limit int64) (*ScanPage, error) {
+func (s *MemoryStore) mergeIteratorHeap(iteratorHeap shardIteratorHeap, limit int64) (*ScanPage, error) {
 	if len(iteratorHeap) == 0 {
 		return new(ScanPage), nil
 	}
@@ -216,6 +177,45 @@ func mergeIteratorHeap(iteratorHeap shardIteratorHeap, limit int64) (*ScanPage, 
 		Entries: entries,
 		NextKey: nextKey,
 	}, nil
+}
+
+// Len returns the length of the heap.
+func (h shardIteratorHeap) Len() int {
+	return len(h)
+}
+
+// Less returns true if the entry in the heap is less than the entry in the other heap.
+func (h shardIteratorHeap) Less(i, j int) bool {
+	return h[i].entry.Key < h[j].entry.Key
+}
+
+// Swap swaps the entries in the heap.
+func (h shardIteratorHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+// Push pushes a new entry into the heap.
+func (h *shardIteratorHeap) Push(x any) {
+	item, ok := x.(*shardIteratorItem)
+	if !ok {
+		// container/heap interface doesn't allow us to return an error,
+		// so we panic if the type is unexpected.
+		panic(fmt.Errorf("%w: %T", ErrUnexpectedHeapType, x))
+	}
+
+	*h = append(*h, item)
+}
+
+// Pop pops the last entry from the heap.
+// Note: container/heap expects Pop to remove the element at index len-1,
+// not the root. The heap package handles reordering after Pop.
+func (h *shardIteratorHeap) Pop() any {
+	old := *h
+	n := len(old)
+	item := old[n-1]
+	*h = old[:n-1]
+
+	return item
 }
 
 // Next returns the next entry in the iterator.

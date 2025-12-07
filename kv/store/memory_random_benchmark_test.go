@@ -16,7 +16,8 @@ func BenchmarkMemoryStore_RandomKey(b *testing.B) {
 
 			const genericKeys = 10_000
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 
 			b.StopTimer()
 			seedMemoryStore(b, store, genericKeys, "key-")
@@ -36,7 +37,8 @@ func BenchmarkMemoryStore_RandomKey_WithPrefix(b *testing.B) {
 		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
 			b.ReportAllocs()
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 
 			// Seed 10k generic + 2k with "pfx-" to simulate a dense subset.
 			b.StopTimer()

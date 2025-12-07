@@ -133,24 +133,25 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | `SnapshotNotFoundError` | The snapshot path does not exist. Expected on first run of backup/restore flows. | `ErrSnapshotNotFound` |
 | `SnapshotPermissionError` | OS denied access to the snapshot path. | `ErrSnapshotPermissionDenied` |
 | `SnapshotExportError` | Failure while creating directories, temp files, copying data, or finalising the snapshot. | `ErrBackupDirectoryFailed`, `ErrBackupTempFileFailed`, `ErrBackupCopyFailed`, `ErrBackupFinalizeFailed`, `ErrSnapshotExportFailed` |
-| `SnapshotIOError` | Low-level BoltDB I/O problems when opening/closing/stat-ing snapshots or creating buckets. | `ErrBoltDBSnapshotOpenFailed`, `ErrBoltDBSnapshotCloseFailed`, `ErrBoltDBSnapshotStatFailed`, `ErrBoltDBBucketCreateFailed`, `ErrBoltDBWriteFailed`, `ErrSnapshotOpenFailed` |
+| `SnapshotIOError` | Low-level bbolt I/O problems when opening/closing/stat-ing snapshots or creating buckets. | `ErrBBoltSnapshotOpenFailed`, `ErrBBoltSnapshotCloseFailed`, `ErrBBoltSnapshotStatFailed`, `ErrBBoltBucketCreateFailed`, `ErrBBoltWriteFailed`, `ErrSnapshotOpenFailed` |
 | `SnapshotReadError` | Unable to read/import a snapshot (corrupted file, exceeds safety caps, or default snapshot path resolution failed). | `ErrSnapshotReadFailed`, `ErrSnapshotPathResolveFailed` |
+| `SnapshotKeyMissingError` | Snapshot missing an expected key during import. | `ErrSnapshotKeyMissing` |
 | `DiskPathError` | Resolving or creating the disk backend path failed (bad path, permissions, or path points to a directory). | `ErrDiskPathResolveFailed`, `ErrDiskDirectoryCreateFailed`, `ErrDiskPathIsDirectory` |
 
 #### Disk backend operations
 
 | err.name | Trigger | Go sentinels |
 | --- | --- | --- |
-| `DiskStoreOpenError` | Could not open BoltDB (usually due to file locks or permissions). | `ErrDiskStoreOpenFailed` |
-| `DiskStoreReadError` | Bolt read transaction failed. | `ErrDiskStoreReadFailed` |
+| `DiskStoreOpenError` | Could not open bbolt (usually due to file locks or permissions). | `ErrDiskStoreOpenFailed` |
+| `DiskStoreReadError` | bbolt read transaction failed. | `ErrDiskStoreReadFailed` |
 | `DiskStoreWriteError` | Write operations failed (set, increment, swap, CAS). All share same recovery: check disk permissions/space. | `ErrDiskStoreWriteFailed`, `ErrDiskStoreIncrementFailed`, `ErrDiskStoreGetOrSetFailed`, `ErrDiskStoreSwapFailed`, `ErrDiskStoreCompareSwapFailed` |
 | `DiskStoreDeleteError` | Delete operations failed (delete, deleteIfExists, compareAndDelete, clear). | `ErrDiskStoreDeleteFailed`, `ErrDiskStoreDeleteIfExistsFailed`, `ErrDiskStoreCompareDeleteFailed`, `ErrDiskStoreClearFailed` |
 | `DiskStoreExistsError` | `exists()` check failed to execute. | `ErrDiskStoreExistsFailed` |
-| `DiskStoreScanError` | `scan()`/`list()` failed due to Bolt cursor issues. | `ErrDiskStoreScanFailed` |
+| `DiskStoreScanError` | `scan()`/`list()` failed due to bbolt cursor issues. | `ErrDiskStoreScanFailed` |
 | `DiskStoreSizeError` | Size or count queries failed (grouped because recovery is identical: check DB health). | `ErrDiskStoreSizeFailed`, `ErrDiskStoreCountFailed`, `ErrDiskStoreStatFailed` |
 | `DiskStoreIndexError` | Random-key lookups by index failed. | `ErrDiskStoreRandomAccessFailed` |
 | `KeyListRebuildError` | Rebuilding the in-memory index failed (explicitly via `rebuildKeyList()` or implicitly after restore). | `ErrDiskStoreRebuildKeysFailed`, `ErrKeyListRebuildFailed` |
-| `BucketNotFoundError` | Asked BoltDB for a non-existent bucket (usually indicates bad path or corrupted DB). | `ErrBucketNotFound` |
+| `BucketNotFoundError` | Asked bbolt for a non-existent bucket (usually indicates bad path or corrupted DB). | `ErrBucketNotFound` |
 
 ### Using the catalogue
 

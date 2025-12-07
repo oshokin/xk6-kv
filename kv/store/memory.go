@@ -3,7 +3,6 @@ package store
 import (
 	"bytes"
 	"fmt"
-	"runtime"
 	"slices"
 	"strconv"
 	"sync"
@@ -39,21 +38,17 @@ type MemoryStore struct {
 	mutationBlockReason error
 }
 
-// NewMemoryStore creates a MemoryStore configured with the provided shard count.
-// If shardCount <= 0, it defaults to runtime.NumCPU().
-// If shardCount > MaxShardCount, it is capped at MaxShardCount.
-func NewMemoryStore(trackKeys bool, shardCount int) *MemoryStore {
-	if shardCount <= 0 {
-		shardCount = max(1, runtime.NumCPU())
+// NewMemoryStore creates a MemoryStore with the provided memory configuration.
+func NewMemoryStore(memoryCfg *MemoryConfig) *MemoryStore {
+	if memoryCfg == nil {
+		memoryCfg = new(MemoryConfig)
 	}
 
-	if shardCount > MaxShardCount {
-		shardCount = MaxShardCount
-	}
+	shardCount := memoryCfg.GetShardCount()
 
 	store := &MemoryStore{
 		shardCount: shardCount,
-		trackKeys:  trackKeys,
+		trackKeys:  memoryCfg.TrackKeys,
 		shards:     make([]*memoryShard, shardCount),
 		hashFn:     selectShardHashFunc(defaultShardHashStrategy),
 	}
@@ -63,7 +58,7 @@ func NewMemoryStore(trackKeys bool, shardCount int) *MemoryStore {
 			container: make(map[string][]byte),
 		}
 
-		if trackKeys {
+		if memoryCfg.TrackKeys {
 			shard.keysList = []string{}
 			shard.keysMap = make(map[string]int)
 			shard.ost = NewOSTree()

@@ -26,7 +26,8 @@ func TestMemoryStore_Scan_ConcurrentMutations(t *testing.T) {
 		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
 			t.Parallel()
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 
 			for i := range initialKeys {
 				require.NoError(t, store.Set(fmt.Sprintf(prefixFormat, prefix, i), fmt.Sprintf("value-%d", i)))
@@ -114,7 +115,8 @@ func TestMemoryStore_Scan_MutationAfterPagination(t *testing.T) {
 		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
 			t.Parallel()
 
-			store := NewMemoryStore(trackKeys, 0)
+			memoryCfg := &MemoryConfig{TrackKeys: trackKeys}
+			store := NewMemoryStore(memoryCfg)
 
 			for _, key := range initialKeys {
 				require.NoError(t, store.Set(key, key+"-value"))

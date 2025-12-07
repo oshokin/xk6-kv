@@ -123,9 +123,9 @@ type Store interface {
 	// Implementations that do not maintain indexes MAY implement this as a no-op.
 	RebuildKeyList() error
 
-	// Backup writes the store contents to an on-disk snapshot (BoltDB file).
-	// MemoryStore streams data into a fresh BoltDB file, optionally allowing
-	// best-effort concurrency. DiskStore copies its underlying BoltDB file.
+	// Backup writes the store contents to an on-disk snapshot (bbolt file).
+	// MemoryStore streams data into a fresh bbolt file, optionally allowing
+	// best-effort concurrency. DiskStore copies its underlying bbolt file.
 	// When DiskStore is asked to back up to its own DB path, a fast-path summary
 	// is returned without copying (so callers can detect the noop).
 	// Returns a summary detailing entry counts and snapshot metadata.

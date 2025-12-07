@@ -5,7 +5,7 @@
 import { openKv } from "k6/x/kv";
 import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";
 
-// Choose a deterministic location for the BoltDB file. In real tests you might drive this from an env var.
+// Choose a deterministic location for the bbolt file. In real tests you might drive this from an env var.
 const databasePath = `${__ENV.XK6_KV_PATH ?? "./custom-database.kv"}`;
 
 const kv = openKv({

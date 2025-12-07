@@ -114,7 +114,6 @@ func (s *MemoryStore) hashKey(key string) int {
 		hashFn = selectShardHashFunc(defaultShardHashStrategy)
 	}
 
-	//nolint:gosec // shardCount is always >= 1, see NewMemoryStore.
 	return int(hashFn(key) % uint64(s.shardCount))
 }
 

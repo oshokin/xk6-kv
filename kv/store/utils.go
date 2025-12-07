@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
@@ -24,23 +25,23 @@ func ResolveDiskPath(dbPath string) (string, error) {
 
 	cleanedPath := filepath.Clean(trimmedPath)
 
-	absPath, err := filepath.Abs(cleanedPath)
+	result, err := filepath.Abs(cleanedPath)
 	if err != nil {
 		return "", fmt.Errorf("%w: path %q: %w", ErrDiskPathResolveFailed, cleanedPath, err)
 	}
 
-	info, err := os.Stat(absPath)
+	info, err := os.Stat(result)
 	switch {
 	case err == nil:
 		if info.IsDir() {
-			return absPath, fmt.Errorf("%w: %q", ErrDiskPathIsDirectory, absPath)
+			return result, fmt.Errorf("%w: %q", ErrDiskPathIsDirectory, result)
 		}
 
-		return absPath, nil
+		return result, nil
 	case errors.Is(err, os.ErrNotExist):
-		return absPath, nil
+		return result, nil
 	default:
-		return absPath, fmt.Errorf("%w: %q: %w", ErrDiskPathResolveFailed, absPath, err)
+		return result, fmt.Errorf("%w: %q: %w", ErrDiskPathResolveFailed, result, err)
 	}
 }
 
@@ -59,6 +60,6 @@ func normalizeToBytes(value any) ([]byte, error) {
 
 // clamp constrains a value to lie within [low, high] bounds.
 // Used to cap preallocation sizes to prevent OOM while avoiding tiny allocations.
-func clamp(value, low, high int) int {
+func clamp[T cmp.Ordered](value, low, high T) T {
 	return max(low, min(value, high))
 }

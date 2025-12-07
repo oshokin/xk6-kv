@@ -35,8 +35,7 @@ export function createKv(testName) {
   return openKv({
     backend: BACKEND,
     path: BACKEND === 'disk' && testName ? getTestPath(testName) : undefined,
-    trackKeys: TRACK_KEYS,
-    shardCount: 0
+    trackKeys: TRACK_KEYS
   });
 }
 
