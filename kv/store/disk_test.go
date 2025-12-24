@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	bolt "go.etcd.io/bbolt"
 )
 
 // newTestDiskStore creates a temporary on-disk store bound to a provided path
@@ -307,6 +308,60 @@ func TestDiskStore_ReopenAfterFullyClosed_OnDemand(t *testing.T) {
 
 	require.NoError(t, store.Set("key3", "value3"))
 	assert.EqualValues(t, 1, store.refCount.Load(), "refCount must be reset to 1 after reopen")
+}
+
+// TestDiskStore_Open_ReadOnlyExistingBucket ensures read-only open succeeds when
+// the database (and k6 bucket) already exists, and that write attempts fail.
+func TestDiskStore_Open_ReadOnlyExistingBucket(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "readonly.db")
+
+	// Seed the database in read/write mode.
+	rwStore := newTestDiskStore(t, false, dbPath, true)
+	require.NoError(t, rwStore.Set("seed", "value"))
+	require.NoError(t, rwStore.Close())
+
+	diskConfig := &DiskConfig{ReadOnly: GetComparablePointer(true)}
+	store, err := NewDiskStore(false, dbPath, diskConfig)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
+
+	require.NoError(t, store.Open(), "read-only open must succeed when bucket exists")
+
+	gotAny, err := store.Get("seed")
+	require.NoError(t, err, "Get must succeed in read-only mode")
+	assert.Equal(t, []byte("value"), gotAny.([]byte))
+
+	err = store.Set("write", "should fail")
+	require.ErrorIs(t, err, ErrDiskStoreWriteFailed, "writes must fail in read-only mode")
+}
+
+// TestDiskStore_Open_ReadOnlyMissingBucketFails ensures read-only open errors when the
+// internal bucket does not exist (since it cannot be created without a write transaction).
+func TestDiskStore_Open_ReadOnlyMissingBucketFails(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "missing-bucket.db")
+
+	// Create an empty bbolt file without the default bucket.
+	db, err := bolt.Open(dbPath, 0o600, nil)
+	require.NoError(t, err, "bolt.Open must succeed for empty DB setup")
+	require.NoError(t, db.Close())
+
+	diskConfig := &DiskConfig{ReadOnly: GetComparablePointer(true)}
+	store, err := NewDiskStore(false, dbPath, diskConfig)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		_ = store.Close()
+	})
+
+	err = store.Open()
+	require.Error(t, err, "read-only open must fail when bucket is absent")
+	require.ErrorIs(t, err, ErrBucketNotFound)
 }
 
 // TestDiskStore_GetSet_RoundtripAndTypes validates:

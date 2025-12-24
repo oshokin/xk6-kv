@@ -126,15 +126,30 @@ func (s *DiskStore) Open() error {
 		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 
-	// Create the internal bucket if it doesn't exist.
-	err = handler.Update(func(tx *bolt.Tx) error {
-		_, bucketErr := tx.CreateBucketIfNotExists(defaultBBoltBucketBytes)
-		if bucketErr != nil {
-			return fmt.Errorf("%w: internal bucket %q: %w", ErrBBoltBucketCreateFailed, DefaultBBoltBucket, bucketErr)
-		}
+	// Read-only handles cannot execute write transactions. When the caller
+	// explicitly requested read-only mode, verify that the bucket already
+	// exists instead of trying to create it.
+	isReadOnly := s.boltOptions != nil && s.boltOptions.ReadOnly
+	if isReadOnly {
+		err = handler.View(func(tx *bolt.Tx) error {
+			if tx.Bucket(defaultBBoltBucketBytes) == nil {
+				return fmt.Errorf("%w: %s", ErrBucketNotFound, DefaultBBoltBucket)
+			}
 
-		return nil
-	})
+			return nil
+		})
+	} else {
+		// Create the internal bucket if it doesn't exist.
+		err = handler.Update(func(tx *bolt.Tx) error {
+			_, bucketErr := tx.CreateBucketIfNotExists(defaultBBoltBucketBytes)
+			if bucketErr != nil {
+				return fmt.Errorf("%w: internal bucket %q: %w", ErrBBoltBucketCreateFailed, DefaultBBoltBucket, bucketErr)
+			}
+
+			return nil
+		})
+	}
+
 	if err != nil {
 		// Close failure here only adds context-creation already failed-so treat it as best-effort.
 		_ = handler.Close()

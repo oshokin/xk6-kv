@@ -9,9 +9,8 @@ const kv = openKv({
   trackKeys: true,
 });
 
-export default function () {
-  kv.set("counter", 0);
-  const n = kv.incrementBy("counter", 1);
-  console.log(`memory-tuned counter=${n}`);
+export default async function () {
+  await kv.set("counter", 0);
+  const nextValue = await kv.incrementBy("counter", 1);
+  console.log(`memory-tuned counter=${nextValue}`);
 }
-

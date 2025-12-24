@@ -117,6 +117,8 @@ export async function teardown() {
 }
 ```
 
+> **Async note:** every `kv.*` helper returns a Promise. In k6 scripts you should mark your `setup`, `default`, or helper functions as `async` (or use `.then`) and `await` each call—otherwise errors are swallowed and the operation may never finish.
+
 ## Error Handling
 
 Every rejected `kv.*` promise carries a **typed error object** with `name` and `message` fields. Check `err.name` (or `err.Name` when k6 serialises it as Go struct) instead of matching raw strings:
@@ -189,6 +191,8 @@ interface OpenKvOptions {
 - `disk`: (Disk only) Optional bbolt tuning. When `disk` is omitted, bbolt defaults apply (1s lock timeout, syncs enabled, array freelist, etc.).
 - `disk.readOnly`: Requires the bbolt file (and `k6` bucket) to already exist; opening in read-only mode cannot create the bucket and will fail if the file is missing or empty.
 
+> ⚠️ **Snapshot path sharing:** If you omit `backup().fileName` or `restore().fileName`, the memory backend deliberately falls back to the same `.k6.kv` file the disk backend uses. This lets you run ultra-fast tests with `backend: "memory"` and then immediately replay the generated dataset via `backend: "disk"` without touching paths. If you *don't* want that coupling (for example, you run disk workloads concurrently), always pass an explicit `fileName`.
+
 **Memory Backend Sharding:**
 
 The memory backend shards data across multiple internal partitions to improve concurrent performance by reducing lock contention:
@@ -212,12 +216,14 @@ All methods return Promises except `close()`.
 - **`set(key: string, value: any): Promise<any>`** - Sets a key-value pair.
 - **`delete(key: string): Promise<boolean>`** - Removes a key-value pair (always resolves to `true`).
 - **`exists(key: string): Promise<boolean>`** - Checks if a key exists.
-- **`clear(): Promise<boolean>`** - Removes all entries (always resolves to `true`).
+- **`clear(): Promise<boolean>`** - Removes all entries (always resolves to `true`).  
+  > `clear()` drops and recreates the underlying bbolt bucket, so treat it like a destructive maintenance operation. Run it while writers are idle (or immediately call `rebuildKeyList()` afterward when `trackKeys: true`) to avoid brief indexing drift for keys inserted concurrently with the wipe.
 - **`size(): Promise<number>`** - Returns current store size (number of keys).
 
 #### Atomic Operations
 
 - **`incrementBy(key: string, delta: number): Promise<number>`** - Atomically increments numeric value. Treats missing keys as `0`.
+  > JS numbers are IEEE‑754 doubles, so anything above `Number.MAX_SAFE_INTEGER` (~9e15) loses precision before the value reaches Go. Keep counters below that threshold or encode larger values as strings/custom objects in your script before calling `incrementBy`.
 - **`getOrSet(key: string, value: any): Promise<{ value: any, loaded: boolean }>`** - Gets existing value or sets if absent. `loaded: true` means pre-existing.
 - **`swap(key: string, value: any): Promise<{ previous: any|null, loaded: boolean }>`** - Replaces value atomically. Returns previous value if existed.
 - **`compareAndSwap(key: string, oldValue: any, newValue: any): Promise<boolean>`** - Sets `newValue` only if current value equals `oldValue`. Pass `null`/`undefined` as `oldValue` to mean "only if the key is absent" (set-if-not-exists).
@@ -266,7 +272,10 @@ All methods return Promises except `close()`.
 #### Snapshot Operations
 
 - **`backup(options?: BackupOptions): Promise<BackupSummary>`**  
-  Writes the current dataset to a bbolt file. Always set `fileName` (leaving it blank points at the backend’s live bbolt file) and use `allowConcurrentWrites: true` for a best-effort dump that releases writers sooner (summary includes `bestEffort` + `warning` so you can alarm on it).
+  Writes the current dataset to a bbolt file. Always set `fileName` (leaving it blank points at the backend’s live bbolt file) and use `allowConcurrentWrites: true` for a best-effort dump that releases writers sooner (summary includes `bestEffort` + `warning` so you can alarm on it).  
+  > **Memory backend caution:** when `allowConcurrentWrites` is left at the default `false`, the memory backend holds its global mutation gate for the entire duration of the backup (from key snapshot through streaming). On large datasets that can pause every writer/VU for minutes. Enable `allowConcurrentWrites: true` if you need the cluster to keep serving traffic during the export (accepting the best-effort snapshot) or schedule strict backups during quiet windows.
+  >
+  > **Shared-file workflow:** Leaving `fileName` blank while running the memory backend is intentional—it writes into `.k6.kv`, the same file the disk backend mounts by default. That makes a common DX pattern possible: run the hot path with `backend: "memory"`, call `backup()` without arguments in `teardown()`, and later rerun the same test with `backend: "disk"` to replay the captured dataset. If you want snapshots to live somewhere else (or you run disk workloads in parallel), provide an explicit `fileName` so you don’t clobber the shared DB.
 
 - **`restore(options?: RestoreOptions): Promise<RestoreSummary>`**  
   Replaces the dataset with a snapshot produced by `backup()`. Optional `maxEntries` / `maxBytes` guards protect against oversized or corrupted inputs.
@@ -280,7 +289,7 @@ await kv.backup({
 await kv.restore({ fileName: "./backups/kv-latest.kv" });
 ```
 
-> **Disk backend note:** pointing `fileName` at the live bbolt path is treated as a no-op (backup just returns metadata; restore leaves the DB untouched), so always write to / read from a different file.
+> **Disk backend note:** pointing `fileName` at the *currently mounted* bbolt path is treated as a no-op (backup just returns metadata; restore leaves the DB untouched), so when you’re already running `backend: "disk"` you still need a different `fileName`. The “shared `.k6.kv` trick” only applies when you begin on the memory backend and want to seed the disk backend later.
 
 - **`close(): void`** - Synchronously closes the store. Call in `teardown()`.
 
@@ -288,6 +297,7 @@ await kv.restore({ fileName: "./backups/kv-latest.kv" });
 
 - **`trackKeys: true`**: `randomKey()` without prefix -> O(1); with prefix -> O(log n). Achieving those speeds means every key is mirrored in memory across multiple helper structures, so large datasets consume noticeably more RAM and the slices/maps never shrink automatically. Budget for that footprint or rebuild the index periodically.
 - **`trackKeys: false`** (default): `randomKey()` falls back to a full-map/two-transaction scan, so heavy use remains O(n). Enable tracking or redesign workloads that call `randomKey()` frequently to avoid linear-time pauses.
+- **Random key workloads:** Calling `randomKey()` repeatedly with `trackKeys: false` (especially on the disk backend) runs a full scan inside a single read transaction, which stalls the lone bbolt writer until the scan finishes. Turn on `trackKeys` (for O(1)/O(log n) sampling) or throttle/redesign these workloads to avoid head-of-line blocking.
 - Both backends are optimized for concurrent workloads, but there's synchronization overhead between VUs
 
 ## Usage Examples

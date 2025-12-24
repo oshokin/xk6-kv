@@ -12,6 +12,12 @@ import (
 	"strings"
 )
 
+// GetComparablePointer returns an addressable copy of the value so callers can
+// obtain a stable pointer even for non-addressable operands (e.g. literals).
+func GetComparablePointer[T any](v T) *T {
+	return &v
+}
+
 // ResolveDiskPath normalizes user-provided paths and applies fast-fail defaults.
 // Empty strings revert to the default DB file path.
 func ResolveDiskPath(dbPath string) (string, error) {

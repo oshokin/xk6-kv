@@ -86,6 +86,16 @@ func (k *KV) runAsyncWithStore(
 	}
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				panicErr := fmt.Errorf("panic recovered during store operation: %v", r)
+
+				runOnEventLoop(func() error {
+					return reject(classifyError(panicErr).ToSobekValue(rt))
+				})
+			}
+		}()
+
 		if k.store == nil {
 			runOnEventLoop(func() error {
 				return reject(k.databaseNotOpenError().ToSobekValue(rt))

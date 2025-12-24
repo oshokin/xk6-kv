@@ -13,6 +13,7 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
 
 3. Many scripts mutate on-disk state (e.g. snapshots). They intentionally write inside the repo so it is easy to inspect the artifacts.
 
+> ⚠️ **Snapshot defaults:** When an example uses the memory backend and omits `backup().fileName`, it writes into `.k6.kv`—the same file the disk backend mounts by default. That’s deliberate so you can run `backend: "memory"` for the hot path, dump the dataset in `teardown()`, and later rerun the very same test with `backend: "disk"` without changing paths. If you need a separate artifact (or run disk workloads concurrently), set `fileName` explicitly before running the example.
 > Tip: the `e2e/` directory contains larger, production-style scenarios that stitch multiple APIs together.
 
 ## Error Manual
@@ -87,6 +88,10 @@ async function backupWithRetry(maxRetries = 3) {
   }
 }
 ```
+
+### Memory backup stall (strict mode)
+
+Running `kv.backup()` against the **memory backend** with `allowConcurrentWrites` left at its default `false` takes the mutation gate for the entire export. Every writer (and therefore every VU) blocks from the moment the key snapshot starts until the last chunk is flushed to disk, so large datasets can freeze traffic for minutes. If you need online backups, either pass `allowConcurrentWrites: true` (best-effort snapshot; see `e2e/backup-restore-concurrency.js`) or schedule strict backups during maintenance windows.
 
 ### Error catalogue
 

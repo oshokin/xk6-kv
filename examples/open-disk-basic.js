@@ -7,9 +7,12 @@ import { openKv } from "k6/x/kv";
 // - disk options: bbolt defaults (1s lock timeout, fsync on)
 const kv = openKv({ backend: "disk" });
 
-export default function () {
-  kv.set("foo", "bar");
-  const v = kv.get("foo");
-  console.log(`disk-basic value: ${v}`);
+export default async function () {
+  await kv.set("foo", "bar");
+  const value = await kv.get("foo");
+  console.log(`disk-basic value: ${value}`);
 }
 
+export async function teardown() {
+  kv.close();
+}

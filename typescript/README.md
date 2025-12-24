@@ -77,6 +77,8 @@ npx tsc --noEmit
 k6 run example.ts
 ```
 
+> ⚠️ **Snapshot defaults:** Just like the Go/JS examples, calling `await kv.backup()` without a `fileName` while you’re on `backend: 'memory'` writes into `.k6.kv`, the disk backend’s default file. That’s by design so you can `backup()` in `teardown()` and later rerun the same TypeScript script with `backend: 'disk'` to replay the captured dataset. Pass a custom `fileName` if you need a separate artifact.
+
 ## Features
 
 ✅ Full IntelliSense/autocomplete  

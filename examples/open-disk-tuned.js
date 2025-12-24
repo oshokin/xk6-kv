@@ -18,9 +18,12 @@ const kv = openKv({
   },
 });
 
-export default function () {
-  kv.set("user:1", { name: "Alice" });
-  const user = kv.get("user:1");
+export default async function () {
+  await kv.set("user:1", { name: "Alice" });
+  const user = await kv.get("user:1");
   console.log(`disk-tuned user: ${JSON.stringify(user)}`);
 }
 
+export async function teardown() {
+  kv.close();
+}

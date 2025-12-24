@@ -1,14 +1,18 @@
 package kv
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/oshokin/xk6-kv/kv/store"
+)
 
 func TestDiskOptionsEqual(t *testing.T) {
 	t.Parallel()
 
-	boolTrue := getComparablePointer(true)
-	boolFalse := getComparablePointer(false)
-	freelistMapUpper := getComparablePointer("MAP")
-	freelistMapLower := getComparablePointer("map")
+	boolTrue := store.GetComparablePointer(true)
+	boolFalse := store.GetComparablePointer(false)
+	freelistMapUpper := store.GetComparablePointer("MAP")
+	freelistMapLower := store.GetComparablePointer("map")
 
 	testCases := []struct {
 		name   string
@@ -43,7 +47,7 @@ func TestDiskOptionsEqual(t *testing.T) {
 		{
 			name:   "matching bools",
 			left:   &DiskOptions{NoSync: boolTrue},
-			right:  &DiskOptions{NoSync: getComparablePointer(true)},
+			right:  &DiskOptions{NoSync: store.GetComparablePointer(true)},
 			expect: true,
 		},
 		{
@@ -79,8 +83,4 @@ func TestDiskOptionsEqual(t *testing.T) {
 			}
 		})
 	}
-}
-
-func getComparablePointer[T any](v T) *T {
-	return &v
 }
