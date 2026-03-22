@@ -67,6 +67,7 @@ jobs:
         with:
           # Use the Go version from the matrix.
           go-version: ${{ matrix.go-version }}
+          check-latest: true
           cache: true
       # Run all tests with race detection.
       - name: Run tests
@@ -97,6 +98,7 @@ jobs:
         with:
           # Use the configured Go version.
           go-version: ${{ env.GO_VERSION }}
+          check-latest: true
           cache: true
       # Build the k6 binary with this extension and verify it works.
       - name: Check build
