@@ -444,97 +444,6 @@ func TestMemoryStore_Swap_Basic(t *testing.T) {
 	assert.Equal(t, []byte("v2"), got.([]byte), "value must be replaced")
 }
 
-// TestMemoryStore_CompareAndSwap_Basic verifies CompareAndSwap fails when the
-// old value doesn't match, and succeeds only when it matches exactly.
-func TestMemoryStore_CompareAndSwap_Basic(t *testing.T) {
-	t.Parallel()
-
-	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
-	require.NoError(t, store.Set("k", "old"))
-
-	ok, err := store.CompareAndSwap("k", "BAD", "new")
-	require.NoError(t, err)
-	assert.False(t, ok, "CAS must fail with wrong old")
-
-	got, err := store.Get("k")
-	require.NoError(t, err)
-	assert.Equal(t, []byte("old"), got.([]byte), "value must remain unchanged on failed CAS")
-
-	ok, err = store.CompareAndSwap("k", "old", "new")
-	require.NoError(t, err)
-	assert.True(t, ok, "CAS must succeed on correct old")
-
-	got, err = store.Get("k")
-	require.NoError(t, err)
-	assert.Equal(t, []byte("new"), got.([]byte), "value must be updated")
-}
-
-// TestMemoryStore_CompareAndSwap_InsertWhenAbsent verifies that CompareAndSwap
-// with oldValue=nil creates the key when absent, and fails when the key exists.
-func TestMemoryStore_CompareAndSwap_InsertWhenAbsent(t *testing.T) {
-	t.Parallel()
-
-	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
-
-	ok, err := store.CompareAndSwap("lock", nil, "holder")
-	require.NoError(t, err)
-	assert.True(t, ok, "CAS should create the key when oldValue is nil")
-
-	got, err := store.Get("lock")
-	require.NoError(t, err)
-	assert.Equal(t, []byte("holder"), got.([]byte), "value must match inserted payload")
-
-	ok, err = store.CompareAndSwap("lock", nil, "other")
-	require.NoError(t, err)
-	assert.False(t, ok, "second CAS must fail because key now exists")
-}
-
-// TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner verifies that under concurrent
-// contention on the same key, exactly one CompareAndSwap operation succeeds.
-func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
-	t.Parallel()
-
-	const concurrencyLevel = 200
-
-	var (
-		store = NewMemoryStore(&MemoryConfig{TrackKeys: true})
-		okCh  = make(chan bool, concurrencyLevel)
-		wg    sync.WaitGroup
-	)
-
-	require.NoError(t, store.Set("k", "v0"))
-
-	wg.Add(concurrencyLevel)
-
-	for range concurrencyLevel {
-		go func() {
-			defer wg.Done()
-
-			ok, err := store.CompareAndSwap("k", "v0", "v1")
-			assert.NoError(t, err)
-
-			okCh <- ok
-		}()
-	}
-
-	wg.Wait()
-	close(okCh)
-
-	var successCount int
-
-	for ok := range okCh {
-		if ok {
-			successCount++
-		}
-	}
-
-	assert.Equal(t, 1, successCount, "exactly one CAS must succeed")
-
-	got, err := store.Get("k")
-	require.NoError(t, err)
-	assert.Equal(t, []byte("v1"), got.([]byte))
-}
-
 // TestMemoryStore_Delete verifies Delete removes existing keys from the store,
 // and is a no-op (returns no error) for keys that don't exist.
 func TestMemoryStore_Delete(t *testing.T) {
@@ -635,71 +544,6 @@ func TestMemoryStore_DeleteIfExists_ConcurrentSingleWinner(t *testing.T) {
 
 	exists, _ := store.Exists("k")
 	assert.False(t, exists, "key must be removed")
-}
-
-// TestMemoryStore_CompareAndDelete_Basic verifies CompareAndDelete only removes
-// the key when the expected value matches exactly, and fails otherwise.
-func TestMemoryStore_CompareAndDelete_Basic(t *testing.T) {
-	t.Parallel()
-
-	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
-	require.NoError(t, store.Set("k", "v1"))
-
-	ok, err := store.CompareAndDelete("k", "BAD")
-	require.NoError(t, err)
-	assert.False(t, ok, "wrong value must not delete")
-
-	exists, _ := store.Exists("k")
-	assert.True(t, exists, "key should still exist")
-
-	ok, err = store.CompareAndDelete("k", "v1")
-	require.NoError(t, err)
-	assert.True(t, ok, "correct value must delete")
-
-	exists, _ = store.Exists("k")
-	assert.False(t, exists, "key must be removed")
-}
-
-// TestMemoryStore_CompareAndDelete_ConcurrentSingleWinner verifies that under
-// concurrent contention, exactly one CompareAndDelete operation succeeds.
-func TestMemoryStore_CompareAndDelete_ConcurrentSingleWinner(t *testing.T) {
-	t.Parallel()
-
-	const concurrencyLevel = 120
-
-	var (
-		store        = NewMemoryStore(&MemoryConfig{TrackKeys: true})
-		successCount int
-		mu           sync.Mutex
-		wg           sync.WaitGroup
-	)
-
-	require.NoError(t, store.Set("k", "secret"))
-
-	wg.Add(concurrencyLevel)
-
-	for range concurrencyLevel {
-		go func() {
-			defer wg.Done()
-
-			ok, err := store.CompareAndDelete("k", "secret")
-			assert.NoError(t, err)
-
-			if ok {
-				mu.Lock()
-
-				successCount++
-
-				mu.Unlock()
-			}
-		}()
-	}
-
-	wg.Wait()
-	assert.Equal(t, 1, successCount, "exactly one CompareAndDelete must succeed")
-
-	exists, _ := store.Exists("k")
-	assert.False(t, exists, "key must be deleted")
 }
 
 // TestMemoryStore_AtomicOps_DoNotChangeBytesUnexpectedly verifies the store clones
@@ -808,7 +652,12 @@ func TestMemoryStore_Scan_PrefixPagination(t *testing.T) {
 					require.True(t, int64(len(page.Entries)) <= pageSize || pageSize <= 0, "page exceeded limit")
 				} else {
 					require.NotEmpty(t, page.Entries, "NextKey must only be set when entries exist")
-					assert.Equal(t, page.Entries[len(page.Entries)-1].Key, page.NextKey, "NextKey must equal last key in page")
+					assert.Equal(
+						t,
+						page.Entries[len(page.Entries)-1].Key,
+						page.NextKey,
+						"NextKey must equal last key in page",
+					)
 				}
 
 				allScanEntries = append(allScanEntries, page.Entries...)

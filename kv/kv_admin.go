@@ -2,7 +2,6 @@ package kv
 
 import (
 	"github.com/grafana/sobek"
-	"go.k6.io/k6/js/common"
 
 	"github.com/oshokin/xk6-kv/kv/store"
 )
@@ -54,7 +53,7 @@ func (k *KV) RebuildKeyList() *sobek.Promise {
 // Returns a Promise that resolves to a backup summary with operation metrics.
 // The summary uses camelCase field names for JavaScript convention compatibility.
 func (k *KV) Backup(options sobek.Value) *sobek.Promise {
-	backupOptions := ImportBackupOptions(k.vu.Runtime(), options)
+	backupOptions := importBackupOptions(k.vu.Runtime(), options)
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {
@@ -83,7 +82,7 @@ func (k *KV) Backup(options sobek.Value) *sobek.Promise {
 // Returns a Promise that resolves to a restore summary with operation metrics.
 // The summary uses camelCase field names for JavaScript convention compatibility.
 func (k *KV) Restore(options sobek.Value) *sobek.Promise {
-	restoreOptions := ImportRestoreOptions(k.vu.Runtime(), options)
+	restoreOptions := importRestoreOptions(k.vu.Runtime(), options)
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {
@@ -116,76 +115,4 @@ func (k *KV) Close() error {
 	}
 
 	return k.store.Close()
-}
-
-// BackupOptions is the JS-facing result of backup().
-type BackupOptions struct {
-	FileName              string `js:"fileName"`
-	AllowConcurrentWrites bool   `js:"allowConcurrentWrites"`
-}
-
-// ImportBackupOptions converts JS values into BackupOptions.
-func ImportBackupOptions(rt *sobek.Runtime, options sobek.Value) BackupOptions {
-	backupOptions := BackupOptions{}
-	if common.IsNullish(options) {
-		return backupOptions
-	}
-
-	optionsObj := options.ToObject(rt)
-	if fileNameValue := optionsObj.Get("fileName"); !common.IsNullish(fileNameValue) {
-		backupOptions.FileName = fileNameValue.String()
-	}
-
-	allowValue := optionsObj.Get("allowConcurrentWrites")
-	if !common.IsNullish(allowValue) {
-		var allow bool
-
-		err := rt.ExportTo(allowValue, &allow)
-		if err == nil {
-			backupOptions.AllowConcurrentWrites = allow
-		}
-	}
-
-	return backupOptions
-}
-
-// RestoreOptions is the JS-facing result of restore().
-type RestoreOptions struct {
-	FileName   string `js:"fileName"`
-	MaxEntries int64  `js:"maxEntries"`
-	MaxBytes   int64  `js:"maxBytes"`
-}
-
-// ImportRestoreOptions converts JS values into RestoreOptions.
-func ImportRestoreOptions(rt *sobek.Runtime, options sobek.Value) RestoreOptions {
-	restoreOptions := RestoreOptions{}
-	if common.IsNullish(options) {
-		return restoreOptions
-	}
-
-	optionsObj := options.ToObject(rt)
-
-	if fileNameValue := optionsObj.Get("fileName"); !common.IsNullish(fileNameValue) {
-		restoreOptions.FileName = fileNameValue.String()
-	}
-
-	if maxEntriesValue := optionsObj.Get("maxEntries"); !common.IsNullish(maxEntriesValue) {
-		var parsedValue int64
-
-		err := rt.ExportTo(maxEntriesValue, &parsedValue)
-		if err == nil {
-			restoreOptions.MaxEntries = parsedValue
-		}
-	}
-
-	if maxBytesValue := optionsObj.Get("maxBytes"); !common.IsNullish(maxBytesValue) {
-		var parsedValue int64
-
-		err := rt.ExportTo(maxBytesValue, &parsedValue)
-		if err == nil {
-			restoreOptions.MaxBytes = parsedValue
-		}
-	}
-
-	return restoreOptions
 }

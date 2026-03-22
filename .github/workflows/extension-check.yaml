@@ -16,7 +16,7 @@ on:
 # Environment variables (constants for configuration).
 env:
   # Tool versions.
-  GOLANGCI_LINT_VERSION: "v2.7.2"
+  GOLANGCI_LINT_VERSION: "v2.11.3"
   GO_VERSION: "1.25.x"
   XK6_VERSION: "master"
 
@@ -37,7 +37,7 @@ jobs:
     steps:
       # Checkout the repository code with full git history.
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           # Fetch all commits and branches for complete history.
           fetch-depth: 0
@@ -60,10 +60,10 @@ jobs:
     steps:
       # Checkout the repository code.
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       # Install the Go version specified in the matrix.
       - name: Install Go ${{ matrix.go-version }}
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           # Use the Go version from the matrix.
           go-version: ${{ matrix.go-version }}
@@ -90,10 +90,10 @@ jobs:
     steps:
       # Checkout the repository code.
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       # Install Go for the build test.
       - name: Install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           # Use the configured Go version.
           go-version: ${{ env.GO_VERSION }}

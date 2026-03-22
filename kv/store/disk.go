@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"fmt"
 	"math"
 	"os"
@@ -143,7 +142,12 @@ func (s *DiskStore) Open() error {
 		err = handler.Update(func(tx *bolt.Tx) error {
 			_, bucketErr := tx.CreateBucketIfNotExists(defaultBBoltBucketBytes)
 			if bucketErr != nil {
-				return fmt.Errorf("%w: internal bucket %q: %w", ErrBBoltBucketCreateFailed, DefaultBBoltBucket, bucketErr)
+				return fmt.Errorf(
+					"%w: internal bucket %q: %w",
+					ErrBBoltBucketCreateFailed,
+					DefaultBBoltBucket,
+					bucketErr,
+				)
 			}
 
 			return nil
@@ -439,81 +443,6 @@ func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err 
 	return prev, true, nil
 }
 
-// CompareAndSwap replaces value only if current equals 'old'. Returns true if swapped.
-func (s *DiskStore) CompareAndSwap(key string, oldValue any, newValue any) (bool, error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
-		return false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
-	}
-
-	expectAbsent := oldValue == nil
-
-	var (
-		oldBytes []byte
-		err      error
-	)
-
-	if !expectAbsent {
-		oldBytes, err = normalizeToBytes(oldValue)
-		if err != nil {
-			return false, err
-		}
-	}
-
-	// Convert new value to bytes if it's not already.
-	newBytes, err := normalizeToBytes(newValue)
-	if err != nil {
-		return false, err
-	}
-
-	var (
-		swapped  bool
-		inserted bool
-	)
-
-	err = s.handle.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(s.bucket)
-		if bucket == nil {
-			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
-		}
-
-		// Get current value.
-		current := bucket.Get([]byte(key))
-
-		switch {
-		case expectAbsent:
-			// CAS with nil oldValue: only succeed if key doesn't exist.
-			if current != nil {
-				return nil
-			}
-
-			inserted = true
-		default:
-			// CAS with non-nil oldValue: compare byte-for-byte.
-			if current == nil || !bytes.Equal(current, oldBytes) {
-				return nil
-			}
-		}
-
-		// Values match (or key absent as expected), perform swap.
-		swapped = true
-
-		return bucket.Put([]byte(key), newBytes)
-	})
-	if err != nil {
-		return false, fmt.Errorf("%w: %w", ErrDiskStoreCompareSwapFailed, err)
-	}
-
-	// Indexes only change when a new key is inserted via expectAbsent semantics.
-	if swapped && inserted && s.trackKeys {
-		s.keysLock.Lock()
-		s.addKeyIndexLocked(key)
-		s.keysLock.Unlock()
-	}
-
-	return swapped, nil
-}
-
 // Delete removes a key and its value from the store.
 // If tracking is enabled, removes from keysList/keysMap in O(1)
 // (swap-with-last trick) and updates the OSTree.
@@ -622,62 +551,6 @@ func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 	})
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", ErrDiskStoreDeleteIfExistsFailed, err)
-	}
-
-	// Update tracking structures if deleted.
-	if deleted && s.trackKeys {
-		s.keysLock.Lock()
-		s.removeKeyIndexLocked(key)
-		s.keysLock.Unlock()
-	}
-
-	return deleted, nil
-}
-
-// CompareAndDelete deletes key only if current equals "oldValue".
-// Returns true if deleted.
-func (s *DiskStore) CompareAndDelete(key string, oldValue any) (bool, error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
-		return false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
-	}
-
-	oldBytes, err := normalizeToBytes(oldValue)
-	if err != nil {
-		return false, err
-	}
-
-	var deleted bool
-
-	err = s.handle.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(s.bucket)
-		if bucket == nil {
-			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
-		}
-
-		// Get current value.
-		current := bucket.Get([]byte(key))
-
-		// Compare current with old: must match exactly (both nil or both equal bytes).
-		// Three cases: both nil (match), one nil (mismatch), both non-nil (compare bytes).
-		if (current == nil && oldValue != nil) ||
-			(current != nil && oldValue == nil) ||
-			(current != nil && oldValue != nil && !bytes.Equal(current, oldBytes)) {
-			return nil
-		}
-
-		// Values match, perform deletion.
-		err := bucket.Delete([]byte(key))
-		if err != nil {
-			return err
-		}
-
-		deleted = true
-
-		return nil
-	})
-	if err != nil {
-		return false, fmt.Errorf("%w: %w", ErrDiskStoreCompareDeleteFailed, err)
 	}
 
 	// Update tracking structures if deleted.

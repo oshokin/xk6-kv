@@ -104,24 +104,61 @@ func (s *SerializedStore) Swap(key string, value any) (any, bool, error) {
 // CompareAndSwap performs an atomic CAS using serialized 'oldValue' and 'newValue'.
 // It returns true on successful swap. No deserialization is needed here.
 func (s *SerializedStore) CompareAndSwap(key string, oldValue any, newValue any) (bool, error) {
-	var (
-		oldSerializedValue []byte
-		err                error
-	)
-
-	if oldValue != nil {
-		oldSerializedValue, err = s.serializer.Serialize(oldValue)
-		if err != nil {
-			return false, err
-		}
-	}
-
-	newSerializedValue, err := s.serializer.Serialize(newValue)
+	result, err := s.CompareAndSwapDetailed(key, oldValue, newValue, false)
 	if err != nil {
 		return false, err
 	}
 
-	return s.store.CompareAndSwap(key, oldSerializedValue, newSerializedValue)
+	return result.Swapped, nil
+}
+
+// CompareAndSwapDetailed performs CAS with serialized values and returns a
+// structured result. Current is deserialized when included.
+func (s *SerializedStore) CompareAndSwapDetailed(
+	key string,
+	oldValue any,
+	newValue any,
+	includeCurrentOnMismatch bool,
+) (*CompareAndSwapDetailedResult, error) {
+	var (
+		oldSerializedValue []byte
+		oldCompareValue    any
+		err                error
+	)
+
+	// Preserve CAS absent-key sentinel semantics by passing a real nil interface
+	// to the underlying store when oldValue is null/undefined from JS.
+	oldCompareValue = nil
+
+	if oldValue != nil {
+		oldSerializedValue, err = s.serializer.Serialize(oldValue)
+		if err != nil {
+			return nil, err
+		}
+
+		oldCompareValue = oldSerializedValue
+	}
+
+	newSerializedValue, err := s.serializer.Serialize(newValue)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := s.store.CompareAndSwapDetailed(key, oldCompareValue, newSerializedValue, includeCurrentOnMismatch)
+	if err != nil {
+		return nil, err
+	}
+
+	if result.ShouldIncludeCurrent() {
+		decodedCurrent, decodeErr := s.deserializeValue(result.Current)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+
+		result.Current = decodedCurrent
+	}
+
+	return result, nil
 }
 
 // Delete removes the key from the underlying store (no serialization involved).
@@ -142,12 +179,41 @@ func (s *SerializedStore) DeleteIfExists(key string) (bool, error) {
 // CompareAndDelete deletes the key only if its current serialized value equals
 // the serialized "oldValue". It returns true on successful deletion.
 func (s *SerializedStore) CompareAndDelete(key string, oldValue any) (bool, error) {
-	serializedOldValue, err := s.serializer.Serialize(oldValue)
+	result, err := s.CompareAndDeleteDetailed(key, oldValue, false)
 	if err != nil {
 		return false, err
 	}
 
-	return s.store.CompareAndDelete(key, serializedOldValue)
+	return result.Deleted, nil
+}
+
+// CompareAndDeleteDetailed performs compare-and-delete with serialized values
+// and returns a structured result. Current is deserialized when included.
+func (s *SerializedStore) CompareAndDeleteDetailed(
+	key string,
+	oldValue any,
+	includeCurrentOnMismatch bool,
+) (*CompareAndDeleteDetailedResult, error) {
+	serializedOldValue, err := s.serializer.Serialize(oldValue)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := s.store.CompareAndDeleteDetailed(key, serializedOldValue, includeCurrentOnMismatch)
+	if err != nil {
+		return nil, err
+	}
+
+	if result.ShouldIncludeCurrent() {
+		decodedCurrent, decodeErr := s.deserializeValue(result.Current)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+
+		result.Current = decodedCurrent
+	}
+
+	return result, nil
 }
 
 // Clear removes all keys from the underlying store.

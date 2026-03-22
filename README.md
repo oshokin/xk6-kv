@@ -227,8 +227,17 @@ All methods return Promises except `close()`.
 - **`getOrSet(key: string, value: any): Promise<{ value: any, loaded: boolean }>`** - Gets existing value or sets if absent. `loaded: true` means pre-existing.
 - **`swap(key: string, value: any): Promise<{ previous: any|null, loaded: boolean }>`** - Replaces value atomically. Returns previous value if existed.
 - **`compareAndSwap(key: string, oldValue: any, newValue: any): Promise<boolean>`** - Sets `newValue` only if current value equals `oldValue`. Pass `null`/`undefined` as `oldValue` to mean "only if the key is absent" (set-if-not-exists).
+- **`compareAndSwapDetailed(key: string, oldValue: any, newValue: any, options?: { includeCurrentOnMismatch?: boolean }): Promise<{ swapped: true, reason: "swapped" } | { swapped: false, reason: "mismatch", existed: boolean, current?: any }>`** - Detailed CAS diagnostics. On mismatch, includes `existed` and optionally `current` (only when `includeCurrentOnMismatch: true` and key existed).
+- **`setIfAbsent(key: string, value: any): Promise<boolean>`** - Convenience API for first-writer-wins key initialization. Equivalent to `compareAndSwap(key, null, value)`.
 - **`deleteIfExists(key: string): Promise<boolean>`** - Deletes key if it exists. Returns `true` if deleted.
 - **`compareAndDelete(key: string, oldValue: any): Promise<boolean>`** - Deletes key only if current value equals `oldValue`.
+- **`compareAndDeleteDetailed(key: string, oldValue: any, options?: { includeCurrentOnMismatch?: boolean }): Promise<{ deleted: true, reason: "deleted" } | { deleted: false, reason: "mismatch", existed: boolean, current?: any }>`** - Detailed compare-and-delete diagnostics. `oldValue: null/undefined` is treated as regular expected-value comparison through the configured serializer (not an absent-key sentinel).
+
+##### Backwards compatibility
+
+- `compareAndSwap()` and `compareAndDelete()` behavior and return types are unchanged.
+- `compareAndSwapDetailed()` / `compareAndDeleteDetailed()` are additive opt-in APIs for richer mismatch diagnostics.
+- `setIfAbsent()` is a convenience API over absent-key CAS semantics; existing APIs are not redefined.
 
 #### Query Operations
 

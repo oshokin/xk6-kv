@@ -151,7 +151,7 @@ linters:
     interfacebloat:
       # The maximum number of methods allowed for an interface.
       # Default is 10.
-      max: 20
+      max: 25
 
     # Settings for nolintlint linter (reports ill-formed or insufficient nolint directives).
     nolintlint:

@@ -8,20 +8,6 @@ import (
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
-type (
-	// getOrSetResult is the JS-facing result of getOrSet().
-	getOrSetResult struct {
-		Value  any  `js:"value"`
-		Loaded bool `js:"loaded"`
-	}
-
-	// swapResult is the JS-facing result of swap().
-	swapResult struct {
-		Previous any  `js:"previous"`
-		Loaded   bool `js:"loaded"`
-	}
-)
-
 // Get returns a Promise that resolves to the value stored under the provided key.
 //
 // Rejection cases:

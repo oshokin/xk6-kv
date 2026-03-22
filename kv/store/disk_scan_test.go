@@ -96,7 +96,12 @@ func TestDiskStore_Scan_PrefixPagination(t *testing.T) {
 					require.True(t, int64(len(page.Entries)) <= pageSize || pageSize <= 0, "page exceeded limit")
 				} else {
 					require.NotEmpty(t, page.Entries, "NextKey must only be set when entries exist")
-					assert.Equal(t, page.Entries[len(page.Entries)-1].Key, page.NextKey, "NextKey must equal last key in page")
+					assert.Equal(
+						t,
+						page.Entries[len(page.Entries)-1].Key,
+						page.NextKey,
+						"NextKey must equal last key in page",
+					)
 				}
 
 				allScanEntries = append(allScanEntries, page.Entries...)

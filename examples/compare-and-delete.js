@@ -1,7 +1,7 @@
 // Compare-and-delete removes a key only if its current value equals the expected old value.
 // This is handy for "delete only if not processed" or "delete only if state is still X".
 //
-// Covered method: compareAndDelete.
+// Covered methods: compareAndDelete, compareAndDeleteDetailed.
 
 import { openKv } from "k6/x/kv";
 import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";
@@ -19,8 +19,25 @@ export default async function () {
   expect(firstAttemptDeleted).toEqual(false);
   expect(await kv.exists("workflow:job:42:state")).toEqual(true);
 
+  // Detailed mismatch diagnostics (optionally include current value).
+  const detailedMismatch = await kv.compareAndDeleteDetailed(
+    "workflow:job:42:state",
+    "running",
+    { includeCurrentOnMismatch: true }
+  );
+  expect(detailedMismatch.deleted).toEqual(false);
+  expect(detailedMismatch.reason).toEqual("mismatch");
+  expect(detailedMismatch.existed).toEqual(true);
+  expect(detailedMismatch.current).toEqual("failed");
+
   // Correct expected value -> deletion must happen atomically.
   const secondAttemptDeleted = await kv.compareAndDelete("workflow:job:42:state", "failed");
   expect(secondAttemptDeleted).toEqual(true);
   expect(await kv.exists("workflow:job:42:state")).toEqual(false);
+
+  // Null is a regular expected value comparison (serializer-based), not absent sentinel.
+  await kv.set("workflow:job:43:state", null);
+  const nullDelete = await kv.compareAndDeleteDetailed("workflow:job:43:state", undefined);
+  expect(nullDelete.deleted).toEqual(true);
+  expect(nullDelete.reason).toEqual("deleted");
 }

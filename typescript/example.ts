@@ -61,6 +61,23 @@ export default async function () {
     await kv.compareAndSwap('lock', 'vu1', null);
   }
 
+  // More explicit lock helper.
+  const lockInserted = await kv.setIfAbsent('lock:bootstrap', 'vu1');
+  console.log(`Bootstrap lock inserted: ${lockInserted}`);
+
+  // Detailed CAS diagnostics for mismatch triage.
+  const casDetailed = await kv.compareAndSwapDetailed(
+    'lock',
+    null,
+    'vu2',
+    { includeCurrentOnMismatch: true }
+  );
+  if (!casDetailed.swapped) {
+    console.log(
+      `CAS mismatch, existed=${casDetailed.existed}, current=${JSON.stringify(casDetailed.current)}`
+    );
+  }
+
   // Delete only if exists (more informative than delete).
   const deleted = await kv.deleteIfExists('temp');
   console.log(`Temp deleted: ${deleted}`);
@@ -70,6 +87,19 @@ export default async function () {
   const cadSuccess = await kv.compareAndDelete('job:123', 'failed');
   if (cadSuccess) {
     console.log('Failed job removed');
+  }
+
+  // Detailed compare-and-delete diagnostics.
+  await kv.set('job:124', 'running');
+  const cadDetailed = await kv.compareAndDeleteDetailed(
+    'job:124',
+    'failed',
+    { includeCurrentOnMismatch: true }
+  );
+  if (!cadDetailed.deleted) {
+    console.log(
+      `CAD mismatch, existed=${cadDetailed.existed}, current=${JSON.stringify(cadDetailed.current)}`
+    );
   }
 
   // List all entries (or filtered by prefix/limit).

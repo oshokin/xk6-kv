@@ -324,6 +324,89 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Options for compareAndSwapDetailed() and compareAndDeleteDetailed().
+   */
+  export interface CompareDetailedOptions {
+    /**
+     * When true and the compare fails while the key exists, include the stored
+     * value as `current` in the result. Ignored when the operation succeeds.
+     *
+     * @default false
+     */
+    includeCurrentOnMismatch?: boolean;
+  }
+
+  /**
+   * compareAndSwapDetailed() result when the compare matched and the new value was written.
+   */
+  export interface CompareAndSwapDetailedSuccess {
+    /** True when newValue was applied. */
+    swapped: true;
+    /** Always `"swapped"` on success. */
+    reason: 'swapped';
+  }
+
+  /**
+   * compareAndSwapDetailed() result when oldValue did not match the stored value
+   * or the key was absent when a value was expected.
+   */
+  export interface CompareAndSwapDetailedMismatch<T = any> {
+    /** False when the compare did not succeed. */
+    swapped: false;
+    /** Always `"mismatch"` for this branch. */
+    reason: 'mismatch';
+    /** True if the key exists, false if it is absent. */
+    existed: boolean;
+    /**
+     * The stored value when `includeCurrentOnMismatch` is true, the key exists,
+     * and the compare failed. Omitted otherwise.
+     */
+    current?: T;
+  }
+
+  /**
+   * Result of compareAndSwapDetailed(): success or mismatch with optional `current`.
+   */
+  export type CompareAndSwapDetailedResult<T = any> =
+    | CompareAndSwapDetailedSuccess
+    | CompareAndSwapDetailedMismatch<T>;
+
+  /**
+   * compareAndDeleteDetailed() result when the compare matched and the key was removed.
+   */
+  export interface CompareAndDeleteDetailedSuccess {
+    /** True when the key was deleted. */
+    deleted: true;
+    /** Always `"deleted"` on success. */
+    reason: 'deleted';
+  }
+
+  /**
+   * compareAndDeleteDetailed() result when oldValue did not match the stored value
+   * or the key was absent when a value was expected.
+   */
+  export interface CompareAndDeleteDetailedMismatch<T = any> {
+    /** False when the key was not deleted. */
+    deleted: false;
+    /** Always `"mismatch"` for this branch. */
+    reason: 'mismatch';
+    /** True if the key exists, false if it is absent. */
+    existed: boolean;
+    /**
+     * The stored value when `includeCurrentOnMismatch` is true, the key exists,
+     * and the compare failed. Omitted otherwise.
+     */
+    current?: T;
+  }
+
+  /**
+   * Result of compareAndDeleteDetailed(): success or mismatch with optional `current`.
+   */
+  export type CompareAndDeleteDetailedResult<T = any> =
+    | CompareAndDeleteDetailedSuccess
+    | CompareAndDeleteDetailedMismatch<T>;
+
+  /**
    * Key-value store instance.
    * All methods are Promise-based except close() which is synchronous.
    */
@@ -501,6 +584,61 @@ declare module 'k6/x/kv' {
     compareAndSwap(key: string, oldValue: any, newValue: any): Promise<boolean>;
 
     /**
+     * Atomically sets newValue only if current value equals oldValue, returning a
+     * structured result for logging and incident triage.
+     *
+     * On success the result is `{ swapped: true, reason: "swapped" }` and never
+     * includes `current`. On mismatch the result is
+     * `{ swapped: false, reason: "mismatch", existed, current? }`; `current` is
+     * present only when `includeCurrentOnMismatch` is true and the key exists.
+     *
+     * Pass `null` (or leave undefined) for `oldValue` to express
+     * "swap only if the key is currently absent", same as compareAndSwap().
+     *
+     * @param key - The key to update
+     * @param oldValue - The expected current value
+     * @param newValue - The new value to set
+     * @param options - Optional flags controlling mismatch payloads
+     * @returns Promise that resolves to CompareAndSwapDetailedResult
+     *
+     * @example
+     * ```javascript
+     * const result = await kv.compareAndSwapDetailed('flag', prev, next, {
+     *   includeCurrentOnMismatch: true
+     * });
+     * if (!result.swapped && result.existed && result.current) {
+     *   console.log('Lost race; store has', result.current);
+     * }
+     * ```
+     */
+    compareAndSwapDetailed<T = any>(
+      key: string,
+      oldValue: any,
+      newValue: any,
+      options?: CompareDetailedOptions
+    ): Promise<CompareAndSwapDetailedResult<T>>;
+
+    /**
+     * Atomically sets key only if it is currently absent.
+     *
+     * Equivalent to `compareAndSwap(key, null, value)` with a clearer name for
+     * bootstrap and lock-creation flows.
+     *
+     * @param key - The key to initialize
+     * @param value - The value to store when the key is absent
+     * @returns Promise that resolves to true if the value was inserted, false if the key already existed
+     *
+     * @example
+     * ```javascript
+     * const created = await kv.setIfAbsent('lock:job:1', workerId);
+     * if (created) {
+     *   // This worker won the bootstrap race
+     * }
+     * ```
+     */
+    setIfAbsent(key: string, value: any): Promise<boolean>;
+
+    /**
      * Deletes the key if it exists.
      * More informative than delete() which always returns true.
      *
@@ -532,6 +670,40 @@ declare module 'k6/x/kv' {
      * ```
      */
     compareAndDelete(key: string, oldValue: any): Promise<boolean>;
+
+    /**
+     * Atomically deletes the key only if current value equals oldValue, returning a
+     * structured result for logging and incident triage.
+     *
+     * On success the result is `{ deleted: true, reason: "deleted" }` and never
+     * includes `current`. On mismatch the result is
+     * `{ deleted: false, reason: "mismatch", existed, current? }`; `current` is
+     * present only when `includeCurrentOnMismatch` is true and the key exists.
+     *
+     * Unlike compareAndSwap(), `null` and `undefined` for `oldValue` are normal
+     * expected values compared through the configured serializer (for example
+     * JSON null), not an absent-key sentinel.
+     *
+     * @param key - The key to delete
+     * @param oldValue - The expected current value
+     * @param options - Optional flags controlling mismatch payloads
+     * @returns Promise that resolves to CompareAndDeleteDetailedResult
+     *
+     * @example
+     * ```javascript
+     * const result = await kv.compareAndDeleteDetailed('session:1', expected, {
+     *   includeCurrentOnMismatch: true
+     * });
+     * if (result.deleted) {
+     *   console.log('Session removed');
+     * }
+     * ```
+     */
+    compareAndDeleteDetailed<T = any>(
+      key: string,
+      oldValue: any,
+      options?: CompareDetailedOptions
+    ): Promise<CompareAndDeleteDetailedResult<T>>;
 
     // ==================== Query Operations ====================
 

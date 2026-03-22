@@ -73,6 +73,22 @@ export const options = {
     'checks{api:getOrSet-boolean-true}': ['rate>0.999'],
     'checks{api:getOrSet-boolean-false}': ['rate>0.999'],
     'checks{api:getOrSet-float-value}': ['rate>0.999'],
+    'checks{api:compareAndSwapDetailed-success-structure}': ['rate>0.999'],
+    'checks{api:compareAndSwapDetailed-success-fields}': ['rate>0.999'],
+    'checks{api:compareAndSwapDetailed-mismatch-no-current}': ['rate>0.999'],
+    'checks{api:compareAndSwapDetailed-mismatch-with-current}': ['rate>0.999'],
+    'checks{api:compareAndSwapDetailed-missing-key}': ['rate>0.999'],
+    'checks{api:compareAndSwapDetailed-null-absent-sentinel}': ['rate>0.999'],
+    'checks{api:setIfAbsent-first-write}': ['rate>0.999'],
+    'checks{api:setIfAbsent-second-write}': ['rate>0.999'],
+    'checks{api:setIfAbsent-value-preserved}': ['rate>0.999'],
+    'checks{api:compareAndDeleteDetailed-success-structure}': ['rate>0.999'],
+    'checks{api:compareAndDeleteDetailed-success-fields}': ['rate>0.999'],
+    'checks{api:compareAndDeleteDetailed-mismatch-no-current}': ['rate>0.999'],
+    'checks{api:compareAndDeleteDetailed-mismatch-with-current}': ['rate>0.999'],
+    'checks{api:compareAndDeleteDetailed-missing-key}': ['rate>0.999'],
+    'checks{api:compareAndDeleteDetailed-null-literal}': ['rate>0.999'],
+    'checks{api:compareAndDeleteDetailed-undefined-literal}': ['rate>0.999'],
     'checks{api:list-boolean-true}': ['rate>0.999'],
     'checks{api:list-boolean-false}': ['rate>0.999'],
     'checks{api:list-float-value}': ['rate>0.999'],
@@ -213,6 +229,249 @@ export default async function apiOutputValidationTest() {
   check(swapExistingResult, {
     'api:swap-existing': () =>
       swapExistingResult.loaded === true && swapExistingResult.previous === 'first'
+  });
+
+  // compareAndSwapDetailed(): Validate detailed payload shape for all branches.
+  // Success branch should contain only (swapped, reason). Mismatch branch should
+  // contain (swapped, reason, existed) and include current only when requested and
+  // the key exists.
+  const casDetailedKey = 'casDetailedKey';
+  const casDetailedInitial = { version: 1, owner: 'seed' };
+  await kv.set(casDetailedKey, casDetailedInitial);
+
+  const casDetailedMismatchNoCurrent = await kv.compareAndSwapDetailed(
+    casDetailedKey,
+    { version: 999, owner: 'seed' },
+    { version: 2, owner: 'writer-1' },
+    { includeCurrentOnMismatch: false }
+  );
+  const casDetailedMismatchNoCurrentKeys = Object.keys(casDetailedMismatchNoCurrent);
+
+  check(casDetailedMismatchNoCurrent, {
+    'api:compareAndSwapDetailed-mismatch-no-current': () =>
+      casDetailedMismatchNoCurrent.swapped === false &&
+      casDetailedMismatchNoCurrent.reason === 'mismatch' &&
+      casDetailedMismatchNoCurrent.existed === true &&
+      casDetailedMismatchNoCurrentKeys.includes('swapped') &&
+      casDetailedMismatchNoCurrentKeys.includes('reason') &&
+      casDetailedMismatchNoCurrentKeys.includes('existed') &&
+      casDetailedMismatchNoCurrentKeys.length === 3 &&
+      !Object.prototype.hasOwnProperty.call(casDetailedMismatchNoCurrent, 'current')
+  });
+
+  const casDetailedMismatchWithCurrent = await kv.compareAndSwapDetailed(
+    casDetailedKey,
+    { version: 999, owner: 'seed' },
+    { version: 2, owner: 'writer-2' },
+    { includeCurrentOnMismatch: true }
+  );
+  const casDetailedMismatchWithCurrentKeys = Object.keys(casDetailedMismatchWithCurrent);
+
+  check(casDetailedMismatchWithCurrent, {
+    'api:compareAndSwapDetailed-mismatch-with-current': () =>
+      casDetailedMismatchWithCurrent.swapped === false &&
+      casDetailedMismatchWithCurrent.reason === 'mismatch' &&
+      casDetailedMismatchWithCurrent.existed === true &&
+      casDetailedMismatchWithCurrentKeys.includes('swapped') &&
+      casDetailedMismatchWithCurrentKeys.includes('reason') &&
+      casDetailedMismatchWithCurrentKeys.includes('existed') &&
+      casDetailedMismatchWithCurrentKeys.includes('current') &&
+      casDetailedMismatchWithCurrentKeys.length === 4 &&
+      typeof casDetailedMismatchWithCurrent.current === 'object' &&
+      casDetailedMismatchWithCurrent.current.version === 1 &&
+      casDetailedMismatchWithCurrent.current.owner === 'seed'
+  });
+
+  const casDetailedMissingKey = await kv.compareAndSwapDetailed(
+    'casDetailedMissingKey',
+    { expected: true },
+    { version: 1 },
+    { includeCurrentOnMismatch: true }
+  );
+  const casDetailedMissingKeyKeys = Object.keys(casDetailedMissingKey);
+
+  check(casDetailedMissingKey, {
+    'api:compareAndSwapDetailed-missing-key': () =>
+      casDetailedMissingKey.swapped === false &&
+      casDetailedMissingKey.reason === 'mismatch' &&
+      casDetailedMissingKey.existed === false &&
+      casDetailedMissingKeyKeys.includes('swapped') &&
+      casDetailedMissingKeyKeys.includes('reason') &&
+      casDetailedMissingKeyKeys.includes('existed') &&
+      casDetailedMissingKeyKeys.length === 3 &&
+      !Object.prototype.hasOwnProperty.call(casDetailedMissingKey, 'current')
+  });
+
+  const casDetailedSuccess = await kv.compareAndSwapDetailed(
+    casDetailedKey,
+    casDetailedInitial,
+    { version: 2, owner: 'writer-3' },
+    { includeCurrentOnMismatch: true }
+  );
+  const casDetailedSuccessKeys = Object.keys(casDetailedSuccess);
+
+  check(casDetailedSuccess, {
+    'api:compareAndSwapDetailed-success-structure': () =>
+      casDetailedSuccessKeys.includes('swapped') &&
+      casDetailedSuccessKeys.includes('reason') &&
+      casDetailedSuccessKeys.length === 2,
+    'api:compareAndSwapDetailed-success-fields': () =>
+      casDetailedSuccess.swapped === true &&
+      casDetailedSuccess.reason === 'swapped' &&
+      !Object.prototype.hasOwnProperty.call(casDetailedSuccess, 'current') &&
+      !Object.prototype.hasOwnProperty.call(casDetailedSuccess, 'existed')
+  });
+
+  // oldValue=null in CAS means "only if absent", same as set-if-not-exists.
+  const casDetailedNullAbsentSentinel = await kv.compareAndSwapDetailed(
+    'casDetailedAbsentKey',
+    null,
+    { createdBy: 'compareAndSwapDetailed' },
+    { includeCurrentOnMismatch: true }
+  );
+
+  check(casDetailedNullAbsentSentinel, {
+    'api:compareAndSwapDetailed-null-absent-sentinel': () =>
+      casDetailedNullAbsentSentinel.swapped === true &&
+      casDetailedNullAbsentSentinel.reason === 'swapped' &&
+      !Object.prototype.hasOwnProperty.call(casDetailedNullAbsentSentinel, 'current') &&
+      !Object.prototype.hasOwnProperty.call(casDetailedNullAbsentSentinel, 'existed')
+  });
+
+  // setIfAbsent(): Validate boolean contract and first-writer-wins behavior.
+  const setIfAbsentKey = 'setIfAbsentKey';
+  const setIfAbsentFirst = await kv.setIfAbsent(setIfAbsentKey, { owner: 'writer-1' });
+  const setIfAbsentSecond = await kv.setIfAbsent(setIfAbsentKey, { owner: 'writer-2' });
+  const setIfAbsentStored = await kv.get(setIfAbsentKey);
+
+  check(true, {
+    'api:setIfAbsent-first-write': () =>
+      typeof setIfAbsentFirst === 'boolean' && setIfAbsentFirst === true,
+    'api:setIfAbsent-second-write': () =>
+      typeof setIfAbsentSecond === 'boolean' && setIfAbsentSecond === false,
+    'api:setIfAbsent-value-preserved': () =>
+      typeof setIfAbsentStored === 'object' &&
+      setIfAbsentStored.owner === 'writer-1'
+  });
+
+  // compareAndDeleteDetailed(): Validate detailed payload shape for all branches.
+  // Success branch should contain only (deleted, reason). Mismatch branch should
+  // contain (deleted, reason, existed) and include current only when requested and
+  // the key exists.
+  const cadDetailedKey = 'cadDetailedKey';
+  const cadDetailedInitial = { state: 'active', version: 1 };
+  await kv.set(cadDetailedKey, cadDetailedInitial);
+
+  const cadDetailedMismatchNoCurrent = await kv.compareAndDeleteDetailed(
+    cadDetailedKey,
+    { state: 'stale', version: 1 },
+    { includeCurrentOnMismatch: false }
+  );
+  const cadDetailedMismatchNoCurrentKeys = Object.keys(cadDetailedMismatchNoCurrent);
+
+  check(cadDetailedMismatchNoCurrent, {
+    'api:compareAndDeleteDetailed-mismatch-no-current': () =>
+      cadDetailedMismatchNoCurrent.deleted === false &&
+      cadDetailedMismatchNoCurrent.reason === 'mismatch' &&
+      cadDetailedMismatchNoCurrent.existed === true &&
+      cadDetailedMismatchNoCurrentKeys.includes('deleted') &&
+      cadDetailedMismatchNoCurrentKeys.includes('reason') &&
+      cadDetailedMismatchNoCurrentKeys.includes('existed') &&
+      cadDetailedMismatchNoCurrentKeys.length === 3 &&
+      !Object.prototype.hasOwnProperty.call(cadDetailedMismatchNoCurrent, 'current')
+  });
+
+  const cadDetailedMismatchWithCurrent = await kv.compareAndDeleteDetailed(
+    cadDetailedKey,
+    { state: 'stale', version: 1 },
+    { includeCurrentOnMismatch: true }
+  );
+  const cadDetailedMismatchWithCurrentKeys = Object.keys(cadDetailedMismatchWithCurrent);
+
+  check(cadDetailedMismatchWithCurrent, {
+    'api:compareAndDeleteDetailed-mismatch-with-current': () =>
+      cadDetailedMismatchWithCurrent.deleted === false &&
+      cadDetailedMismatchWithCurrent.reason === 'mismatch' &&
+      cadDetailedMismatchWithCurrent.existed === true &&
+      cadDetailedMismatchWithCurrentKeys.includes('deleted') &&
+      cadDetailedMismatchWithCurrentKeys.includes('reason') &&
+      cadDetailedMismatchWithCurrentKeys.includes('existed') &&
+      cadDetailedMismatchWithCurrentKeys.includes('current') &&
+      cadDetailedMismatchWithCurrentKeys.length === 4 &&
+      typeof cadDetailedMismatchWithCurrent.current === 'object' &&
+      cadDetailedMismatchWithCurrent.current.state === 'active' &&
+      cadDetailedMismatchWithCurrent.current.version === 1
+  });
+
+  const cadDetailedMissingKey = await kv.compareAndDeleteDetailed(
+    'cadDetailedMissingKey',
+    { expected: true },
+    { includeCurrentOnMismatch: true }
+  );
+  const cadDetailedMissingKeyKeys = Object.keys(cadDetailedMissingKey);
+
+  check(cadDetailedMissingKey, {
+    'api:compareAndDeleteDetailed-missing-key': () =>
+      cadDetailedMissingKey.deleted === false &&
+      cadDetailedMissingKey.reason === 'mismatch' &&
+      cadDetailedMissingKey.existed === false &&
+      cadDetailedMissingKeyKeys.includes('deleted') &&
+      cadDetailedMissingKeyKeys.includes('reason') &&
+      cadDetailedMissingKeyKeys.includes('existed') &&
+      cadDetailedMissingKeyKeys.length === 3 &&
+      !Object.prototype.hasOwnProperty.call(cadDetailedMissingKey, 'current')
+  });
+
+  const cadDetailedSuccess = await kv.compareAndDeleteDetailed(
+    cadDetailedKey,
+    cadDetailedInitial,
+    { includeCurrentOnMismatch: true }
+  );
+  const cadDetailedSuccessKeys = Object.keys(cadDetailedSuccess);
+
+  check(cadDetailedSuccess, {
+    'api:compareAndDeleteDetailed-success-structure': () =>
+      cadDetailedSuccessKeys.includes('deleted') &&
+      cadDetailedSuccessKeys.includes('reason') &&
+      cadDetailedSuccessKeys.length === 2,
+    'api:compareAndDeleteDetailed-success-fields': () =>
+      cadDetailedSuccess.deleted === true &&
+      cadDetailedSuccess.reason === 'deleted' &&
+      !Object.prototype.hasOwnProperty.call(cadDetailedSuccess, 'current') &&
+      !Object.prototype.hasOwnProperty.call(cadDetailedSuccess, 'existed')
+  });
+
+  // CAD treats null/undefined as normal value comparisons (not absent sentinel).
+  const cadNullKey = 'cadDetailedNullKey';
+  await kv.set(cadNullKey, null);
+  const cadNullDelete = await kv.compareAndDeleteDetailed(
+    cadNullKey,
+    null,
+    { includeCurrentOnMismatch: true }
+  );
+
+  check(cadNullDelete, {
+    'api:compareAndDeleteDetailed-null-literal': () =>
+      cadNullDelete.deleted === true &&
+      cadNullDelete.reason === 'deleted' &&
+      !Object.prototype.hasOwnProperty.call(cadNullDelete, 'current') &&
+      !Object.prototype.hasOwnProperty.call(cadNullDelete, 'existed')
+  });
+
+  const cadUndefinedKey = 'cadDetailedUndefinedKey';
+  await kv.set(cadUndefinedKey, null);
+  const cadUndefinedDelete = await kv.compareAndDeleteDetailed(
+    cadUndefinedKey,
+    undefined,
+    { includeCurrentOnMismatch: true }
+  );
+
+  check(cadUndefinedDelete, {
+    'api:compareAndDeleteDetailed-undefined-literal': () =>
+      cadUndefinedDelete.deleted === true &&
+      cadUndefinedDelete.reason === 'deleted' &&
+      !Object.prototype.hasOwnProperty.call(cadUndefinedDelete, 'current') &&
+      !Object.prototype.hasOwnProperty.call(cadUndefinedDelete, 'existed')
   });
 
   // list(): Validate that results are returned as an array of entry objects.

@@ -7,13 +7,12 @@ import (
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
-// testOpenKVStoreBarrier is a test hook invoked the moment a goroutine enters the
-// store-initialization path. It lets tests synchronize concurrent calls to OpenKv
-// without impacting production behavior (nil in non-test builds).
-//
 //nolint:gochecknoglobals // this is a test hook.
 var (
-	testOpenKVStoreBarrier   func()
+	// testOpenKVStoreBarrier runs when a goroutine enters store initialization.
+	// Tests use it to synchronize concurrent OpenKv calls; production keeps it nil.
+	testOpenKVStoreBarrier func()
+	// testOpenKVStoreBarrierMu guards reads/writes of testOpenKVStoreBarrier.
 	testOpenKVStoreBarrierMu sync.RWMutex
 )
 

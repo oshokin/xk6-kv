@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"fmt"
 	"math"
 	"slices"
@@ -241,64 +240,6 @@ func (s *MemoryStore) Swap(key string, value any) (previous any, loaded bool, er
 	return nil, false, nil
 }
 
-// CompareAndSwap atomically replaces the current value with newValue only if the
-// current value equals oldValue (or the key is absent when oldValue is nil).
-func (s *MemoryStore) CompareAndSwap(key string, oldValue any, newValue any) (bool, error) {
-	release, err := s.guardMutation()
-	if err != nil {
-		return false, err
-	}
-	defer release()
-
-	expectAbsent := oldValue == nil
-
-	var oldBytes []byte
-
-	if !expectAbsent {
-		oldBytes, err = normalizeToBytes(oldValue)
-		if err != nil {
-			return false, err
-		}
-	}
-
-	// Convert new value to bytes.
-	newBytes, err := normalizeToBytes(newValue)
-	if err != nil {
-		return false, err
-	}
-
-	shard := s.getShardByKey(key)
-
-	shard.mu.Lock()
-	defer shard.mu.Unlock()
-
-	current, exists := shard.container[key]
-
-	switch {
-	case expectAbsent:
-		// CAS with nil oldValue: only succeed if key doesn't exist.
-		if exists {
-			return false, nil
-		}
-
-		shard.container[key] = newBytes
-		shard.addKeyTrackingLocked(key)
-
-		return true, nil
-	default:
-		// CAS with non-nil oldValue: compare current value byte-for-byte.
-		if !exists || !bytes.Equal(current, oldBytes) {
-			return false, nil
-		}
-
-		shard.container[key] = newBytes
-
-		// Indexes do not change because the key already existed.
-		// No need to update keysList/keysMap/OSTree for existing keys.
-		return true, nil
-	}
-}
-
 // Delete removes key if present.
 func (s *MemoryStore) Delete(key string) error {
 	release, err := s.guardMutation()
@@ -364,35 +305,6 @@ func (s *MemoryStore) DeleteIfExists(key string) (bool, error) {
 	defer shard.mu.Unlock()
 
 	if _, exists := shard.container[key]; !exists {
-		return false, nil
-	}
-
-	delete(shard.container, key)
-	shard.removeKeyTrackingLocked(key)
-
-	return true, nil
-}
-
-// CompareAndDelete deletes key only if the current value equals oldValue.
-func (s *MemoryStore) CompareAndDelete(key string, oldValue any) (bool, error) {
-	release, err := s.guardMutation()
-	if err != nil {
-		return false, err
-	}
-	defer release()
-
-	oldBytes, err := normalizeToBytes(oldValue)
-	if err != nil {
-		return false, err
-	}
-
-	shard := s.getShardByKey(key)
-
-	shard.mu.Lock()
-	defer shard.mu.Unlock()
-
-	current, exists := shard.container[key]
-	if !exists || !bytes.Equal(current, oldBytes) {
 		return false, nil
 	}
 
