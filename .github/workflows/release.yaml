@@ -21,6 +21,8 @@ jobs:
   # Single release job for both automatic (main push), tag push, and manual triggers.
   release:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     # Only run if the Extension Check workflow succeeded for a push to main or a tag, or if run manually.
     if: |
       github.event_name == 'workflow_dispatch' ||
