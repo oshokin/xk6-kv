@@ -14,12 +14,13 @@ import (
 //   - trackKeys = true:
 //     prefix==""  -> O(1) from keysList.
 //     prefix!=""  -> O(log n) via OSTree.
-//   - trackKeys = false -> two-pass scan over bbolt cursor.
+//   - trackKeys = false -> two-pass scan in a single bbolt snapshot.
 func (s *DiskStore) RandomKey(prefix string) (string, error) {
-	err := s.ensureOpen()
+	release, err := s.beginOperation()
 	if err != nil {
 		return "", err
 	}
+	defer release()
 
 	if s.trackKeys {
 		return s.randomKeyWithTracking(prefix)
@@ -150,100 +151,32 @@ func (s *DiskStore) randomKeyWithTracking(prefix string) (string, error) {
 	return "", nil
 }
 
-// randomKeyWithoutTracking performs a two-pass prefix scan over bbolt:
+// randomKeyWithoutTracking performs a two-pass prefix scan inside one bbolt
+// View transaction:
 // 1) count matching keys;
 // 2) pick the r-th and iterate again to select it.
+// Running both passes in one View keeps count and selection on the same snapshot.
 func (s *DiskStore) randomKeyWithoutTracking(prefix string) (string, error) {
-	// Pass 1: count.
-	count, err := s.countKeys(prefix)
-	if err != nil || count == 0 {
-		return "", err
-	}
-
-	// Pass 2: pick and return the r-th.
-	target := rand.Int64N(count) //nolint:gosec // math/rand/v2 is safe
-
-	return s.getKeyByIndex(prefix, target)
-}
-
-// countKeys counts how many keys match a given prefix using a bbolt cursor.
-// When prefix == "", we can return KeyN directly from stats.
-func (s *DiskStore) countKeys(prefix string) (int64, error) {
-	var count int64
+	var selected string
 
 	err := s.handle.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(s.bucket)
-		if b == nil {
+		bucket := tx.Bucket(s.bucket)
+		if bucket == nil {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
-		// Fast path: no prefix means count all keys, use bbolt stats (O(1)).
-		if prefix == "" {
-			count = int64(b.Stats().KeyN)
-
+		// Pass 1: count matches in this snapshot.
+		count := countKeysInBucket(bucket, prefix)
+		if count == 0 {
 			return nil
 		}
 
-		c := b.Cursor()
-		p := []byte(prefix)
+		// Pass 2: pick and return the r-th key from the same snapshot.
+		target := rand.Int64N(count) //nolint:gosec // math/rand/v2 is safe
 
-		// Iterate from prefix start until we leave the prefix range.
-		// Cursor maintains lexicographic order, so we can break once prefix no longer matches.
-		// Cursor.Next/Seek return both key and value; this matcher only needs keys,
-		// so we intentionally ignore the value part of the tuple.
-		for k, _ := c.Seek([]byte(prefix)); k != nil; k, _ = c.Next() {
-			if !bytes.HasPrefix(k, p) {
-				break
-			}
-
-			count++
-		}
-
-		return nil
-	})
-	if err != nil {
-		return 0, fmt.Errorf("%w: %w", ErrDiskStoreCountFailed, err)
-	}
-
-	return count, nil
-}
-
-// getKeyByIndex returns the key at the given zero-based position among
-// keys that match prefix. If the index is out of range due to races,
-// it returns "" and nil to preserve the "no error when empty" contract.
-func (s *DiskStore) getKeyByIndex(prefix string, index int64) (string, error) {
-	var (
-		key     string
-		found   bool
-		current int64
-	)
-
-	err := s.handle.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(s.bucket)
-		if b == nil {
-			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
-		}
-
-		c := b.Cursor()
-		p := []byte(prefix)
-
-		// Iterate through matching keys until we reach the target index.
-		// Cursor iteration yields both key and value; the random selector only
-		// cares about keys, so the value is deliberately ignored.
-		for k, _ := c.Seek([]byte(prefix)); k != nil; k, _ = c.Next() {
-			if prefix != "" && !bytes.HasPrefix(k, p) {
-				break
-			}
-
-			// Found the key at target index: return it.
-			if current == index {
-				key = string(k)
-				found = true
-
-				return nil
-			}
-
-			current++
+		key, found := keyByIndexInBucket(bucket, prefix, target)
+		if found {
+			selected = key
 		}
 
 		return nil
@@ -252,9 +185,58 @@ func (s *DiskStore) getKeyByIndex(prefix string, index int64) (string, error) {
 		return "", fmt.Errorf("%w: %w", ErrDiskStoreRandomAccessFailed, err)
 	}
 
-	if !found {
-		return "", nil
+	return selected, nil
+}
+
+// countKeysInBucket counts how many keys match prefix using the provided bucket.
+// When prefix == "", it returns KeyN directly from bucket stats (O(1)).
+func countKeysInBucket(bucket *bolt.Bucket, prefix string) int64 {
+	if prefix == "" {
+		return int64(bucket.Stats().KeyN)
 	}
 
-	return key, nil
+	var (
+		count       int64
+		cursor      = bucket.Cursor()
+		prefixBytes = []byte(prefix)
+	)
+
+	// Iterate from prefix start until we leave the prefix range.
+	// Cursor maintains lexicographic order, so we can break once prefix no longer matches.
+	for k, _ := cursor.Seek(prefixBytes); k != nil; k, _ = cursor.Next() {
+		if !bytes.HasPrefix(k, prefixBytes) {
+			break
+		}
+
+		count++
+	}
+
+	return count
+}
+
+// keyByIndexInBucket returns the key at the zero-based index among keys that
+// match prefix in the provided bucket snapshot.
+func keyByIndexInBucket(bucket *bolt.Bucket, prefix string, index int64) (string, bool) {
+	var (
+		current     int64
+		cursor      = bucket.Cursor()
+		prefixBytes = []byte(prefix)
+	)
+
+	// Iterate through matching keys until we reach the target index.
+	// Cursor iteration yields both key and value; we only need keys.
+	for k, _ := cursor.Seek(prefixBytes); k != nil; k, _ = cursor.Next() {
+		if prefix != "" && !bytes.HasPrefix(k, prefixBytes) {
+			break
+		}
+
+		// Found the key at target index: return it.
+		if current == index {
+			return string(k), true
+		}
+
+		current++
+	}
+
+	return "", false
 }

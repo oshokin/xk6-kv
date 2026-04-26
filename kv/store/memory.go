@@ -36,6 +36,9 @@ type MemoryStore struct {
 	// mutationBlockReason is the reason why mutations are blocked.
 	// Stored so blocked operations can return a descriptive error.
 	mutationBlockReason error
+	// testRestoreHook is a test-only synchronization hook invoked in Restore()
+	// after mutation blocking is active and before snapshot I/O begins.
+	testRestoreHook func()
 }
 
 // NewMemoryStore creates a MemoryStore with the provided memory configuration.

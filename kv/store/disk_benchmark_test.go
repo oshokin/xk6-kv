@@ -172,12 +172,12 @@ func BenchmarkDiskStore_CompareAndSwap_Contention(b *testing.B) {
 			b.ReportAllocs()
 
 			store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-compare-and-swap-contention-*.db")
-			require.NoError(b, store.Set("k", "v0"))
+			require.NoError(b, store.Set("k", "state-initial"))
 
 			b.ResetTimer()
 			b.RunParallel(func(parallelBench *testing.PB) {
 				for parallelBench.Next() {
-					_, _ = store.CompareAndSwap("k", "v0", "v1")
+					_, _ = store.CompareAndSwap("k", "state-initial", "state-updated")
 				}
 			})
 		})

@@ -66,7 +66,7 @@ func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 		wg    sync.WaitGroup
 	)
 
-	require.NoError(t, store.Set("k", "v0"))
+	require.NoError(t, store.Set("k", "state-initial"))
 
 	wg.Add(concurrencyLevel)
 
@@ -74,7 +74,7 @@ func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			ok, err := store.CompareAndSwap("k", "v0", "v1")
+			ok, err := store.CompareAndSwap("k", "state-initial", "state-updated")
 			assert.NoError(t, err)
 
 			okCh <- ok
@@ -96,7 +96,7 @@ func TestMemoryStore_CompareAndSwap_ConcurrentSingleWinner(t *testing.T) {
 
 	got, err := store.Get("k")
 	require.NoError(t, err)
-	assert.Equal(t, []byte("v1"), got.([]byte))
+	assert.Equal(t, []byte("state-updated"), got.([]byte))
 }
 
 // TestMemoryStore_CompareAndSwapDetailed_Metadata verifies reason/existed/current fields
@@ -157,7 +157,7 @@ func TestMemoryStore_CompareAndDelete_Basic(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
-	require.NoError(t, store.Set("k", "v1"))
+	require.NoError(t, store.Set("k", "state-current"))
 
 	ok, err := store.CompareAndDelete("k", "BAD")
 	require.NoError(t, err)
@@ -166,7 +166,7 @@ func TestMemoryStore_CompareAndDelete_Basic(t *testing.T) {
 	exists, _ := store.Exists("k")
 	assert.True(t, exists, "key should still exist")
 
-	ok, err = store.CompareAndDelete("k", "v1")
+	ok, err = store.CompareAndDelete("k", "state-current")
 	require.NoError(t, err)
 	assert.True(t, ok, "correct value must delete")
 
@@ -220,7 +220,7 @@ func TestMemoryStore_CompareAndDeleteDetailed_Metadata(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
-	require.NoError(t, store.Set("k", "v1"))
+	require.NoError(t, store.Set("k", "state-current"))
 
 	wantMismatchOmitCurrent := &CompareAndDeleteDetailedResult{
 		Reason:  CompareReasonMismatch,
@@ -229,7 +229,7 @@ func TestMemoryStore_CompareAndDeleteDetailed_Metadata(t *testing.T) {
 	wantMismatchIncludeCurrent := &CompareAndDeleteDetailedResult{
 		Reason:     CompareReasonMismatch,
 		Existed:    true,
-		Current:    []byte("v1"),
+		Current:    []byte("state-current"),
 		HasCurrent: true,
 	}
 	wantMissingKey := &CompareAndDeleteDetailedResult{
@@ -249,11 +249,11 @@ func TestMemoryStore_CompareAndDeleteDetailed_Metadata(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, wantMismatchIncludeCurrent, result)
 
-	result, err = store.CompareAndDeleteDetailed("missing", "v1", true)
+	result, err = store.CompareAndDeleteDetailed("missing", "state-current", true)
 	require.NoError(t, err)
 	assert.Equal(t, wantMissingKey, result)
 
-	result, err = store.CompareAndDeleteDetailed("k", "v1", true)
+	result, err = store.CompareAndDeleteDetailed("k", "state-current", true)
 	require.NoError(t, err)
 	assert.Equal(t, wantDeleteMatch, result)
 }
@@ -264,7 +264,7 @@ func TestMemoryStore_CompareAndDelete_NilOldValueUnsupported(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
-	require.NoError(t, store.Set("k", "v1"))
+	require.NoError(t, store.Set("k", "state-current"))
 
 	ok, err := store.CompareAndDelete("k", nil)
 	assert.False(t, ok)

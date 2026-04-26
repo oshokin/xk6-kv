@@ -19,19 +19,19 @@ func TestMemoryStore_BlockMutationsAPI(t *testing.T) {
 
 	require.NoError(t, store.blockMutations(errors.New("custom block")))
 
-	err := store.Set("k1", "v1")
+	err := store.Set("key-alpha", "value-alpha")
 	require.EqualError(t, err, "custom block")
 
 	store.unblockMutations()
-	require.NoError(t, store.Set("k1", "v1"))
+	require.NoError(t, store.Set("key-alpha", "value-alpha"))
 
 	require.NoError(t, store.blockMutations(nil))
 
-	err = store.Set("k2", "v2")
+	err = store.Set("key-beta", "value-beta")
 	require.ErrorIs(t, err, ErrMutationBlocked)
 
 	store.unblockMutations()
-	require.NoError(t, store.Set("k2", "v2"))
+	require.NoError(t, store.Set("key-beta", "value-beta"))
 }
 
 // TestMemoryStore_BlockMutations_WaitGroupRace stress-tests concurrent blocking

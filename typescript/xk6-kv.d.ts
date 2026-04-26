@@ -760,6 +760,23 @@ declare module 'k6/x/kv' {
     list(options?: ListOptions): Promise<Entry[]>;
 
     /**
+     * Returns the number of keys that start with the provided prefix.
+     *
+     * - `count("")` (or omitted prefix) is equivalent to `size()`
+     * - Prefix matching is byte-wise and consistent with scan/list/randomKey
+     *
+     * @param prefix - Optional key prefix filter
+     * @returns Promise that resolves to the number of matching keys
+     *
+     * @example
+     * ```javascript
+     * const usersCount = await kv.count('user:');
+     * const totalCount = await kv.count();
+     * ```
+     */
+    count(prefix?: string): Promise<number>;
+
+    /**
      * Returns a random key, optionally filtered by prefix.
      * Resolves to empty string ("") when no key matches (including empty store).
      * Never throws - always safe to call.
@@ -855,7 +872,8 @@ declare module 'k6/x/kv' {
    * Must be called in the init context (outside default/setup/teardown functions).
    *
    * The first successful call initializes the shared store for all VUs.
-   * Later calls reuse the established store and ignore differing options.
+   * Later calls must provide equivalent options; conflicting options throw
+   * KVOptionsConflictError.
    *
    * @param options - Storage and serialization configuration
    * @returns KV store instance

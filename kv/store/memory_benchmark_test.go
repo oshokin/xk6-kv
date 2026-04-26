@@ -140,12 +140,12 @@ func BenchmarkMemoryStore_CompareAndSwap_Contention(b *testing.B) {
 
 	memoryCfg := &MemoryConfig{TrackKeys: true}
 	store := NewMemoryStore(memoryCfg)
-	require.NoError(b, store.Set("k", "v0"))
+	require.NoError(b, store.Set("k", "state-initial"))
 
 	b.ResetTimer()
 	b.RunParallel(func(parallelBench *testing.PB) {
 		for parallelBench.Next() {
-			_, _ = store.CompareAndSwap("k", "v0", "v1")
+			_, _ = store.CompareAndSwap("k", "state-initial", "state-updated")
 		}
 	})
 }

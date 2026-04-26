@@ -297,6 +297,10 @@ func (s *MemoryStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 		}
 	}()
 
+	if s.testRestoreHook != nil {
+		s.testRestoreHook()
+	}
+
 	// Open snapshot file in read-only mode.
 	db, err := bolt.Open(opts.FileName, 0o600, &bolt.Options{ReadOnly: true})
 	if err != nil {

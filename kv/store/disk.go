@@ -41,7 +41,7 @@ type DiskStore struct {
 	// ost is an order-statistics index (lexicographic; used for prefix random).
 	ost *OSTree
 	// opened is a flag to track whether the store is open.
-	// Uses atomic to allow lock-free reads in ensureOpen().
+	// Checked under lifecycleMu by beginOperation().
 	opened atomic.Bool
 	// refCount is a counter to track the number of openers.
 	// Incremented on each Open(), decremented on Close(). DB closes when it reaches 0.
@@ -49,6 +49,13 @@ type DiskStore struct {
 	// lock is a mutex to serialize open/close transitions.
 	// Prevents race conditions during state changes.
 	lock sync.Mutex
+	// lifecycleMu prevents close-vs-operation races.
+	// Operations hold RLock for the full ensureOpen+tx window;
+	// Open/Close take Lock while transitioning lifecycle state.
+	lifecycleMu sync.RWMutex
+	// testRestoreHook is a test-only synchronization hook invoked in Restore()
+	// after any restore lock is acquired and before snapshot I/O begins.
+	testRestoreHook func()
 }
 
 const (
@@ -101,6 +108,9 @@ func NewDiskStore(trackKeys bool, path string, cfg *DiskConfig) (*DiskStore, err
 // Open initializes the underlying bbolt handle when needed and increments the
 // reference counter for each caller. It is safe for concurrent use.
 func (s *DiskStore) Open() error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -189,15 +199,16 @@ func (s *DiskStore) Open() error {
 
 // Get retrieves the raw []byte value from the disk store.
 func (s *DiskStore) Get(key string) (any, error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
+	defer release()
 
 	var value []byte
 
 	// Get the value from the database within a bbolt transaction.
-	err := s.handle.View(func(tx *bolt.Tx) error {
+	err = s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
@@ -225,10 +236,11 @@ func (s *DiskStore) Get(key string) (any, error) {
 // Set inserts or updates the value for a given key.
 // If this is a new key and tracking is enabled, we update indexes.
 func (s *DiskStore) Set(key string, value any) error {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
+	defer release()
 
 	// Convert value to bytes if it's not already.
 	valueBytes, err := normalizeToBytes(value)
@@ -236,16 +248,13 @@ func (s *DiskStore) Set(key string, value any) error {
 		return err
 	}
 
-	var existed bool
-
 	if s.trackKeys {
-		// Lightweight existence check to decide whether to update indexes later.
-		// We check before the transaction to avoid holding keysLock during disk I/O.
-		// This optimization reduces lock contention by minimizing lock duration.
-		s.keysLock.RLock()
-		_, existed = s.keysMap[key]
-		s.keysLock.RUnlock()
+		// Keep bbolt mutation and index update as one logical operation.
+		s.keysLock.Lock()
+		defer s.keysLock.Unlock()
 	}
+
+	var existed bool
 
 	// Update the value in the database within a bbolt transaction.
 	err = s.handle.Update(func(tx *bolt.Tx) error {
@@ -253,6 +262,8 @@ func (s *DiskStore) Set(key string, value any) error {
 		if bucket == nil {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
+
+		existed = bucket.Get([]byte(key)) != nil
 
 		return bucket.Put([]byte(key), valueBytes)
 	})
@@ -262,9 +273,7 @@ func (s *DiskStore) Set(key string, value any) error {
 
 	// Update indexes only if the key was new.
 	if s.trackKeys && !existed {
-		s.keysLock.Lock()
 		s.addKeyIndexLocked(key)
-		s.keysLock.Unlock()
 	}
 
 	return nil
@@ -274,9 +283,16 @@ func (s *DiskStore) Set(key string, value any) error {
 // Absent keys are treated as 0. Values must be decimal ASCII int64.
 // Returns the new value as int64.
 func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return 0, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
+	}
+	defer release()
+
+	if s.trackKeys {
+		// Keep bbolt mutation and index update as one logical operation.
+		s.keysLock.Lock()
+		defer s.keysLock.Unlock()
 	}
 
 	var (
@@ -285,7 +301,7 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 	)
 
 	// Update the value in the database within a bbolt transaction.
-	err := s.handle.Update(func(tx *bolt.Tx) error {
+	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
@@ -327,9 +343,7 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 
 	// Update tracking if this was a new key.
 	if s.trackKeys && wasNew {
-		s.keysLock.Lock()
 		s.addKeyIndexLocked(key)
-		s.keysLock.Unlock()
 	}
 
 	return newValue, nil
@@ -338,15 +352,22 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 // GetOrSet returns the existing value (loaded=true) if key is present,
 // otherwise stores "value" and returns it (loaded=false).
 func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, err error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return nil, false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
+	defer release()
 
 	// Convert value to bytes if it's not already.
 	valueBytes, err := normalizeToBytes(value)
 	if err != nil {
 		return nil, false, err
+	}
+
+	if s.trackKeys {
+		// Keep bbolt mutation and index update as one logical operation.
+		s.keysLock.Lock()
+		defer s.keysLock.Unlock()
 	}
 
 	var (
@@ -383,9 +404,7 @@ func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, er
 
 	// Update tracking if enabled.
 	if s.trackKeys {
-		s.keysLock.Lock()
 		s.addKeyIndexLocked(key)
-		s.keysLock.Unlock()
 	}
 
 	return valueBytes, false, nil
@@ -393,15 +412,22 @@ func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, er
 
 // Swap replaces the value and returns the previous value (if existed) and whether it existed.
 func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return nil, false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
+	defer release()
 
 	// Convert value to bytes if it's not already.
 	valueBytes, err := normalizeToBytes(value)
 	if err != nil {
 		return nil, false, err
+	}
+
+	if s.trackKeys {
+		// Keep bbolt mutation and index update as one logical operation.
+		s.keysLock.Lock()
+		defer s.keysLock.Unlock()
 	}
 
 	var (
@@ -430,9 +456,7 @@ func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err 
 
 	// Update tracking if this is a new key.
 	if s.trackKeys && !existed {
-		s.keysLock.Lock()
 		s.addKeyIndexLocked(key)
-		s.keysLock.Unlock()
 	}
 
 	// Return a real nil interface when key was not present.
@@ -447,13 +471,20 @@ func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err 
 // If tracking is enabled, removes from keysList/keysMap in O(1)
 // (swap-with-last trick) and updates the OSTree.
 func (s *DiskStore) Delete(key string) error {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
+	}
+	defer release()
+
+	if s.trackKeys {
+		// Keep bbolt mutation and index update as one logical operation.
+		s.keysLock.Lock()
+		defer s.keysLock.Unlock()
 	}
 
 	// Remove from bbolt.
-	err := s.handle.Update(func(tx *bolt.Tx) error {
+	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
@@ -467,42 +498,25 @@ func (s *DiskStore) Delete(key string) error {
 
 	// If tracking is enabled, remove the key from the in-memory structures.
 	if s.trackKeys {
-		s.keysLock.Lock()
 		s.removeKeyIndexLocked(key)
-		s.keysLock.Unlock()
 	}
 
 	return nil
 }
 
 // Exists checks if a given key exists.
-// With tracking enabled, we trust positive hits from the in-memory index but
-// fall back to bbolt for negative results to avoid stale reads.
+// We always validate against bbolt to avoid stale-positive answers from
+// in-memory indexes.
 func (s *DiskStore) Exists(key string) (bool, error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
-
-	// When tracking is enabled, check in-memory index first for fast-path.
-	// This avoids disk I/O for most Exists() calls when keys are present.
-	if s.trackKeys {
-		s.keysLock.RLock()
-		_, exists := s.keysMap[key]
-		s.keysLock.RUnlock()
-
-		// Trust positive hits from index (key definitely exists).
-		// For negative results, we must check disk to handle potential index drift
-		// (e.g., if RebuildKeyList hasn't been called after manual DB edits).
-		if exists {
-			return true, nil
-		}
-		// Fall through to disk check for negative results to handle index drift.
-	}
+	defer release()
 
 	var exists bool
 
-	err := s.handle.View(func(tx *bolt.Tx) error {
+	err = s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
@@ -521,14 +535,21 @@ func (s *DiskStore) Exists(key string) (bool, error) {
 
 // DeleteIfExists deletes key if it exists. Returns true if deleted.
 func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
+	}
+	defer release()
+
+	if s.trackKeys {
+		// Keep bbolt mutation and index update as one logical operation.
+		s.keysLock.Lock()
+		defer s.keysLock.Unlock()
 	}
 
 	var deleted bool
 
-	err := s.handle.Update(func(tx *bolt.Tx) error {
+	err = s.handle.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
@@ -555,9 +576,7 @@ func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 
 	// Update tracking structures if deleted.
 	if deleted && s.trackKeys {
-		s.keysLock.Lock()
 		s.removeKeyIndexLocked(key)
-		s.keysLock.Unlock()
 	}
 
 	return deleted, nil
@@ -566,12 +585,19 @@ func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 // Clear wipes all keys and values from the store.
 // We drop and recreate the bucket (cheap), then reset in-memory indexes.
 func (s *DiskStore) Clear() error {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
+	defer release()
 
-	err := s.handle.Update(func(tx *bolt.Tx) error {
+	if s.trackKeys {
+		// Keep bbolt mutation and index reset as one logical operation.
+		s.keysLock.Lock()
+		defer s.keysLock.Unlock()
+	}
+
+	err = s.handle.Update(func(tx *bolt.Tx) error {
 		// Drop whole bucket: faster than deleting keys one-by-one.
 		// bbolt optimizes bucket deletion as a single operation.
 		err := tx.DeleteBucket(s.bucket)
@@ -593,16 +619,12 @@ func (s *DiskStore) Clear() error {
 
 	// Reset the in-memory key tracking structures.
 	if s.trackKeys {
-		s.keysLock.Lock()
-
 		s.keysList = []string{}
 		s.keysMap = make(map[string]int)
 
 		if s.ost != nil {
 			s.ost = NewOSTree()
 		}
-
-		s.keysLock.Unlock()
 	}
 
 	return nil
@@ -610,14 +632,15 @@ func (s *DiskStore) Clear() error {
 
 // Size returns the number of keys in the store (O(1) from bbolt stats).
 func (s *DiskStore) Size() (int64, error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return 0, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
+	defer release()
 
 	var size int64
 
-	err := s.handle.View(func(tx *bolt.Tx) error {
+	err = s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
@@ -653,9 +676,11 @@ func (s *DiskStore) RebuildKeyList() error {
 		return nil
 	}
 
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
+	defer release()
 
 	s.keysLock.Lock()
 	defer s.keysLock.Unlock()
@@ -671,6 +696,9 @@ func (s *DiskStore) RebuildKeyList() error {
 // reaches zero.
 // Subsequent operations can re-open the DB on demand.
 func (s *DiskStore) Close() error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+
 	// Only one goroutine actually closes the DB.
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -708,4 +736,17 @@ func (s *DiskStore) ensureOpen() error {
 	}
 
 	return ErrDiskStoreClosed
+}
+
+// beginOperation acquires the lifecycle read-lock and verifies the store is open.
+// The returned release function must be called exactly once.
+func (s *DiskStore) beginOperation() (func(), error) {
+	s.lifecycleMu.RLock()
+
+	if err := s.ensureOpen(); err != nil {
+		s.lifecycleMu.RUnlock()
+		return nil, err
+	}
+
+	return s.lifecycleMu.RUnlock, nil
 }

@@ -65,6 +65,39 @@ func (s *MemoryStore) Scan(prefix, afterKey string, limit int64) (*ScanPage, err
 	return s.scanWithTracking(prefix, afterKey, limit)
 }
 
+// Count returns the number of keys matching prefix.
+// Count("") is equivalent to Size().
+func (s *MemoryStore) Count(prefix string) (int64, error) {
+	if prefix == "" {
+		return s.Size()
+	}
+
+	var total int64
+
+	for _, shard := range s.shards {
+		shard.mu.RLock()
+
+		if s.trackKeys && shard.ost != nil {
+			left, right := shard.rangeBounds(prefix)
+			total += int64(right - left)
+
+			shard.mu.RUnlock()
+
+			continue
+		}
+
+		for key := range shard.container {
+			if strings.HasPrefix(key, prefix) {
+				total++
+			}
+		}
+
+		shard.mu.RUnlock()
+	}
+
+	return total, nil
+}
+
 // scanWithoutTracking streams entries via per-shard iterators without global read locks.
 func (s *MemoryStore) scanWithoutTracking(prefix, afterKey string, limit int64) (*ScanPage, error) {
 	iteratorHeap := make(shardIteratorHeap, 0, s.shardCount)

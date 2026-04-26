@@ -226,6 +226,12 @@ func (s *SerializedStore) Size() (int64, error) {
 	return s.store.Size()
 }
 
+// Count returns the number of keys matching prefix in the underlying store.
+// Count("") is equivalent to Size().
+func (s *SerializedStore) Count(prefix string) (int64, error) {
+	return s.store.Count(prefix)
+}
+
 // Scan returns a page of key-value pairs, ordered lexicographically.
 // If prefix is non-empty, only keys starting with prefix are considered.
 // If afterKey is non-empty, scanning starts strictly after it; otherwise from the first key.

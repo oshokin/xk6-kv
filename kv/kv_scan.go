@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/grafana/sobek"
+	"go.k6.io/k6/js/common"
 
 	"github.com/oshokin/xk6-kv/kv/store"
 )
@@ -80,6 +81,24 @@ func (k *KV) List(options sobek.Value) *sobek.Promise {
 			}
 
 			return entries, nil
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
+}
+
+// Count returns a Promise that resolves to the number of keys matching prefix.
+// Pass null/undefined/"" to count all keys.
+func (k *KV) Count(prefix sobek.Value) *sobek.Promise {
+	countPrefix := ""
+	if !common.IsNullish(prefix) {
+		countPrefix = prefix.String()
+	}
+
+	return k.runAsyncWithStore(
+		func(s store.Store) (any, error) {
+			return s.Count(countPrefix)
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)

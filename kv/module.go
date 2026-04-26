@@ -99,8 +99,10 @@ func (mi *ModuleInstance) NewKV(_ sobek.ConstructorCall) *sobek.Object {
 // and returns the per-VU KV object bound to that shared store.
 //
 // Concurrency & visibility guarantees:
-//   - The first successful call to OpenKv "wins" and decides the backend + serialization.
-//   - Later calls reuse the established store and ignore differing options.
+//   - The first successful call to OpenKv "wins" and decides the shared store
+//     configuration (backend/path/serialization/trackKeys + backend-specific options).
+//   - Later calls must provide equivalent options; conflicting options fail with
+//     KVOptionsConflictError.
 func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 	options, err := NewOptionsFrom(mi.vu, opts)
 	if err != nil {

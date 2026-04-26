@@ -14,16 +14,17 @@ import (
 // If limit > 0, at most limit entries are returned; if limit <= 0, all matching entries are returned.
 // Returns a ScanPage with Entries and NextKey (set to the last key when more results exist; empty when done).
 func (s *DiskStore) Scan(prefix, afterKey string, limit int64) (*ScanPage, error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
+	defer release()
 
 	page := &ScanPage{
 		Entries: make([]Entry, 0),
 	}
 
-	err := s.handle.View(func(tx *bolt.Tx) error {
+	err = s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
@@ -36,6 +37,43 @@ func (s *DiskStore) Scan(prefix, afterKey string, limit int64) (*ScanPage, error
 	}
 
 	return page, nil
+}
+
+// Count returns the number of keys that match prefix.
+// Count("") is equivalent to Size().
+func (s *DiskStore) Count(prefix string) (int64, error) {
+	release, err := s.beginOperation()
+	if err != nil {
+		return 0, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
+	}
+	defer release()
+
+	if s.trackKeys {
+		s.keysLock.RLock()
+
+		if s.ost != nil {
+			if prefix == "" {
+				total := int64(len(s.keysList))
+				s.keysLock.RUnlock()
+
+				return total, nil
+			}
+
+			left, right := s.ost.RangeBounds(prefix)
+			s.keysLock.RUnlock()
+
+			return int64(right - left), nil
+		}
+
+		s.keysLock.RUnlock()
+	}
+
+	total, err := s.countByCursor(prefix)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %w", ErrDiskStoreCountFailed, err)
+	}
+
+	return total, nil
 }
 
 // fillDiskScanPage populates page with cursor results that match prefix/afterKey/limit constraints.
@@ -124,4 +162,25 @@ func (s *DiskStore) setDiskNextKey(page *ScanPage, cursor *bolt.Cursor, prefix [
 	if len(prefix) == 0 || bytes.HasPrefix(nextKey, prefix) {
 		page.NextKey = lastKey
 	}
+}
+
+// countByCursor counts prefix matches from bbolt cursor state.
+func (s *DiskStore) countByCursor(prefix string) (int64, error) {
+	var total int64
+
+	err := s.handle.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(s.bucket)
+		if bucket == nil {
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
+		}
+
+		total = countKeysInBucket(bucket, prefix)
+
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return total, nil
 }

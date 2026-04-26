@@ -20,6 +20,10 @@
 # Go workspace file.
 go.work
 
+# Editor / IDE.
+.idea/
+.vscode/
+
 # Ignore xk6 built binary.
 /k6
 /k6.exe

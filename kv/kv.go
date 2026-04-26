@@ -3,6 +3,7 @@ package kv
 import (
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/grafana/sobek"
 	"go.k6.io/k6/js/modules"
@@ -40,6 +41,13 @@ type KV struct {
 
 	// vu is the owning k6 VU that provides the Sobek runtime and event loop.
 	vu modules.VU
+
+	// closeOnce ensures per-handle close is idempotent.
+	// This prevents accidental repeated Close() calls from decrementing
+	// shared backend refcounts multiple times.
+	closeOnce sync.Once
+	// closeErr captures the first close result and is returned on subsequent calls.
+	closeErr error
 }
 
 // NewKV constructs a new KV bound to the given VU and backing Store.
@@ -79,10 +87,15 @@ func (k *KV) runAsyncWithStore(
 
 	// Grab the VU's RegisterCallback hook so we can enqueue work back onto
 	// the event loop after the store operation completes.
-	callback := k.vu.RegisterCallback()
+	var (
+		callback   = k.vu.RegisterCallback()
+		settleOnce sync.Once
+	)
 
 	runOnEventLoop := func(fn func() error) {
-		callback(fn)
+		settleOnce.Do(func() {
+			callback(fn)
+		})
 	}
 
 	go func() {

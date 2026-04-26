@@ -239,17 +239,17 @@ func TestMemoryStore_GetOrSet_Basic(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
-	value, loaded, err := store.GetOrSet("k", "v1")
+	value, loaded, err := store.GetOrSet("k", "value-initial")
 
 	require.NoError(t, err)
 	require.False(t, loaded, "first insert must be loaded=false")
-	assert.Equal(t, []byte("v1"), value.([]byte))
+	assert.Equal(t, []byte("value-initial"), value.([]byte))
 
-	value, loaded, err = store.GetOrSet("k", "v2")
+	value, loaded, err = store.GetOrSet("k", "value-updated")
 
 	require.NoError(t, err)
 	require.True(t, loaded, "existing key must return loaded=true")
-	assert.Equal(t, []byte("v1"), value.([]byte), "existing value must be returned")
+	assert.Equal(t, []byte("value-initial"), value.([]byte), "existing value must be returned")
 }
 
 // TestMemoryStore_GetOrSet_ReturnsCopy ensures callers cannot mutate stored values.
@@ -429,19 +429,19 @@ func TestMemoryStore_Swap_Basic(t *testing.T) {
 
 	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
-	prev, loaded, err := store.Swap("k", "v1")
+	prev, loaded, err := store.Swap("k", "value-initial")
 	require.NoError(t, err)
 	assert.False(t, loaded, "first Swap must report loaded=false")
 	assert.Nil(t, prev, "first Swap must return prev=nil")
 
-	prev, loaded, err = store.Swap("k", "v2")
+	prev, loaded, err = store.Swap("k", "value-updated")
 	require.NoError(t, err)
 	assert.True(t, loaded, "second Swap must report loaded=true")
-	assert.Equal(t, []byte("v1"), prev.([]byte))
+	assert.Equal(t, []byte("value-initial"), prev.([]byte))
 
 	got, err := store.Get("k")
 	require.NoError(t, err)
-	assert.Equal(t, []byte("v2"), got.([]byte), "value must be replaced")
+	assert.Equal(t, []byte("value-updated"), got.([]byte), "value must be replaced")
 }
 
 // TestMemoryStore_Delete verifies Delete removes existing keys from the store,
@@ -577,14 +577,12 @@ func TestMemoryStore_Clear(t *testing.T) {
 
 	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
-	entries := []struct{ key, value string }{
-		{"key1", "value1"},
-		{"key2", "value2"},
-	}
-
-	for _, e := range entries {
-		require.NoError(t, store.Set(e.key, e.value))
-	}
+	requirePopulateStore(
+		t,
+		store,
+		"key-alpha", "value-alpha",
+		"key-beta", "value-beta",
+	)
 
 	require.NoError(t, store.Clear())
 	assert.Equal(t, 0, totalKeysInStore(store), "store must be empty after Clear")
@@ -601,14 +599,12 @@ func TestMemoryStore_Size(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 0, size, "empty store must report size=0")
 
-	entries := []struct{ key, value string }{
-		{"key1", "value1"},
-		{"key2", "value2"},
-	}
-
-	for _, e := range entries {
-		require.NoError(t, store.Set(e.key, e.value))
-	}
+	entries := requirePopulateStore(
+		t,
+		store,
+		"key-alpha", "value-alpha",
+		"key-beta", "value-beta",
+	)
 
 	size, err = store.Size()
 	require.NoError(t, err)
@@ -759,22 +755,20 @@ func TestMemoryStore_List(t *testing.T) {
 	assert.Empty(t, entries, "empty store must list zero entries")
 
 	// Seed data.
-	testData := map[string]string{
-		"key1":      "value1",
-		"key2":      "value2",
-		"prefix1":   "value3",
-		"prefix2":   "value4",
-		"different": "value5",
-	}
-
-	for key, value := range testData {
-		require.NoError(t, store.Set(key, value))
-	}
+	records := requirePopulateStore(
+		t,
+		store,
+		"key-alpha", "value-alpha",
+		"key-beta", "value-beta",
+		"prefix-alpha", "value-gamma",
+		"prefix-beta", "value-delta",
+		"different", "value-epsilon",
+	)
 
 	// All entries: length and sorted order.
 	entries, err = store.List("", 0)
 	require.NoError(t, err)
-	require.Len(t, entries, len(testData))
+	require.Len(t, entries, len(records))
 
 	for i := 1; i < len(entries); i++ {
 		assert.LessOrEqualf(t, entries[i-1].Key, entries[i].Key, "entries must be sorted by key")
@@ -807,11 +801,15 @@ func TestMemoryStore_KeyTrackingConsistency(t *testing.T) {
 	t.Parallel()
 
 	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
-	keys := []string{"key1", "key2", "key3"}
+	keys := []string{"key-alpha", "key-beta", "key-gamma"}
 
-	for _, key := range keys {
-		require.NoError(t, store.Set(key, "value"))
-	}
+	requirePopulateStore(
+		t,
+		store,
+		keys[0], "value",
+		keys[1], "value",
+		keys[2], "value",
+	)
 
 	assert.Equal(t, len(keys), totalTrackedKeys(store))
 
@@ -829,6 +827,82 @@ func TestMemoryStore_KeyTrackingConsistency(t *testing.T) {
 	assert.Equal(t, 0, totalTrackedKeys(store), "index must be empty after Clear")
 }
 
+// TestMemoryStore_SetDelete_Interleave_TrackKeysConsistency verifies that
+// concurrent Set/Delete on the same key keeps container and tracking index aligned.
+func TestMemoryStore_SetDelete_Interleave_TrackKeysConsistency(t *testing.T) {
+	t.Parallel()
+
+	const (
+		key             = "race:key"
+		iterationsCount = 5_000
+	)
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	startBarrier := make(chan struct{})
+	errorCh := make(chan error, 2)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		<-startBarrier
+
+		for range iterationsCount {
+			if err := store.Set(key, "value"); err != nil {
+				errorCh <- fmt.Errorf("set failed: %w", err)
+				return
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		<-startBarrier
+
+		for range iterationsCount {
+			if err := store.Delete(key); err != nil {
+				errorCh <- fmt.Errorf("delete failed: %w", err)
+				return
+			}
+		}
+	}()
+
+	close(startBarrier)
+	wg.Wait()
+	close(errorCh)
+
+	for err := range errorCh {
+		require.NoError(t, err)
+	}
+
+	shard := store.getShardByKey(key)
+	shard.mu.RLock()
+
+	_, exists := shard.container[key]
+	_, indexed := shard.keysMap[key]
+
+	var occurrences int
+
+	for _, item := range shard.keysList {
+		if item == key {
+			occurrences++
+		}
+	}
+
+	shard.mu.RUnlock()
+
+	if exists {
+		assert.True(t, indexed, "existing key must be present in keysMap")
+		assert.Equal(t, 1, occurrences, "existing key must appear once in keysList")
+	} else {
+		assert.False(t, indexed, "deleted key must be absent from keysMap")
+		assert.Equal(t, 0, occurrences, "deleted key must be absent from keysList")
+	}
+}
+
 // TestMemoryStore_RebuildKeyList_RandomKeyPrefix verifies RebuildKeyList correctly
 // reconstructs the internal index, restoring RandomKey functionality with prefixes.
 func TestMemoryStore_RebuildKeyList_RandomKeyPrefix(t *testing.T) {
@@ -836,15 +910,15 @@ func TestMemoryStore_RebuildKeyList_RandomKeyPrefix(t *testing.T) {
 
 	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
 
-	mustSetInMemoryStore(t, store, "p:1", "v1")
-	mustSetInMemoryStore(t, store, "p:2", "v2")
-	mustSetInMemoryStore(t, store, "q:1", "v3")
+	mustSetInMemoryStore(t, store, "p:alpha", "value-alpha")
+	mustSetInMemoryStore(t, store, "p:beta", "value-beta")
+	mustSetInMemoryStore(t, store, "q:alpha", "value-gamma")
 
 	// Simulate index loss: clear, then repopulate fresh, then rebuild index.
 	require.NoError(t, store.Clear())
-	mustSetInMemoryStore(t, store, "p:1", "v1")
-	mustSetInMemoryStore(t, store, "p:2", "v2")
-	mustSetInMemoryStore(t, store, "q:1", "v3")
+	mustSetInMemoryStore(t, store, "p:alpha", "value-alpha")
+	mustSetInMemoryStore(t, store, "p:beta", "value-beta")
+	mustSetInMemoryStore(t, store, "q:alpha", "value-gamma")
 
 	require.NoError(t, store.RebuildKeyList(), "RebuildKeyList must succeed")
 

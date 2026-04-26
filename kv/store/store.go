@@ -122,6 +122,10 @@ type (
 		// Size returns the number of keys currently stored.
 		Size() (int64, error)
 
+		// Count returns the number of keys that start with prefix.
+		// Count("") is equivalent to Size().
+		Count(prefix string) (int64, error)
+
 		// Scan is a cursor-based iterator over keys, ordered lexicographically.
 		// If prefix is non-empty, only keys starting with prefix are considered.
 		// If afterKey is non-empty, scanning starts from the first key strictly greater than afterKey;

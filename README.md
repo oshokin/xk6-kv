@@ -155,6 +155,11 @@ See [`typescript/README.md`](./typescript/README.md) for complete setup instruct
 ### `openKv(options?)`
 
 Opens a key-value store. **Must be called in the init context** (outside of default/setup/teardown functions).
+The returned KV handle is shared across VUs, so treat its lifecycle as test-wide.
+
+> ⚠️ **Configuration lock-in:** the first successful `openKv()` call fixes the store configuration
+> for the whole test run. All subsequent `openKv()` calls must provide equivalent options;
+> otherwise `openKv()` throws `KVOptionsConflictError`.
 
 ```typescript
 interface OpenKvOptions {
@@ -268,6 +273,9 @@ All methods return Promises except `close()`.
   }
   ```
 
+- **`count(prefix?: string): Promise<number>`** - Returns number of keys matching prefix.  
+  `count("")` (or omitted prefix) is equivalent to `size()`.
+
 - **`randomKey(options?: RandomKeyOptions): Promise<string>`** - Returns a random key, or `""` if none match.
 
   ```typescript
@@ -300,13 +308,14 @@ await kv.restore({ fileName: "./backups/kv-latest.kv" });
 
 > **Disk backend note:** pointing `fileName` at the *currently mounted* bbolt path is treated as a no-op (backup just returns metadata; restore leaves the DB untouched), so when you’re already running `backend: "disk"` you still need a different `fileName`. The “shared `.k6.kv` trick” only applies when you begin on the memory backend and want to seed the disk backend later.
 
-- **`close(): void`** - Synchronously closes the store. Call in `teardown()`.
+- **`close(): void`** - Synchronously closes the store. Call once in `teardown()`.
+  Do **not** call `close()` from `default()` iterations.
 
 ### Performance Notes
 
 - **`trackKeys: true`**: `randomKey()` without prefix -> O(1); with prefix -> O(log n). Achieving those speeds means every key is mirrored in memory across multiple helper structures, so large datasets consume noticeably more RAM and the slices/maps never shrink automatically. Budget for that footprint or rebuild the index periodically.
-- **`trackKeys: false`** (default): `randomKey()` falls back to a full-map/two-transaction scan, so heavy use remains O(n). Enable tracking or redesign workloads that call `randomKey()` frequently to avoid linear-time pauses.
-- **Random key workloads:** Calling `randomKey()` repeatedly with `trackKeys: false` (especially on the disk backend) runs a full scan inside a single read transaction, which stalls the lone bbolt writer until the scan finishes. Turn on `trackKeys` (for O(1)/O(log n) sampling) or throttle/redesign these workloads to avoid head-of-line blocking.
+- **`trackKeys: false`** (default): `randomKey()` falls back to a two-pass cursor walk in a **single** bbolt read snapshot, so heavy use remains O(n). Enable tracking or redesign workloads that call `randomKey()` frequently to avoid linear-time pauses.
+- **Random key workloads:** Calling `randomKey()` repeatedly with `trackKeys: false` (especially on the disk backend) keeps a read transaction open while it counts and selects keys, which can stall the lone bbolt writer until the call finishes. Turn on `trackKeys` (for O(1)/O(log n) sampling) or throttle/redesign these workloads to avoid head-of-line blocking.
 - Both backends are optimized for concurrent workloads, but there's synchronization overhead between VUs
 
 ## Usage Examples

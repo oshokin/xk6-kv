@@ -114,5 +114,9 @@ func (k *KV) Close() error {
 		return k.databaseNotOpenError()
 	}
 
-	return k.store.Close()
+	k.closeOnce.Do(func() {
+		k.closeErr = k.store.Close()
+	})
+
+	return k.closeErr
 }

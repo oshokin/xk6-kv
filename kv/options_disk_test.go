@@ -47,7 +47,7 @@ func TestDiskOptionsEqual(t *testing.T) {
 		{
 			name:   "matching bools",
 			left:   &DiskOptions{NoSync: boolTrue},
-			right:  &DiskOptions{NoSync: store.GetComparablePointer(true)},
+			right:  &DiskOptions{NoSync: boolTrue},
 			expect: true,
 		},
 		{

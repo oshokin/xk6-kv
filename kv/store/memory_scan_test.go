@@ -116,7 +116,7 @@ func TestMemoryStore_Scan_ConcurrentMutations(t *testing.T) {
 func TestMemoryStore_Scan_MutationAfterPagination(t *testing.T) {
 	t.Parallel()
 
-	initialKeys := []string{"k1", "k2", "k3", "k4"}
+	initialKeys := []string{"key-a", "key-b", "key-c", "key-d"}
 
 	for _, trackKeys := range []bool{true, false} {
 		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
@@ -130,19 +130,62 @@ func TestMemoryStore_Scan_MutationAfterPagination(t *testing.T) {
 			}
 
 			firstPage := mustScanStore(t, store, "", "", 2)
-			require.Equal(t, []string{"k1", "k2"}, keysFromEntries(t, firstPage.Entries))
-			require.Equal(t, "k2", firstPage.NextKey)
+			require.Equal(t, []string{"key-a", "key-b"}, keysFromEntries(t, firstPage.Entries))
+			require.Equal(t, "key-b", firstPage.NextKey)
 
 			// Insert a key lexicographically before NextKey.
-			require.NoError(t, store.Set("k1.5", "k1.5-value"))
+			require.NoError(t, store.Set("key-aa", "key-aa-value"))
 
 			secondPage := mustScanStore(t, store, "", firstPage.NextKey, 2)
-			require.Equal(t, []string{"k3", "k4"}, keysFromEntries(t, secondPage.Entries))
+			require.Equal(t, []string{"key-c", "key-d"}, keysFromEntries(t, secondPage.Entries))
 			assert.Empty(t, secondPage.NextKey, "final page must not expose NextKey")
 
 			// Ensure the newly inserted key appears when scanning from scratch.
 			fullScan := collectScanEntries(t, store, 0)
-			assert.Equal(t, []string{"k1", "k1.5", "k2", "k3", "k4"}, keysFromEntries(t, fullScan))
+			assert.Equal(t, []string{"key-a", "key-aa", "key-b", "key-c", "key-d"}, keysFromEntries(t, fullScan))
+		})
+	}
+}
+
+// TestMemoryStore_Count verifies Count with/without prefix across tracking modes.
+func TestMemoryStore_Count(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+
+			count, err := store.Count("")
+			require.NoError(t, err)
+			assert.EqualValues(t, 0, count)
+
+			requirePopulateStore(
+				t,
+				store,
+				"user:1", "value-1",
+				"user:2", "value-2",
+				"session:1", "value-3",
+			)
+
+			count, err = store.Count("")
+			require.NoError(t, err)
+			assert.EqualValues(t, 3, count)
+
+			count, err = store.Count("user:")
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, count)
+
+			count, err = store.Count("missing:")
+			require.NoError(t, err)
+			assert.EqualValues(t, 0, count)
+
+			require.NoError(t, store.Delete("user:1"))
+
+			count, err = store.Count("user:")
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, count)
 		})
 	}
 }

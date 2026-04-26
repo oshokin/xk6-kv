@@ -21,10 +21,13 @@ func TestDiskStore_RandomKey_WithTracking(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key, "empty store must return empty key")
 
-	keys := []string{"key1", "key2", "key3"}
-	for _, k := range keys {
-		require.NoError(t, store.Set(k, "value"))
-	}
+	entries := requirePopulateStore(
+		t,
+		store,
+		"key-alpha", "value",
+		"key-beta", "value",
+		"key-gamma", "value",
+	)
 
 	found := make(map[string]bool)
 
@@ -35,8 +38,8 @@ func TestDiskStore_RandomKey_WithTracking(t *testing.T) {
 		found[key] = true
 	}
 
-	for _, k := range keys {
-		assert.Truef(t, found[k], "key not observed in random selections: %s", k)
+	for _, entry := range entries {
+		assert.Truef(t, found[entry.key], "key not observed in random selections: %s", entry.key)
 	}
 }
 
@@ -52,9 +55,13 @@ func TestDiskStore_RandomKey_WithoutTracking_Smoke(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key, "empty store must return empty key")
 
-	for _, k := range []string{"key1", "key2", "key3"} {
-		require.NoError(t, store.Set(k, "value"))
-	}
+	requirePopulateStore(
+		t,
+		store,
+		"key-alpha", "value",
+		"key-beta", "value",
+		"key-gamma", "value",
+	)
 
 	key, err = store.RandomKey("")
 	require.NoError(t, err)
@@ -104,9 +111,13 @@ func TestDiskStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key, "empty store must return empty key for any prefix")
 
-	require.NoError(t, store.Set("a:1", "v1"))
-	require.NoError(t, store.Set("a:2", "v2"))
-	require.NoError(t, store.Set("b:1", "v3"))
+	entries := requirePopulateStore(
+		t,
+		store,
+		"a:alpha", "value-alpha",
+		"a:beta", "value-beta",
+		"b:alpha", "value-gamma",
+	)
 
 	key, err = store.RandomKey("")
 	require.NoError(t, err)
@@ -121,11 +132,11 @@ func TestDiskStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key, "no-match prefix must return empty key")
 
-	require.NoError(t, store.Delete("a:1"))
+	require.NoError(t, store.Delete(entries[0].key))
 
 	key, err = store.RandomKey("a:")
 	require.NoError(t, err)
-	assert.Equal(t, "a:2", key, "after delete, the only remaining prefixed key must be returned")
+	assert.Equal(t, entries[1].key, key, "after delete, the only remaining prefixed key must be returned")
 }
 
 // TestDiskStore_RandomKey_WithPrefix_TrackingDisabled covers prefix filtering with tracking disabled.
@@ -138,9 +149,13 @@ func TestDiskStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key, "empty store must return empty key")
 
-	require.NoError(t, store.Set("a:1", "v1"))
-	require.NoError(t, store.Set("a:2", "v2"))
-	require.NoError(t, store.Set("b:1", "v3"))
+	requirePopulateStore(
+		t,
+		store,
+		"a:alpha", "value-alpha",
+		"a:beta", "value-beta",
+		"b:alpha", "value-gamma",
+	)
 
 	key, err = store.RandomKey("a:")
 	require.NoError(t, err)

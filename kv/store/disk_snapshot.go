@@ -22,9 +22,11 @@ func (s *DiskStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 		return nil, err
 	}
 
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
+	defer release()
 
 	if s.isSelfSnapshot(opts.FileName) {
 		return s.diskSelfSnapshotSummary()
@@ -176,8 +178,20 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 		return nil, err
 	}
 
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
+	}
+	defer release()
+
+	if s.trackKeys {
+		// Keep restore mutation and index rebuild as one logical operation.
+		s.keysLock.Lock()
+		defer s.keysLock.Unlock()
+	}
+
+	if s.testRestoreHook != nil {
+		s.testRestoreHook()
 	}
 
 	// Fast path: if restoring from the same file (self-reference), return metadata
@@ -199,7 +213,7 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 	}
 
 	if s.trackKeys {
-		if err := s.RebuildKeyList(); err != nil {
+		if err := s.rebuildKeyListLocked(); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrKeyListRebuildFailed, err)
 		}
 	}

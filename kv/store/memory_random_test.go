@@ -20,10 +20,13 @@ func TestMemoryStore_RandomKey_Distribution_WithTracking(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key, "empty store must return empty key")
 
-	keys := []string{"alpha", "beta", "gamma"}
-	for _, k := range keys {
-		require.NoError(t, store.Set(k, "some-value"))
-	}
+	entries := requirePopulateStore(
+		t,
+		store,
+		"alpha", "some-value",
+		"beta", "some-value",
+		"gamma", "some-value",
+	)
 
 	found := make(map[string]bool)
 
@@ -35,8 +38,8 @@ func TestMemoryStore_RandomKey_Distribution_WithTracking(t *testing.T) {
 		found[k] = true
 	}
 
-	for _, k := range keys {
-		assert.Truef(t, found[k], "key not observed in random selections: %s", k)
+	for _, entry := range entries {
+		assert.Truef(t, found[entry.key], "key not observed in random selections: %s", entry.key)
 	}
 }
 
@@ -52,10 +55,13 @@ func TestMemoryStore_RandomKey_Distribution_NoTracking(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key, "empty store must return empty key")
 
-	keys := []string{"alpha", "beta", "gamma"}
-	for _, k := range keys {
-		require.NoError(t, store.Set(k, "value"))
-	}
+	entries := requirePopulateStore(
+		t,
+		store,
+		"alpha", "value",
+		"beta", "value",
+		"gamma", "value",
+	)
 
 	found := make(map[string]bool)
 
@@ -67,8 +73,8 @@ func TestMemoryStore_RandomKey_Distribution_NoTracking(t *testing.T) {
 		found[k] = true
 	}
 
-	for _, k := range keys {
-		assert.Truef(t, found[k], "key not observed in random selections: %s", k)
+	for _, entry := range entries {
+		assert.Truef(t, found[entry.key], "key not observed in random selections: %s", entry.key)
 	}
 }
 
@@ -85,14 +91,23 @@ func TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key, "empty store must return empty key for any prefix")
 
-	mustSetInMemoryStore(t, store, "a:1", "v1")
-	mustSetInMemoryStore(t, store, "a:2", "v2")
-	mustSetInMemoryStore(t, store, "b:1", "v3")
+	entries := requirePopulateStore(
+		t,
+		store,
+		"a:alpha", "value-alpha",
+		"a:beta", "value-beta",
+		"b:alpha", "value-gamma",
+	)
 
 	key, err = store.RandomKey("")
 	require.NoError(t, err)
 	assert.NotEmpty(t, key, "no-prefix should return some key")
-	assert.True(t, key == "a:1" || key == "a:2" || key == "b:1", "must be one of seeded keys")
+	allowed := map[string]bool{
+		entries[0].key: true,
+		entries[1].key: true,
+		entries[2].key: true,
+	}
+	assert.True(t, allowed[key], "must be one of seeded keys")
 
 	key, err = store.RandomKey("a:")
 	require.NoError(t, err)
@@ -103,10 +118,10 @@ func TestMemoryStore_RandomKey_WithPrefix_TrackingEnabled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key, "no-match prefix must return empty key")
 
-	mustDeleteFromStore(t, store, "a:1")
+	mustDeleteFromStore(t, store, entries[0].key)
 	key, err = store.RandomKey("a:")
 	require.NoError(t, err)
-	assert.Equal(t, "a:2", key, "after delete, the only remaining prefixed key must be returned")
+	assert.Equal(t, entries[1].key, key, "after delete, the only remaining prefixed key must be returned")
 
 	mustClearStore(t, store)
 	key, err = store.RandomKey("a:")
@@ -126,9 +141,13 @@ func TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key, "empty store must return empty key")
 
-	mustSetInMemoryStore(t, store, "a:1", "v1")
-	mustSetInMemoryStore(t, store, "a:2", "v2")
-	mustSetInMemoryStore(t, store, "b:1", "v3")
+	requirePopulateStore(
+		t,
+		store,
+		"a:alpha", "value-alpha",
+		"a:beta", "value-beta",
+		"b:alpha", "value-gamma",
+	)
 
 	key, err = store.RandomKey("a:")
 	require.NoError(t, err)

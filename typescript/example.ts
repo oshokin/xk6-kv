@@ -35,6 +35,11 @@ export default async function () {
   const size = await kv.size();
   console.log(`Store has ${size} keys`);
 
+  // Count keys by prefix.
+  const userCount = await kv.count('user:');
+  const totalCount = await kv.count();
+  console.log(`Users count: ${userCount}, total count via count(): ${totalCount}`);
+
   // Increment counter (creates if missing, treats as 0).
   const newCount = await kv.incrementBy('counter', 5);
   console.log(`Counter after +5: ${newCount}`);

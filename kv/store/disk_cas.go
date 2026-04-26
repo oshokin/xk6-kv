@@ -26,9 +26,16 @@ func (s *DiskStore) CompareAndSwapDetailed(
 	newValue any,
 	includeCurrentOnMismatch bool,
 ) (*CompareAndSwapDetailedResult, error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
+	}
+	defer release()
+
+	if s.trackKeys {
+		// Keep bbolt mutation and index update as one logical operation.
+		s.keysLock.Lock()
+		defer s.keysLock.Unlock()
 	}
 
 	expectAbsent, oldBytes, err := s.prepareCompareAndSwapOldBytes(oldValue)
@@ -75,9 +82,7 @@ func (s *DiskStore) CompareAndSwapDetailed(
 
 	// Indexes only change when a new key is inserted via expectAbsent semantics.
 	if result.Swapped && inserted && s.trackKeys {
-		s.keysLock.Lock()
 		s.addKeyIndexLocked(key)
-		s.keysLock.Unlock()
 	}
 
 	return result, nil
@@ -101,9 +106,16 @@ func (s *DiskStore) CompareAndDeleteDetailed(
 	oldValue any,
 	includeCurrentOnMismatch bool,
 ) (*CompareAndDeleteDetailedResult, error) {
-	// Ensure the store is open.
-	if err := s.ensureOpen(); err != nil {
+	release, err := s.beginOperation()
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
+	}
+	defer release()
+
+	if s.trackKeys {
+		// Keep bbolt mutation and index update as one logical operation.
+		s.keysLock.Lock()
+		defer s.keysLock.Unlock()
 	}
 
 	oldBytes, err := normalizeToBytes(oldValue)
@@ -138,9 +150,7 @@ func (s *DiskStore) CompareAndDeleteDetailed(
 
 	// Update tracking structures if deleted.
 	if result.Deleted && s.trackKeys {
-		s.keysLock.Lock()
 		s.removeKeyIndexLocked(key)
-		s.keysLock.Unlock()
 	}
 
 	return result, nil

@@ -29,7 +29,7 @@ func TestSerializedStore_CompareAndDeleteDetailed_NullSemantics(t *testing.T) {
 	wantStringValueNilCompare := &CompareAndDeleteDetailedResult{
 		Reason:     CompareReasonMismatch,
 		Existed:    true,
-		Current:    "v1",
+		Current:    "value-one",
 		HasCurrent: true,
 	}
 	wantMatchedJSONNullDeleted := &CompareAndDeleteDetailedResult{
@@ -42,7 +42,7 @@ func TestSerializedStore_CompareAndDeleteDetailed_NullSemantics(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, wantAbsentKey, result)
 
-	require.NoError(t, store.Set("k", "v1"))
+	require.NoError(t, store.Set("k", "value-one"))
 
 	result, err = store.CompareAndDeleteDetailed("k", nil, true)
 	require.NoError(t, err)

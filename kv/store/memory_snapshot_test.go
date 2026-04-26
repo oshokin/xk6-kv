@@ -247,7 +247,7 @@ func TestMemoryStore_Restore_HonorsMaxBytes(t *testing.T) {
 
 	memoryCfg := &MemoryConfig{TrackKeys: false}
 	store := NewMemoryStore(memoryCfg)
-	require.NoError(t, store.Set("k1", strings.Repeat("x", 4)))
+	require.NoError(t, store.Set("max-bytes-key", strings.Repeat("x", 4)))
 
 	target := filepath.Join(t.TempDir(), "max-bytes.kv")
 	_, err := store.Backup(&BackupOptions{FileName: target})
@@ -286,7 +286,16 @@ func TestMemoryStore_Restore_BlocksMutationsDuringRestore(t *testing.T) {
 
 	memoryCfg := &MemoryConfig{TrackKeys: true}
 	store := NewMemoryStore(memoryCfg)
-	require.NoError(t, store.Set("k1", "v1"))
+	records := testEntries(
+		"snapshot-alpha", "value-alpha",
+		"during-restore", "should-be-blocked",
+		"concurrent-write", "blocked",
+	)
+	snapshotRecord := records[0]
+	duringRestoreRecord := records[1]
+	concurrentRecord := records[2]
+
+	require.NoError(t, store.Set(snapshotRecord.key, snapshotRecord.value))
 
 	exportPath := filepath.Join(t.TempDir(), "snapshot.kv")
 	_, err := store.Backup(&BackupOptions{FileName: exportPath})
@@ -294,7 +303,19 @@ func TestMemoryStore_Restore_BlocksMutationsDuringRestore(t *testing.T) {
 
 	// Clear the store so we have a known state.
 	require.NoError(t, store.Clear())
-	require.NoError(t, store.Set("during-import", "should-be-blocked"))
+	require.NoError(t, store.Set(duringRestoreRecord.key, duringRestoreRecord.value))
+
+	restoreStarted := make(chan struct{})
+	releaseRestore := make(chan struct{})
+
+	store.testRestoreHook = func() {
+		close(restoreStarted)
+		<-releaseRestore
+	}
+
+	defer func() {
+		store.testRestoreHook = nil
+	}()
 
 	done := make(chan error, 1)
 
@@ -303,20 +324,12 @@ func TestMemoryStore_Restore_BlocksMutationsDuringRestore(t *testing.T) {
 		done <- err
 	}()
 
-	// Give import goroutine time to start and acquire the mutation lock.
-	// This is a best-effort test for blocking behavior.
-	for range 10 {
-		err := store.Set("concurrent-write", "blocked")
-		if errors.Is(err, ErrRestoreInProgress) {
-			// Successfully observed the blocking behavior.
-			require.NoError(t, <-done)
+	<-restoreStarted
 
-			return
-		}
-	}
+	err = store.Set(concurrentRecord.key, concurrentRecord.value)
+	require.ErrorIs(t, err, ErrRestoreInProgress)
 
-	// If we never observed blocking, the test still passes
-	// (timing-dependent behavior, but the race detector would catch issues).
+	close(releaseRestore)
 	require.NoError(t, <-done)
 }
 
@@ -327,39 +340,42 @@ func TestMemoryStore_Restore_BlocksConcurrentBackup(t *testing.T) {
 
 	memoryCfg := &MemoryConfig{TrackKeys: true}
 	store := NewMemoryStore(memoryCfg)
-	require.NoError(t, store.Set("k1", "v1"))
 
-	exportPath := filepath.Join(t.TempDir(), "snapshot.kv")
-	_, err := store.Backup(&BackupOptions{FileName: exportPath})
+	requirePopulateStore(t, store, "snapshot-alpha", "value-alpha")
+
+	exportPaths := []string{
+		filepath.Join(t.TempDir(), "snapshot.kv"),
+		filepath.Join(t.TempDir(), "export.kv"),
+	}
+
+	_, err := store.Backup(&BackupOptions{FileName: exportPaths[0]})
 	require.NoError(t, err)
 
-	var wg sync.WaitGroup
+	restoreStarted := make(chan struct{})
+	releaseRestore := make(chan struct{})
+	store.testRestoreHook = func() {
+		close(restoreStarted)
+		<-releaseRestore
+	}
 
-	wg.Add(2)
-
-	// Goroutine 1: Restore (takes time to parse stream).
-	go func() {
-		defer wg.Done()
-
-		_, err := store.Restore(&RestoreOptions{FileName: exportPath})
-		assert.NoError(t, err)
+	defer func() {
+		store.testRestoreHook = nil
 	}()
 
-	// Goroutine 2: Backup while import is happening.
+	restoreDone := make(chan error, 1)
+
 	go func() {
-		defer wg.Done()
-
-		time.Sleep(10 * time.Millisecond) // Let import start.
-
-		exportPath2 := filepath.Join(t.TempDir(), "export2.kv")
-		_, err := store.Backup(&BackupOptions{FileName: exportPath2})
-		// Either succeeds (timing dependent) or fails with ErrRestoreInProgress.
-		if err != nil {
-			assert.ErrorIs(t, err, ErrRestoreInProgress)
-		}
+		_, err := store.Restore(&RestoreOptions{FileName: exportPaths[0]})
+		restoreDone <- err
 	}()
 
-	wg.Wait()
+	<-restoreStarted
+
+	_, err = store.Backup(&BackupOptions{FileName: exportPaths[1]})
+	require.ErrorIs(t, err, ErrRestoreInProgress)
+
+	close(releaseRestore)
+	require.NoError(t, <-restoreDone)
 }
 
 // TestMemoryStore_Restore_PreventsDataLoss verifies that writes during import
@@ -370,7 +386,16 @@ func TestMemoryStore_Restore_PreventsDataLoss(t *testing.T) {
 
 	memoryCfg := &MemoryConfig{TrackKeys: true}
 	store := NewMemoryStore(memoryCfg)
-	require.NoError(t, store.Set("k1", "v1"))
+	records := testEntries(
+		"snapshot-alpha", "value-alpha",
+		"stale-before-restore", "value-before-restore",
+		"concurrent-write", "value-during-restore",
+	)
+	snapshotRecord := records[0]
+	staleRecord := records[1]
+	concurrentRecord := records[2]
+
+	require.NoError(t, store.Set(snapshotRecord.key, snapshotRecord.value))
 
 	exportPath := filepath.Join(t.TempDir(), "snapshot.kv")
 	_, err := store.Backup(&BackupOptions{FileName: exportPath})
@@ -378,59 +403,46 @@ func TestMemoryStore_Restore_PreventsDataLoss(t *testing.T) {
 
 	// Clear the store and add a different key.
 	require.NoError(t, store.Clear())
-	require.NoError(t, store.Set("k2", "v2"))
+	require.NoError(t, store.Set(staleRecord.key, staleRecord.value))
 
-	var wg sync.WaitGroup
+	restoreStarted := make(chan struct{})
+	releaseRestore := make(chan struct{})
+	store.testRestoreHook = func() {
+		close(restoreStarted)
+		<-releaseRestore
+	}
 
-	wg.Add(2)
+	defer func() {
+		store.testRestoreHook = nil
+	}()
 
-	importDone := make(chan struct{})
+	restoreDone := make(chan error, 1)
 
-	// Goroutine 1: Restore.
 	go func() {
-		defer wg.Done()
-		defer close(importDone)
-
 		_, err := store.Restore(&RestoreOptions{FileName: exportPath})
-		assert.NoError(t, err)
+		restoreDone <- err
 	}()
 
-	// Goroutine 2: Try to write while import is happening.
-	var writeBlocked bool
+	<-restoreStarted
 
-	go func() {
-		defer wg.Done()
+	err = store.Set(concurrentRecord.key, concurrentRecord.value)
+	require.ErrorIs(t, err, ErrRestoreInProgress)
 
-		// Let import start.
-		time.Sleep(5 * time.Millisecond)
+	close(releaseRestore)
+	require.NoError(t, <-restoreDone)
 
-		// Try to write during import.
-		err := store.Set("k3", "v3")
-		if errors.Is(err, ErrRestoreInProgress) {
-			writeBlocked = true
-		}
+	// After import completes, verify the store has the imported data.
+	val, err := store.Get(snapshotRecord.key)
+	require.NoError(t, err)
+	assert.Equal(t, []byte(snapshotRecord.value), val)
 
-		// Wait for import to complete.
-		<-importDone
+	// Stale key should be gone (overwritten by import).
+	_, err = store.Get(staleRecord.key)
+	require.Error(t, err)
 
-		// After import completes, verify the store has the imported data.
-		val, err := store.Get("k1")
-		assert.NoError(t, err)
-		assert.Equal(t, []byte("v1"), val)
-
-		// k2 should be gone (overwritten by import).
-		_, err = store.Get("k2")
-		assert.Error(t, err)
-
-		// If k3 was blocked, it should not exist.
-		// If k3 succeeded (timing dependent), it would have been overwritten.
-		_, err = store.Get("k3")
-		if writeBlocked {
-			assert.Error(t, err, "k3 should not exist after import")
-		}
-	}()
-
-	wg.Wait()
+	// Concurrent write must be blocked during restore.
+	_, err = store.Get(concurrentRecord.key)
+	assert.Error(t, err, "concurrent key should not exist after restore")
 }
 
 // TestMemoryStore_Restore_ConcurrentOperations_Serialized verifies that
@@ -450,16 +462,16 @@ func TestMemoryStore_Restore_ConcurrentOperations_Serialized(t *testing.T) {
 		path  string
 	}{
 		{
-			id:    "snapshot1",
-			key:   "k1",
-			value: "v1",
-			path:  filepath.Join(tempDir, "snapshot1.kv"),
+			id:    "snapshot-alpha",
+			key:   "key-alpha",
+			value: "value-alpha",
+			path:  filepath.Join(tempDir, "snapshot-alpha.kv"),
 		},
 		{
-			id:    "snapshot2",
-			key:   "k2",
-			value: "v2",
-			path:  filepath.Join(tempDir, "snapshot2.kv"),
+			id:    "snapshot-beta",
+			key:   "key-beta",
+			value: "value-beta",
+			path:  filepath.Join(tempDir, "snapshot-beta.kv"),
 		},
 	}
 
@@ -484,14 +496,16 @@ func TestMemoryStore_Restore_ConcurrentOperations_Serialized(t *testing.T) {
 	wg.Add(len(snapshots))
 
 	for _, snap := range snapshots {
+		snapshot := snap
+
 		go func() {
 			defer wg.Done()
 
-			_, err := store.Restore(&RestoreOptions{FileName: snap.path})
+			_, err := store.Restore(&RestoreOptions{FileName: snapshot.path})
 			if err == nil {
-				results <- snap.id
+				results <- snapshot.id
 			} else if errors.Is(err, ErrRestoreInProgress) {
-				results <- snap.id + "-blocked"
+				results <- snapshot.id + "-blocked"
 			}
 		}()
 	}
@@ -531,23 +545,28 @@ func TestMemoryStore_Restore_ConcurrentOperations_Serialized(t *testing.T) {
 	assert.True(t, anySucceeded, "at least one import should succeed")
 
 	// Verify final state is consistent (not a mix of both imports).
-	keys := []string{snapshots[0].key, snapshots[1].key}
-	expectedValues := []string{snapshots[0].value, snapshots[1].value}
+	keys := make([]string, len(snapshots))
 
-	errors := make([]error, len(keys))
+	expectedValues := make([]string, len(snapshots))
+	for index, snapshot := range snapshots {
+		keys[index] = snapshot.key
+		expectedValues[index] = snapshot.value
+	}
+
+	getErrors := make([]error, len(keys))
 	values := make([]any, len(keys))
 
 	for i, key := range keys {
-		values[i], errors[i] = store.Get(key)
+		values[i], getErrors[i] = store.Get(key)
 	}
 
 	// Should have either the first or second snapshot, not both.
-	if errors[0] == nil {
+	if getErrors[0] == nil {
 		assert.Equal(t, []byte(expectedValues[0]), values[0])
-		assert.Error(t, errors[1], "k2 should not exist if import1 won")
+		assert.Error(t, getErrors[1], "%s should not exist if %s won", keys[1], snapshots[0].id)
 	} else {
 		assert.Equal(t, []byte(expectedValues[1]), values[1])
-		assert.Error(t, errors[0], "k1 should not exist if import2 won")
+		assert.Error(t, getErrors[0], "%s should not exist if %s won", keys[0], snapshots[1].id)
 	}
 }
 

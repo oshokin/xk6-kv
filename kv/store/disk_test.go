@@ -6,11 +6,11 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
@@ -257,8 +257,8 @@ func TestDiskStore_OpenClose_InterleavedRace(t *testing.T) {
 					return
 				}
 
-				// Small jitter to diversify interleavings.
-				time.Sleep(time.Microsecond)
+				// Yield to increase scheduling interleavings without wall-clock sleeps.
+				runtime.Gosched()
 
 				if err := store.Close(); err != nil {
 					errorCh <- fmt.Errorf("close failed: %w", err)
@@ -286,6 +286,62 @@ func TestDiskStore_OpenClose_InterleavedRace(t *testing.T) {
 	assert.EqualValues(t, 0, store.refCount.Load(), "refCount must stay zero")
 }
 
+// TestDiskStore_Close_WaitsForLifecycleReaders ensures Close waits for in-flight operations
+// that already passed lifecycle gate.
+func TestDiskStore_Close_WaitsForLifecycleReaders(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	store.lifecycleMu.RLock()
+
+	closeDone := make(chan error, 1)
+
+	go func() {
+		closeDone <- store.Close()
+	}()
+
+	runtime.Gosched()
+
+	select {
+	case err := <-closeDone:
+		t.Fatalf("Close() must block while lifecycle reader is active; got early result: %v", err)
+	default:
+	}
+
+	store.lifecycleMu.RUnlock()
+	require.NoError(t, <-closeDone)
+	assert.False(t, store.opened.Load(), "store must be closed after reader releases lifecycle lock")
+}
+
+// TestDiskStore_Operation_WaitsForLifecycleWriter ensures operations wait while lifecycle
+// transitions (Open/Close) hold the write lock.
+func TestDiskStore_Operation_WaitsForLifecycleWriter(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("key", "value"))
+
+	store.lifecycleMu.Lock()
+
+	getDone := make(chan error, 1)
+
+	go func() {
+		_, err := store.Get("key")
+		getDone <- err
+	}()
+
+	runtime.Gosched()
+
+	select {
+	case err := <-getDone:
+		t.Fatalf("Get() must block while lifecycle writer is active; got early result: %v", err)
+	default:
+	}
+
+	store.lifecycleMu.Unlock()
+	require.NoError(t, <-getDone)
+}
+
 // TestDiskStore_ReopenAfterFullyClosed_OnDemand ensures a closed store rejects operations until
 // Open is called again, and that Open reinitializes the handle.
 func TestDiskStore_ReopenAfterFullyClosed_OnDemand(t *testing.T) {
@@ -293,20 +349,26 @@ func TestDiskStore_ReopenAfterFullyClosed_OnDemand(t *testing.T) {
 
 	store := newTestDiskStore(t, true, "", true)
 
-	require.NoError(t, store.Set("key1", "value1"))
+	records := testEntries(
+		"key-alpha", "value-alpha",
+		"key-beta", "value-beta",
+		"key-gamma", "value-gamma",
+	)
+
+	require.NoError(t, store.Set(records[0].key, records[0].value))
 
 	require.NoError(t, store.Close(), "Close must succeed")
 
 	require.False(t, store.opened.Load(), "store should be fully closed")
 	require.EqualValues(t, 0, store.refCount.Load(), "refCount must be zero")
 
-	err := store.Set("key2", "value2")
+	err := store.Set(records[1].key, records[1].value)
 	require.Error(t, err, "operations must fail when store is closed")
 
 	require.NoError(t, store.Open(), "Open must succeed after close")
 	assert.True(t, store.opened.Load(), "store must be opened after reopen")
 
-	require.NoError(t, store.Set("key3", "value3"))
+	require.NoError(t, store.Set(records[2].key, records[2].value))
 	assert.EqualValues(t, 1, store.refCount.Load(), "refCount must be reset to 1 after reopen")
 }
 
@@ -487,6 +549,35 @@ func TestDiskStore_Exists_IgnoresStaleIndex(t *testing.T) {
 	assert.True(t, exists, "Exists must fall back to bbolt when index misses key")
 }
 
+// TestDiskStore_Exists_DetectsStalePositiveIndex ensures Exists validates against bbolt
+// even when in-memory tracking still says a key exists.
+func TestDiskStore_Exists_DetectsStalePositiveIndex(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+
+	const key = "user:stale-positive"
+	require.NoError(t, store.Set(key, "value"))
+
+	// Simulate stale-positive index by deleting only from bbolt.
+	err := store.handle.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(store.bucket)
+		require.NotNil(t, bucket)
+
+		return bucket.Delete([]byte(key))
+	})
+	require.NoError(t, err)
+
+	store.keysLock.RLock()
+	_, indexed := store.keysMap[key]
+	store.keysLock.RUnlock()
+	require.True(t, indexed, "test setup requires stale positive index entry")
+
+	exists, err := store.Exists(key)
+	require.NoError(t, err)
+	assert.False(t, exists, "Exists must not trust stale-positive index hits")
+}
+
 // TestDiskStore_IncrementBy_Basic checks IncrementBy on absent key (start at 0), positive/negative
 // increments, rejects non-integer payloads, and can parse JSON-encoded (quoted) string values.
 func TestDiskStore_IncrementBy_Basic(t *testing.T) {
@@ -603,17 +694,17 @@ func TestDiskStore_GetOrSet_Basic(t *testing.T) {
 	t.Parallel()
 
 	store := newTestDiskStore(t, true, "", true)
-	value, loaded, err := store.GetOrSet("k", "v1")
+	value, loaded, err := store.GetOrSet("k", "value-initial")
 
 	require.NoError(t, err)
 	require.False(t, loaded, "first insert must be loaded=false")
-	assert.Equal(t, []byte("v1"), value.([]byte))
+	assert.Equal(t, []byte("value-initial"), value.([]byte))
 
-	value, loaded, err = store.GetOrSet("k", "v2")
+	value, loaded, err = store.GetOrSet("k", "value-updated")
 
 	require.NoError(t, err)
 	require.True(t, loaded, "existing key must return loaded=true")
-	assert.Equal(t, []byte("v1"), value.([]byte), "existing value must be returned")
+	assert.Equal(t, []byte("value-initial"), value.([]byte), "existing value must be returned")
 }
 
 // TestDiskStore_GetOrSet_InsertReturnsCopy ensures the inserted bytes are not exposed.
@@ -706,19 +797,19 @@ func TestDiskStore_Swap_Basic(t *testing.T) {
 
 	store := newTestDiskStore(t, true, "", true)
 
-	prev, loaded, err := store.Swap("k", "v1")
+	prev, loaded, err := store.Swap("k", "value-initial")
 	require.NoError(t, err)
 	assert.False(t, loaded, "first Swap must report loaded=false")
 	assert.Nil(t, prev, "first Swap must return prev=nil")
 
-	prev, loaded, err = store.Swap("k", "v2")
+	prev, loaded, err = store.Swap("k", "value-updated")
 	require.NoError(t, err)
 	assert.True(t, loaded, "second Swap must report loaded=true")
-	assert.Equal(t, []byte("v1"), prev.([]byte))
+	assert.Equal(t, []byte("value-initial"), prev.([]byte))
 
 	got, err := store.Get("k")
 	require.NoError(t, err)
-	assert.Equal(t, []byte("v2"), got.([]byte), "value must be replaced")
+	assert.Equal(t, []byte("value-updated"), got.([]byte), "value must be replaced")
 }
 
 // TestDiskStore_Delete verifies Delete succeeds for present keys and is a no-op (no error) for missing keys.
@@ -846,8 +937,11 @@ func TestDiskStore_Clear(t *testing.T) {
 
 	store := newTestDiskStore(t, true, "", true)
 
-	require.NoError(t, store.Set("key1", "value1"))
-	require.NoError(t, store.Set("key2", "value2"))
+	entries := testEntries(
+		"key-alpha", "value-alpha",
+		"key-beta", "value-beta",
+	)
+	requirePopulateStoreEntries(t, store, entries)
 
 	require.NoError(t, store.Clear())
 
@@ -866,12 +960,15 @@ func TestDiskStore_Size(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 0, size, "empty store must report size=0")
 
-	require.NoError(t, store.Set("key1", "value1"))
-	require.NoError(t, store.Set("key2", "value2"))
+	entries := testEntries(
+		"key-alpha", "value-alpha",
+		"key-beta", "value-beta",
+	)
+	requirePopulateStoreEntries(t, store, entries)
 
 	size, err = store.Size()
 	require.NoError(t, err)
-	assert.EqualValues(t, 2, size, "size must equal number of entries")
+	assert.EqualValues(t, len(entries), size, "size must equal number of entries")
 }
 
 // TestDiskStore_List checks listing with/without prefix and with limits, verifying returned keys.
@@ -884,29 +981,27 @@ func TestDiskStore_List(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, entries, "empty store must list zero entries")
 
-	testData := map[string]string{
-		"key1":      "value1",
-		"key2":      "value2",
-		"prefix1":   "value3",
-		"prefix2":   "value4",
-		"different": "value5",
-	}
-
-	for key, value := range testData {
-		require.NoError(t, store.Set(key, value))
-	}
+	records := requirePopulateStore(
+		t,
+		store,
+		"key-alpha", "value-alpha",
+		"key-beta", "value-beta",
+		"prefix-alpha", "value-gamma",
+		"prefix-beta", "value-delta",
+		"different", "value-epsilon",
+	)
 
 	entries, err = store.List("", 0)
 	require.NoError(t, err)
-	require.Len(t, entries, len(testData))
+	require.Len(t, entries, len(records))
 
 	keyMap := make(map[string]bool, len(entries))
 	for _, entry := range entries {
 		keyMap[entry.Key] = true
 	}
 
-	for key := range testData {
-		assert.Truef(t, keyMap[key], "missing key in List: %s", key)
+	for _, record := range records {
+		assert.Truef(t, keyMap[record.key], "missing key in List: %s", record.key)
 	}
 
 	entries, err = store.List("prefix", 0)
@@ -934,12 +1029,16 @@ func TestDiskStore_KeyTrackingConsistency(t *testing.T) {
 
 	var (
 		store = newTestDiskStore(t, true, "", true)
-		keys  = []string{"key1", "key2", "key3"}
+		keys  = []string{"key-alpha", "key-beta", "key-gamma"}
 	)
 
-	for _, key := range keys {
-		require.NoError(t, store.Set(key, "value"))
-	}
+	requirePopulateStore(
+		t,
+		store,
+		keys[0], "value",
+		keys[1], "value",
+		keys[2], "value",
+	)
 
 	store.keysLock.RLock()
 
@@ -952,12 +1051,12 @@ func TestDiskStore_KeyTrackingConsistency(t *testing.T) {
 
 	store.keysLock.RUnlock()
 
-	require.NoError(t, store.Delete("key2"))
+	require.NoError(t, store.Delete(keys[1]))
 
 	store.keysLock.RLock()
 
 	assert.Len(t, store.keysList, 2)
-	_, exists := store.keysMap["key2"]
+	_, exists := store.keysMap[keys[1]]
 	assert.False(t, exists, "deleted key must not remain in index")
 
 	store.keysLock.RUnlock()
@@ -969,14 +1068,93 @@ func TestDiskStore_KeyTrackingConsistency(t *testing.T) {
 	store.keysLock.RUnlock()
 }
 
+// TestDiskStore_SetDelete_Interleave_TrackKeysConsistency verifies that
+// concurrent Set/Delete on the same key keeps bbolt and tracking index aligned.
+func TestDiskStore_SetDelete_Interleave_TrackKeysConsistency(t *testing.T) {
+	t.Parallel()
+
+	const (
+		key             = "race:key"
+		iterationsCount = 5_000
+	)
+
+	store := newTestDiskStore(t, true, "", true)
+	startBarrier := make(chan struct{})
+	errorCh := make(chan error, 2)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		<-startBarrier
+
+		for range iterationsCount {
+			if err := store.Set(key, "value"); err != nil {
+				errorCh <- fmt.Errorf("set failed: %w", err)
+				return
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		<-startBarrier
+
+		for range iterationsCount {
+			if err := store.Delete(key); err != nil {
+				errorCh <- fmt.Errorf("delete failed: %w", err)
+				return
+			}
+		}
+	}()
+
+	close(startBarrier)
+	wg.Wait()
+	close(errorCh)
+
+	for err := range errorCh {
+		require.NoError(t, err)
+	}
+
+	exists, err := store.Exists(key)
+	require.NoError(t, err)
+
+	store.keysLock.RLock()
+	_, indexed := store.keysMap[key]
+
+	var occurrences int
+
+	for _, item := range store.keysList {
+		if item == key {
+			occurrences++
+		}
+	}
+
+	store.keysLock.RUnlock()
+
+	if exists {
+		assert.True(t, indexed, "existing key must be present in keysMap")
+		assert.Equal(t, 1, occurrences, "existing key must appear once in keysList")
+	} else {
+		assert.False(t, indexed, "deleted key must be absent from keysMap")
+		assert.Equal(t, 0, occurrences, "deleted key must be absent from keysList")
+	}
+}
+
 // TestDiskStore_RebuildKeyList ensures RebuildKeyList reconstructs the in-memory index from storage.
 func TestDiskStore_RebuildKeyList(t *testing.T) {
 	t.Parallel()
 
 	store := newTestDiskStore(t, true, "", true)
 
-	require.NoError(t, store.Set("key1", "value1"))
-	require.NoError(t, store.Set("key2", "value2"))
+	entries := testEntries(
+		"key-alpha", "value-alpha",
+		"key-beta", "value-beta",
+	)
+	requirePopulateStoreEntries(t, store, entries)
 
 	// Corrupt the in-memory index to simulate loss.
 	store.keysLock.Lock()
@@ -991,7 +1169,11 @@ func TestDiskStore_RebuildKeyList(t *testing.T) {
 
 	assert.Len(t, store.keysList, 2)
 
-	expected := map[string]bool{"key1": true, "key2": true}
+	expected := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		expected[entry.key] = true
+	}
+
 	for _, key := range store.keysList {
 		assert.Truef(t, expected[key], "unexpected key in index: %s", key)
 	}
