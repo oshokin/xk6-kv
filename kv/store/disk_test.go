@@ -656,10 +656,9 @@ func TestDiskStore_IncrementBy_Basic(t *testing.T) {
 func TestDiskStore_IncrementBy_Concurrent(t *testing.T) {
 	t.Parallel()
 
-	const (
-		concurrencyLevel       = 1000
-		delta            int64 = 1
-	)
+	const delta int64 = 1
+
+	concurrencyLevel := scaledStressCount(1_000, 128)
 
 	var (
 		store = newTestDiskStore(t, true, "", true)
@@ -732,7 +731,7 @@ func TestDiskStore_GetOrSet_InsertReturnsCopy(t *testing.T) {
 func TestDiskStore_GetOrSet_Concurrent(t *testing.T) {
 	t.Parallel()
 
-	const concurrencyLevel = 256
+	concurrencyLevel := scaledStressCount(256, 64)
 
 	type goroutineResult struct {
 		actualBytes []byte
@@ -1073,10 +1072,9 @@ func TestDiskStore_KeyTrackingConsistency(t *testing.T) {
 func TestDiskStore_SetDelete_Interleave_TrackKeysConsistency(t *testing.T) {
 	t.Parallel()
 
-	const (
-		key             = "race:key"
-		iterationsCount = 5_000
-	)
+	const key = "race:key"
+
+	iterationsCount := scaledStressCount(5_000, 400)
 
 	store := newTestDiskStore(t, true, "", true)
 	startBarrier := make(chan struct{})
@@ -1265,11 +1263,10 @@ func TestDiskStore_RefCountIgnoresOperationCount(t *testing.T) {
 func TestDiskStore_GetOrSet_Delete_Interleave_NoPanic(t *testing.T) {
 	t.Parallel()
 
-	const (
-		testKey         = "order-new"
-		iterationsCount = 5_000
-		keysCount       = 100
-	)
+	const testKey = "order-new"
+
+	iterationsCount := scaledStressCount(5_000, 400)
+	keysCount := scaledStressCount(100, 32)
 
 	var (
 		store     = newTestDiskStore(t, true, "", true)

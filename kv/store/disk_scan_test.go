@@ -199,10 +199,11 @@ func TestDiskStore_Scan_ConcurrentMutations(t *testing.T) {
 	const (
 		initialKeys  = 128
 		pageSize     = int64(5)
-		iterations   = 256
 		prefix       = "conc"
 		prefixFormat = "%s:%03d"
 	)
+
+	iterations := scaledStressCount(256, 48)
 
 	for _, trackKeys := range []bool{true, false} {
 		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {

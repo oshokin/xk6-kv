@@ -73,12 +73,14 @@ func TestDiskStore_RandomKey_WithoutTracking_Smoke(t *testing.T) {
 func TestDiskStore_RandomKey_ConcurrentOperations(t *testing.T) {
 	t.Parallel()
 
+	operationCount := scaledStressCount(1_000, 128)
+
 	var (
 		store = newTestDiskStore(t, true, "", true)
 		wg    sync.WaitGroup
 	)
 
-	for i := range 1000 {
+	for i := range operationCount {
 		wg.Add(1)
 
 		go func(opIndex int) {

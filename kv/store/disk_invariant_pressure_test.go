@@ -15,10 +15,11 @@ func TestDiskStore_SetCASDeleteRandomKey_TrackKeysConsistency(t *testing.T) {
 	t.Parallel()
 
 	const (
-		prefix     = "mix:"
-		keyCount   = 64
-		iterations = 1_200
+		prefix   = "mix:"
+		keyCount = 64
 	)
+
+	iterations := scaledStressCount(1_200, 120)
 
 	store := newTestDiskStore(t, true, "", true)
 	startBarrier := make(chan struct{})
@@ -112,11 +113,12 @@ func TestDiskStore_ClearSetRace_TrackKeysConsistency(t *testing.T) {
 	t.Parallel()
 
 	const (
-		prefix          = "clear:"
-		keyCount        = 128
-		clearIterations = 300
-		setIterations   = 1_600
+		prefix   = "clear:"
+		keyCount = 128
 	)
+
+	clearIterations := scaledStressCount(300, 40)
+	setIterations := scaledStressCount(1_600, 160)
 
 	store := newTestDiskStore(t, true, "", true)
 	startBarrier := make(chan struct{})
@@ -188,11 +190,12 @@ func TestDiskStore_RebuildKeyList_UnderMutationPressure(t *testing.T) {
 	t.Parallel()
 
 	const (
-		prefix             = "rebuild:"
-		keyCount           = 96
-		mutationIterations = 1_500
-		rebuildIterations  = 220
+		prefix   = "rebuild:"
+		keyCount = 96
 	)
+
+	mutationIterations := scaledStressCount(1_500, 150)
+	rebuildIterations := scaledStressCount(220, 30)
 
 	store := newTestDiskStore(t, true, "", true)
 	for i := range keyCount {

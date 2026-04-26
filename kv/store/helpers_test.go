@@ -1,6 +1,7 @@
 package store
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,14 @@ const (
 	testNonNumeric = "not-a-number"
 	// Maximum safe JavaScript integer.
 	testMaxSafeJSInt = int64(9007199254740991)
+	// bbolt commits are fsync-heavy on Windows CI,
+	// so we divide the stress count by 8 to keep contention meaningful
+	// and avoid recurring package-level test timeouts.
+	windowsStressScaleDivisor = 8
+	// `go test -short` should still exercise concurrency paths, but finish quickly,
+	// so we divide the stress count by 4 to provide fast feedback
+	// without collapsing stress loops to trivial sizes.
+	shortModeStressScaleDivisor = 4
 )
 
 type testEntry struct {
@@ -151,4 +160,34 @@ func requireMemoryTrackingMatchesStore(t *testing.T, store *MemoryStore) {
 
 		shard.mu.RUnlock()
 	}
+}
+
+// scaledStressCount reduces heavy stress-loop sizes on slower platforms/runs while
+// preserving concurrency semantics and invariant coverage.
+func scaledStressCount(baseValue, minValue int) int {
+	if baseValue <= 0 {
+		panic("scaledStressCount base must be > 0")
+	}
+
+	if minValue <= 0 {
+		panic("scaledStressCount min must be > 0")
+	}
+
+	count := baseValue
+
+	// bbolt fsync-heavy write paths are substantially slower on Windows CI.
+	if runtime.GOOS == "windows" {
+		count /= windowsStressScaleDivisor
+	}
+
+	// Keep `go test -short` responsive while still exercising the same invariants.
+	if testing.Short() {
+		count /= shortModeStressScaleDivisor
+	}
+
+	if count < minValue {
+		return minValue
+	}
+
+	return count
 }
