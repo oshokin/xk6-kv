@@ -53,7 +53,10 @@ func (k *KV) RebuildKeyList() *sobek.Promise {
 // Returns a Promise that resolves to a backup summary with operation metrics.
 // The summary uses camelCase field names for JavaScript convention compatibility.
 func (k *KV) Backup(options sobek.Value) *sobek.Promise {
-	backupOptions := importBackupOptions(k.vu.Runtime(), options)
+	backupOptions, err := importBackupOptions(k.vu.Runtime(), options)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {
@@ -82,7 +85,10 @@ func (k *KV) Backup(options sobek.Value) *sobek.Promise {
 // Returns a Promise that resolves to a restore summary with operation metrics.
 // The summary uses camelCase field names for JavaScript convention compatibility.
 func (k *KV) Restore(options sobek.Value) *sobek.Promise {
-	restoreOptions := importRestoreOptions(k.vu.Runtime(), options)
+	restoreOptions, err := importRestoreOptions(k.vu.Runtime(), options)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {

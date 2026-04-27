@@ -12,12 +12,12 @@ import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common
 // - moderation pipelines throttling expensive operations per customer
 //
 // This scenario keeps a rolling window of active job keys per tenant and
-// validates kv.count(prefix) under concurrent load.
+// validates kv.count({ prefix }) under concurrent load.
 //
 // OPERATIONS EXERCISED:
 // - set(): append newly active jobs
 // - delete(): evict stale jobs from the rolling window
-// - count(prefix): compute active jobs per tenant without full materialization
+// - count({ prefix }): compute active jobs per tenant without full materialization
 
 // Maximum number of active jobs retained per tenant (rolling window size).
 const ACTIVE_WINDOW = parseInt(__ENV.ACTIVE_WINDOW || '20', 10);
@@ -52,7 +52,7 @@ export const setup = createSetup(kv);
 export const teardown = createTeardown(kv, TEST_NAME);
 
 // tenantPrefixCountWindow simulates one worker maintaining a bounded set
-// of active jobs for its tenant and reading cardinality via count(prefix).
+// of active jobs for its tenant and reading cardinality via count({ prefix }).
 export default async function tenantPrefixCountWindow() {
   const tenantId = exec.vu.idInTest;
   const prefix = `${TENANT_PREFIX}${tenantId}:job:`;
@@ -73,7 +73,7 @@ export default async function tenantPrefixCountWindow() {
     await kv.delete(staleKey);
   }
 
-  const tenantCount = await kv.count(prefix);
+  const tenantCount = await kv.count({ prefix });
   const globalCount = await kv.count();
 
   check(tenantCount, {

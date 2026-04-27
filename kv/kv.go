@@ -66,6 +66,21 @@ func (k *KV) databaseNotOpenError() *Error {
 	return NewError(DatabaseNotOpenError, "database is not open")
 }
 
+// rejectedPromise creates an already-rejected Promise on the VU event loop.
+func (k *KV) rejectedPromise(err error) *sobek.Promise {
+	rt := k.vu.Runtime()
+	promise, _, reject := rt.NewPromise()
+	callback := k.vu.RegisterCallback()
+
+	kvErr := classifyError(err)
+
+	callback(func() error {
+		return reject(kvErr.ToSobekValue(rt))
+	})
+
+	return promise
+}
+
 // runAsyncWithStore executes a blocking store operation on a worker goroutine
 // and bridges its result back to JavaScript by resolving a Sobek promise on the
 // VU's event loop. This indirection is required because:

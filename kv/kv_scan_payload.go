@@ -56,95 +56,165 @@ type (
 		// Prefix restricts random selection to keys beginning with this string.
 		Prefix string `js:"prefix"`
 	}
+
+	// countOptions holds the optional prefix filter for count().
+	countOptions struct {
+		// Prefix restricts counting to keys beginning with this string.
+		Prefix string `js:"prefix"`
+	}
 )
 
 // importScanOptions converts a Sobek value into ScanOptions.
-// Accepts null/undefined and partial objects; unknown fields are ignored.
-func importScanOptions(rt *sobek.Runtime, options sobek.Value) scanOptions {
+// Accepts null/undefined and partial objects.
+func importScanOptions(rt *sobek.Runtime, options sobek.Value) (scanOptions, error) {
 	scanOptions := scanOptions{}
 
+	err := ensureOptionalObjectOptions("scan", options)
+	if err != nil {
+		return scanOptions, err
+	}
+
 	if common.IsNullish(options) {
-		return scanOptions
+		return scanOptions, nil
 	}
 
 	optionsObj := options.ToObject(rt)
 
 	prefixValue := optionsObj.Get("prefix")
-	if !common.IsNullish(prefixValue) {
-		scanOptions.Prefix = prefixValue.String()
+
+	prefix, isSet, err := parseOptionalStringOption("scan", "prefix", prefixValue)
+	if err != nil {
+		return scanOptions, err
+	}
+
+	if isSet {
+		scanOptions.Prefix = prefix
 	}
 
 	cursorValue := optionsObj.Get("cursor")
-	if !common.IsNullish(cursorValue) {
-		scanOptions.Cursor = cursorValue.String()
+
+	cursor, isSet, err := parseOptionalStringOption("scan", "cursor", cursorValue)
+	if err != nil {
+		return scanOptions, err
+	}
+
+	if isSet {
+		scanOptions.Cursor = cursor
 	}
 
 	limitValue := optionsObj.Get("limit")
-	if common.IsNullish(limitValue) {
-		return scanOptions
+
+	parsedLimit, isSet, err := parseOptionalInt64Option("scan", "limit", limitValue)
+	if err != nil {
+		return scanOptions, err
 	}
 
-	var (
-		parsedLimit int64
-		err         = rt.ExportTo(limitValue, &parsedLimit)
-	)
-	if err == nil {
+	if isSet {
 		scanOptions.Limit = parsedLimit
 		scanOptions.isLimitSet = true
 	}
 
-	return scanOptions
+	return scanOptions, nil
 }
 
 // importListOptions converts a Sobek value into ListOptions, accepting null/undefined
-// and partial objects. Unknown fields are ignored.
-func importListOptions(rt *sobek.Runtime, options sobek.Value) listOptions {
+// and partial objects.
+func importListOptions(rt *sobek.Runtime, options sobek.Value) (listOptions, error) {
 	listOptions := listOptions{}
 
-	// If no options are passed, return the default options.
-	if common.IsNullish(options) {
-		return listOptions
+	err := ensureOptionalObjectOptions("list", options)
+	if err != nil {
+		return listOptions, err
 	}
 
-	// Interpret the options as a plain object from JS.
+	if common.IsNullish(options) {
+		return listOptions, nil
+	}
+
 	optionsObj := options.ToObject(rt)
 
 	prefixValue := optionsObj.Get("prefix")
-	if !common.IsNullish(prefixValue) {
-		listOptions.Prefix = prefixValue.String()
+
+	prefix, isSet, err := parseOptionalStringOption("list", "prefix", prefixValue)
+	if err != nil {
+		return listOptions, err
+	}
+
+	if isSet {
+		listOptions.Prefix = prefix
 	}
 
 	limitValue := optionsObj.Get("limit")
-	if common.IsNullish(limitValue) {
-		return listOptions
+
+	parsedLimit, isSet, err := parseOptionalInt64Option("list", "limit", limitValue)
+	if err != nil {
+		return listOptions, err
 	}
 
-	var (
-		parsedLimit int64
-		err         = rt.ExportTo(limitValue, &parsedLimit)
-	)
-	if err == nil {
+	if isSet {
 		listOptions.Limit = parsedLimit
 		listOptions.limitSet = true
 	}
 
-	return listOptions
+	return listOptions, nil
 }
 
 // importRandomKeyOptions converts a Sobek value into RandomKeyOptions.
-// Accepts null/undefined and partial objects; missing fields default to zero-values.
-func importRandomKeyOptions(rt *sobek.Runtime, options sobek.Value) randomKeyOptions {
+// Accepts null/undefined and partial objects.
+func importRandomKeyOptions(rt *sobek.Runtime, options sobek.Value) (randomKeyOptions, error) {
 	randomKeyOptions := randomKeyOptions{}
+
+	err := ensureOptionalObjectOptions("randomKey", options)
+	if err != nil {
+		return randomKeyOptions, err
+	}
+
 	if common.IsNullish(options) {
-		return randomKeyOptions
+		return randomKeyOptions, nil
 	}
 
 	optionsObj := options.ToObject(rt)
 
 	prefixValue := optionsObj.Get("prefix")
-	if !common.IsNullish(prefixValue) {
-		randomKeyOptions.Prefix = prefixValue.String()
+
+	prefix, isSet, err := parseOptionalStringOption("randomKey", "prefix", prefixValue)
+	if err != nil {
+		return randomKeyOptions, err
 	}
 
-	return randomKeyOptions
+	if isSet {
+		randomKeyOptions.Prefix = prefix
+	}
+
+	return randomKeyOptions, nil
+}
+
+// importCountOptions converts a Sobek value into CountOptions.
+// Accepts null/undefined and plain objects; other input types are rejected.
+func importCountOptions(rt *sobek.Runtime, options sobek.Value) (countOptions, error) {
+	countOptions := countOptions{}
+
+	err := ensureOptionalObjectOptions("count", options)
+	if err != nil {
+		return countOptions, err
+	}
+
+	if common.IsNullish(options) {
+		return countOptions, nil
+	}
+
+	optionsObj := options.ToObject(rt)
+
+	prefixValue := optionsObj.Get("prefix")
+
+	prefix, isSet, err := parseOptionalStringOption("count", "prefix", prefixValue)
+	if err != nil {
+		return countOptions, err
+	}
+
+	if isSet {
+		countOptions.Prefix = prefix
+	}
+
+	return countOptions, nil
 }

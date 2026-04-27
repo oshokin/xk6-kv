@@ -1,4 +1,4 @@
-// Demonstrates kv.count(prefix) and kv.count() behavior.
+// Demonstrates kv.count({ prefix }) and kv.count() behavior.
 // Useful for lightweight cardinality checks without materializing entries via list()/scan().
 
 import { check } from "k6";
@@ -18,8 +18,8 @@ export async function setup() {
 }
 
 export default async function () {
-  const usersCount = await kv.count("user:");
-  const sessionsCount = await kv.count("session:");
+  const usersCount = await kv.count({ prefix: "user:" });
+  const sessionsCount = await kv.count({ prefix: "session:" });
   const totalCount = await kv.count();
 
   check(usersCount, {

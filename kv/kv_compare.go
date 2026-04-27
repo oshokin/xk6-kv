@@ -12,8 +12,12 @@ import (
 // Passing null/undefined (JS) for oldValue means "swap only if the key does not exist",
 // mirroring sync/atomic.CompareAndSwap semantics in Go.
 func (k *KV) CompareAndSwap(key, oldValue, newValue sobek.Value) *sobek.Promise {
+	keyString, err := parseRequiredStringArg("compareAndSwap", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
+
 	var (
-		keyString   = key.String()
 		exportedOld = oldValue.Export()
 		exportedNew = newValue.Export()
 	)
@@ -36,11 +40,23 @@ func (k *KV) CompareAndSwap(key, oldValue, newValue sobek.Value) *sobek.Promise 
 // current is included only when options.includeCurrentOnMismatch is true and the
 // key existed at compare time.
 func (k *KV) CompareAndSwapDetailed(key, oldValue, newValue, options sobek.Value) *sobek.Promise {
+	keyString, err := parseRequiredStringArg("compareAndSwapDetailed", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
+
+	includeCurrentOnMismatch, err := importIncludeCurrentOnMismatchOption(
+		k.vu.Runtime(),
+		"compareAndSwapDetailed",
+		options,
+	)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
+
 	var (
-		keyString                = key.String()
-		exportedOld              = oldValue.Export()
-		exportedNew              = newValue.Export()
-		includeCurrentOnMismatch = importIncludeCurrentOnMismatchOption(k.vu.Runtime(), options)
+		exportedOld = oldValue.Export()
+		exportedNew = newValue.Export()
 	)
 
 	return k.runAsyncWithStore(
@@ -67,7 +83,10 @@ func (k *KV) CompareAndSwapDetailed(key, oldValue, newValue, options sobek.Value
 // Note: Deleting a non-existent key still resolves to true to keep the API simple.
 // If you need to know whether deletion actually happened, use DeleteIfExists.
 func (k *KV) Delete(key sobek.Value) *sobek.Promise {
-	keyString := key.String()
+	keyString, err := parseRequiredStringArg("delete", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {
@@ -81,7 +100,10 @@ func (k *KV) Delete(key sobek.Value) *sobek.Promise {
 
 // Exists returns a Promise that resolves to true if the key exists, false otherwise.
 func (k *KV) Exists(key sobek.Value) *sobek.Promise {
-	keyString := key.String()
+	keyString, err := parseRequiredStringArg("exists", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {
@@ -96,7 +118,10 @@ func (k *KV) Exists(key sobek.Value) *sobek.Promise {
 // DeleteIfExists returns a Promise that resolves to true only if the key was present
 // and has been deleted; false if it was absent.
 func (k *KV) DeleteIfExists(key sobek.Value) *sobek.Promise {
-	keyString := key.String()
+	keyString, err := parseRequiredStringArg("deleteIfExists", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {
@@ -111,7 +136,11 @@ func (k *KV) DeleteIfExists(key sobek.Value) *sobek.Promise {
 // CompareAndDelete returns a Promise that resolves to true if the current value at "key"
 // equals "oldValue" and the key was deleted atomically; otherwise false.
 func (k *KV) CompareAndDelete(key, old sobek.Value) *sobek.Promise {
-	keyString := key.String()
+	keyString, err := parseRequiredStringArg("compareAndDelete", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
+
 	exportedOld := old.Export()
 
 	return k.runAsyncWithStore(
@@ -132,11 +161,21 @@ func (k *KV) CompareAndDelete(key, old sobek.Value) *sobek.Promise {
 // current is included only when options.includeCurrentOnMismatch is true and the
 // key existed at compare time.
 func (k *KV) CompareAndDeleteDetailed(key, old, options sobek.Value) *sobek.Promise {
-	var (
-		keyString                = key.String()
-		exportedOld              = old.Export()
-		includeCurrentOnMismatch = importIncludeCurrentOnMismatchOption(k.vu.Runtime(), options)
+	keyString, err := parseRequiredStringArg("compareAndDeleteDetailed", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
+
+	includeCurrentOnMismatch, err := importIncludeCurrentOnMismatchOption(
+		k.vu.Runtime(),
+		"compareAndDeleteDetailed",
+		options,
 	)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
+
+	exportedOld := old.Export()
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {
@@ -160,7 +199,11 @@ func (k *KV) CompareAndDeleteDetailed(key, old, options sobek.Value) *sobek.Prom
 // SetIfAbsent atomically sets value only when key is currently absent.
 // Returns true if the value was inserted, false if the key already existed.
 func (k *KV) SetIfAbsent(key, value sobek.Value) *sobek.Promise {
-	keyString := key.String()
+	keyString, err := parseRequiredStringArg("setIfAbsent", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
+
 	exportedValue := value.Export()
 
 	return k.runAsyncWithStore(

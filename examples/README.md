@@ -115,7 +115,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | err.name | Trigger | Go sentinels |
 | --- | --- | --- |
 | `InvalidBackendError` | `openKv()` called with unsupported backend (not "memory" or "disk"). | `ErrInvalidBackend` |
-| `InvalidOptionsError` | `openKv()` called with options that cannot be parsed. | `ErrKVOptionsInvalid` |
+| `InvalidOptionsError` | Invalid API arguments/options shape (e.g. non-object passed to options-based methods, wrong option field types, non-string keys), or `openKv()` called with options that cannot be parsed. | `ErrKVOptionsInvalid`, (JS-layer validation) |
 | `InvalidSerializationError` | `openKv()` called with unsupported serialization (not "json" or "string"). | `ErrInvalidSerialization` |
 | `KVOptionsConflictError` | `openKv()` called multiple times with different options (first call wins, later calls must match). | `ErrKVOptionsConflict` |
 | `BackupOptionsRequiredError` | `kv.backup()` called with `null`/`undefined` options. | `ErrBackupOptionsNil` |

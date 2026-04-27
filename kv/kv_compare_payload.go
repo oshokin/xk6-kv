@@ -121,15 +121,26 @@ func compareAndDeleteDetailedPayload(detailed *store.CompareAndDeleteDetailedRes
 
 // importIncludeCurrentOnMismatchOption reads { includeCurrentOnMismatch?: boolean }.
 // Null/undefined/missing values default to false.
-func importIncludeCurrentOnMismatchOption(rt *sobek.Runtime, options sobek.Value) bool {
+func importIncludeCurrentOnMismatchOption(rt *sobek.Runtime, method string, options sobek.Value) (bool, error) {
+	err := ensureOptionalObjectOptions(method, options)
+	if err != nil {
+		return false, err
+	}
+
 	if common.IsNullish(options) {
-		return false
+		return false, nil
 	}
 
 	include := options.ToObject(rt).Get("includeCurrentOnMismatch")
-	if common.IsNullish(include) {
-		return false
+
+	parsedInclude, isSet, err := parseOptionalBoolOption(method, "includeCurrentOnMismatch", include)
+	if err != nil {
+		return false, err
 	}
 
-	return include.ToBoolean()
+	if !isSet {
+		return false, nil
+	}
+
+	return parsedInclude, nil
 }

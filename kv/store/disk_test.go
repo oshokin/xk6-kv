@@ -1067,6 +1067,37 @@ func TestDiskStore_KeyTrackingConsistency(t *testing.T) {
 	store.keysLock.RUnlock()
 }
 
+// TestDiskStore_Delete_CorruptedIndex_DoesNotPanic verifies delete path remains safe
+// even if keysMap accidentally points outside keysList bounds.
+func TestDiskStore_Delete_CorruptedIndex_DoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	requirePopulateStore(
+		t,
+		store,
+		"key-alpha", "value-alpha",
+		"key-beta", "value-beta",
+	)
+
+	store.keysLock.Lock()
+	store.keysMap["key-alpha"] = len(store.keysList) + 100
+	store.keysLock.Unlock()
+
+	require.NotPanics(t, func() {
+		require.NoError(t, store.Delete("key-alpha"))
+	})
+
+	exists, err := store.Exists("key-alpha")
+	require.NoError(t, err)
+	assert.False(t, exists, "deleted key must not remain in bbolt")
+
+	store.keysLock.RLock()
+	_, indexed := store.keysMap["key-alpha"]
+	store.keysLock.RUnlock()
+	assert.False(t, indexed, "defensive cleanup must remove stale map entry")
+}
+
 // TestDiskStore_SetDelete_Interleave_TrackKeysConsistency verifies that
 // concurrent Set/Delete on the same key keeps bbolt and tracking index aligned.
 func TestDiskStore_SetDelete_Interleave_TrackKeysConsistency(t *testing.T) {

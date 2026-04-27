@@ -14,7 +14,10 @@ import (
 //   - The database is not open.
 //   - The key does not exist (error is forwarded from the store).
 func (k *KV) Get(key sobek.Value) *sobek.Promise {
-	keyString := key.String()
+	keyString, err := parseRequiredStringArg("get", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {
@@ -38,7 +41,10 @@ func (k *KV) Get(key sobek.Value) *sobek.Promise {
 //   - database is not open,
 //   - store-level serialization/validation errors.
 func (k *KV) Set(key sobek.Value, value sobek.Value) *sobek.Promise {
-	keyString := key.String()
+	keyString, err := parseRequiredStringArg("set", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
 
 	// Convert Sobek value to Go 'any' for the store.
 	exportedValue := value.Export()
@@ -62,7 +68,10 @@ func (k *KV) Set(key sobek.Value, value sobek.Value) *sobek.Promise {
 //   - Absent keys are treated as 0 prior to the increment.
 //   - The existing value must parse as an integer; otherwise the Promise is rejected.
 func (k *KV) IncrementBy(key sobek.Value, delta sobek.Value) *sobek.Promise {
-	keyString := key.String()
+	keyString, err := parseRequiredStringArg("incrementBy", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
 
 	// We must not rely on rt.ExportTo(...) here because we are not on the VU event loop.
 	// We instead use sobek.Value.Export(), then coerce to int64 synchronously before we spawn the goroutine.
@@ -99,7 +108,11 @@ func (k *KV) IncrementBy(key sobek.Value, delta sobek.Value) *sobek.Promise {
 //   - If the key exists -> { value: existing, loaded: true }.
 //   - If the key is absent -> stores the provided value and resolves { value: stored, loaded: false }.
 func (k *KV) GetOrSet(key sobek.Value, value sobek.Value) *sobek.Promise {
-	keyString := key.String()
+	keyString, err := parseRequiredStringArg("getOrSet", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
+
 	exportedValue := value.Export()
 
 	return k.runAsyncWithStore(
@@ -126,7 +139,11 @@ func (k *KV) GetOrSet(key sobek.Value, value sobek.Value) *sobek.Promise {
 //   - If key existed -> it is replaced; resolves previous value with loaded=true.
 //   - If key was absent -> it is created; resolves previous=null with loaded=false.
 func (k *KV) Swap(key sobek.Value, value sobek.Value) *sobek.Promise {
-	keyString := key.String()
+	keyString, err := parseRequiredStringArg("swap", "key", key)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
+
 	exportedValue := value.Export()
 
 	return k.runAsyncWithStore(

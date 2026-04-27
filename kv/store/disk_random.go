@@ -56,6 +56,18 @@ func (s *DiskStore) removeKeyIndexLocked(key string) {
 		return
 	}
 
+	// Defensive guard against accidental index corruption.
+	// Even if keysMap/keysList diverge, delete path must not panic.
+	if len(s.keysList) == 0 || idx < 0 || idx >= len(s.keysList) {
+		delete(s.keysMap, key)
+
+		if s.ost != nil {
+			s.ost.Delete(key)
+		}
+
+		return
+	}
+
 	// Swap-with-last deletion to avoid shifting array elements (O(1) instead of O(n)).
 	lastIndex := len(s.keysList) - 1
 	if idx != lastIndex {
@@ -189,7 +201,7 @@ func (s *DiskStore) randomKeyWithoutTracking(prefix string) (string, error) {
 }
 
 // countKeysInBucket counts how many keys match prefix using the provided bucket.
-// When prefix == "", it returns KeyN directly from bucket stats (O(1)).
+// When prefix == "", it returns KeyN from bucket stats.
 func countKeysInBucket(bucket *bolt.Bucket, prefix string) int64 {
 	if prefix == "" {
 		return int64(bucket.Stats().KeyN)

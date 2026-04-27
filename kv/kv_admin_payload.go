@@ -26,60 +26,82 @@ type (
 )
 
 // importBackupOptions converts JS values into BackupOptions.
-func importBackupOptions(rt *sobek.Runtime, options sobek.Value) backupOptions {
+func importBackupOptions(rt *sobek.Runtime, options sobek.Value) (backupOptions, error) {
 	backupOptions := backupOptions{}
+
+	err := ensureOptionalObjectOptions("backup", options)
+	if err != nil {
+		return backupOptions, err
+	}
+
 	if common.IsNullish(options) {
-		return backupOptions
+		return backupOptions, nil
 	}
 
 	optionsObj := options.ToObject(rt)
 	if fileNameValue := optionsObj.Get("fileName"); !common.IsNullish(fileNameValue) {
-		backupOptions.FileName = fileNameValue.String()
+		fileName, _, parseErr := parseOptionalStringOption("backup", "fileName", fileNameValue)
+		if parseErr != nil {
+			return backupOptions, parseErr
+		}
+
+		backupOptions.FileName = fileName
 	}
 
 	allowValue := optionsObj.Get("allowConcurrentWrites")
 	if !common.IsNullish(allowValue) {
-		var allow bool
-
-		err := rt.ExportTo(allowValue, &allow)
-		if err == nil {
-			backupOptions.AllowConcurrentWrites = allow
+		allow, _, parseErr := parseOptionalBoolOption("backup", "allowConcurrentWrites", allowValue)
+		if parseErr != nil {
+			return backupOptions, parseErr
 		}
+
+		backupOptions.AllowConcurrentWrites = allow
 	}
 
-	return backupOptions
+	return backupOptions, nil
 }
 
 // importRestoreOptions converts JS values into RestoreOptions.
-func importRestoreOptions(rt *sobek.Runtime, options sobek.Value) restoreOptions {
+func importRestoreOptions(rt *sobek.Runtime, options sobek.Value) (restoreOptions, error) {
 	restoreOptions := restoreOptions{}
+
+	err := ensureOptionalObjectOptions("restore", options)
+	if err != nil {
+		return restoreOptions, err
+	}
+
 	if common.IsNullish(options) {
-		return restoreOptions
+		return restoreOptions, nil
 	}
 
 	optionsObj := options.ToObject(rt)
 
 	if fileNameValue := optionsObj.Get("fileName"); !common.IsNullish(fileNameValue) {
-		restoreOptions.FileName = fileNameValue.String()
+		fileName, _, parseErr := parseOptionalStringOption("restore", "fileName", fileNameValue)
+		if parseErr != nil {
+			return restoreOptions, parseErr
+		}
+
+		restoreOptions.FileName = fileName
 	}
 
 	if maxEntriesValue := optionsObj.Get("maxEntries"); !common.IsNullish(maxEntriesValue) {
-		var parsedValue int64
-
-		err := rt.ExportTo(maxEntriesValue, &parsedValue)
-		if err == nil {
-			restoreOptions.MaxEntries = parsedValue
+		parsedValue, _, parseErr := parseOptionalInt64Option("restore", "maxEntries", maxEntriesValue)
+		if parseErr != nil {
+			return restoreOptions, parseErr
 		}
+
+		restoreOptions.MaxEntries = parsedValue
 	}
 
 	if maxBytesValue := optionsObj.Get("maxBytes"); !common.IsNullish(maxBytesValue) {
-		var parsedValue int64
-
-		err := rt.ExportTo(maxBytesValue, &parsedValue)
-		if err == nil {
-			restoreOptions.MaxBytes = parsedValue
+		parsedValue, _, parseErr := parseOptionalInt64Option("restore", "maxBytes", maxBytesValue)
+		if parseErr != nil {
+			return restoreOptions, parseErr
 		}
+
+		restoreOptions.MaxBytes = parsedValue
 	}
 
-	return restoreOptions
+	return restoreOptions, nil
 }

@@ -199,6 +199,16 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Options for counting keys.
+   */
+  export interface CountOptions {
+    /**
+     * Filter by key prefix. Only keys starting with this string are counted.
+     */
+    prefix?: string;
+  }
+
+  /**
    * Options for backing up a snapshot.
    */
   export interface BackupOptions {
@@ -762,19 +772,19 @@ declare module 'k6/x/kv' {
     /**
      * Returns the number of keys that start with the provided prefix.
      *
-     * - `count("")` (or omitted prefix) is equivalent to `size()`
+     * - `count()` (or omitted options) is equivalent to `size()`
      * - Prefix matching is byte-wise and consistent with scan/list/randomKey
      *
-     * @param prefix - Optional key prefix filter
+     * @param options - Optional key prefix filter
      * @returns Promise that resolves to the number of matching keys
      *
      * @example
      * ```javascript
-     * const usersCount = await kv.count('user:');
+     * const usersCount = await kv.count({ prefix: 'user:' });
      * const totalCount = await kv.count();
      * ```
      */
-    count(prefix?: string): Promise<number>;
+    count(options?: CountOptions): Promise<number>;
 
     /**
      * Returns a random key, optionally filtered by prefix.

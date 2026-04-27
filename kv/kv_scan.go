@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/grafana/sobek"
-	"go.k6.io/k6/js/common"
 
 	"github.com/oshokin/xk6-kv/kv/store"
 )
@@ -14,7 +13,10 @@ import (
 // It supports cursor-based pagination over keys, ordered lexicographically.
 // Pass the cursor from a previous result to continue; omit it (or pass "") to start fresh.
 func (k *KV) Scan(options sobek.Value) *sobek.Promise {
-	scanOptions := importScanOptions(k.vu.Runtime(), options)
+	scanOptions, err := importScanOptions(k.vu.Runtime(), options)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {
@@ -67,7 +69,10 @@ func (k *KV) Scan(options sobek.Value) *sobek.Promise {
 // ordered lexicographically by key. Options support prefix and limit.
 func (k *KV) List(options sobek.Value) *sobek.Promise {
 	// Import list options from JavaScript (safe on the VU thread now).
-	listOptions := importListOptions(k.vu.Runtime(), options)
+	listOptions, err := importListOptions(k.vu.Runtime(), options)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {
@@ -88,17 +93,17 @@ func (k *KV) List(options sobek.Value) *sobek.Promise {
 	)
 }
 
-// Count returns a Promise that resolves to the number of keys matching prefix.
-// Pass null/undefined/"" to count all keys.
-func (k *KV) Count(prefix sobek.Value) *sobek.Promise {
-	countPrefix := ""
-	if !common.IsNullish(prefix) {
-		countPrefix = prefix.String()
+// Count returns a Promise that resolves to the number of keys matching an optional prefix.
+// Pass null/undefined (or omit options) to count all keys.
+func (k *KV) Count(options sobek.Value) *sobek.Promise {
+	countOptions, err := importCountOptions(k.vu.Runtime(), options)
+	if err != nil {
+		return k.rejectedPromise(err)
 	}
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {
-			return s.Count(countPrefix)
+			return s.Count(countOptions.Prefix)
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {
 			return rt.ToValue(result)
@@ -109,7 +114,10 @@ func (k *KV) Count(prefix sobek.Value) *sobek.Promise {
 // RandomKey returns a Promise that resolves to a random key as a string.
 // If the store is empty or no keys match the optional prefix, resolves to "" (empty string).
 func (k *KV) RandomKey(options sobek.Value) *sobek.Promise {
-	randomKeyOptions := importRandomKeyOptions(k.vu.Runtime(), options)
+	randomKeyOptions, err := importRandomKeyOptions(k.vu.Runtime(), options)
+	if err != nil {
+		return k.rejectedPromise(err)
+	}
 
 	return k.runAsyncWithStore(
 		func(s store.Store) (any, error) {

@@ -147,9 +147,100 @@ func TestMemoryStore_Scan_MutationAfterPagination(t *testing.T) {
 	}
 }
 
-// TestMemoryStore_Count verifies Count with/without prefix across tracking modes.
+// TestMemoryStore_Count verifies Count semantics on boundary-heavy prefix datasets
+// and keeps Count aligned with Scan(prefix, "", 0) across tracking modes.
 func TestMemoryStore_Count(t *testing.T) {
 	t.Parallel()
+
+	type (
+		countCheck struct {
+			prefix string
+			want   int64
+		}
+
+		countCase struct {
+			name    string
+			records []string
+			checks  []*countCheck
+		}
+	)
+
+	countCases := []*countCase{
+		{
+			name: "mixed-boundaries-and-parity",
+			records: []string{
+				"user", "value-user",
+				"user:", "value-user-colon",
+				"user:1", "value-user-1",
+				"user:10", "value-user-10",
+				"userx", "value-userx",
+				"abc", "value-abc",
+				"abcd", "value-abcd",
+				"abce", "value-abce",
+				"abd", "value-abd",
+				"\xff", "value-ff",
+				"\xffa", "value-ffa",
+				"пользователь:1", "value-user-ru-1",
+				"пользователь:2", "value-user-ru-2",
+				"заказ:1", "value-order-ru-1",
+			},
+			checks: []*countCheck{
+				{prefix: "", want: 14},
+				{prefix: "user:", want: 3},
+				{prefix: "abc", want: 3},
+				{prefix: "missing:", want: 0},
+				{prefix: "\xff", want: 2},
+				{prefix: "пользователь:", want: 2},
+			},
+		},
+		{
+			name: "exact-prefix-boundary",
+			records: []string{
+				"abc", "value-1",
+				"abcd", "value-2",
+				"abce", "value-3",
+				"abd", "value-4",
+			},
+			checks: []*countCheck{
+				{prefix: "abc", want: 3},
+			},
+		},
+		{
+			name: "delimiter-boundary",
+			records: []string{
+				"user", "value-user",
+				"user:", "value-user-colon",
+				"user:1", "value-user-1",
+				"user:10", "value-user-10",
+				"userx", "value-userx",
+			},
+			checks: []*countCheck{
+				{prefix: "user:", want: 3},
+			},
+		},
+		{
+			name: "unicode-prefix",
+			records: []string{
+				"пользователь:1", "value-1",
+				"пользователь:2", "value-2",
+				"заказ:1", "value-3",
+			},
+			checks: []*countCheck{
+				{prefix: "пользователь:", want: 2},
+			},
+		},
+		{
+			name: "ff-boundary",
+			records: []string{
+				"\xff", "value-1",
+				"\xffa", "value-2",
+				"a", "value-3",
+			},
+			checks: []*countCheck{
+				{prefix: "\xff", want: 2},
+			},
+		},
+	}
 
 	for _, trackKeys := range []bool{true, false} {
 		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
@@ -157,35 +248,83 @@ func TestMemoryStore_Count(t *testing.T) {
 
 			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
 
-			count, err := store.Count("")
-			require.NoError(t, err)
-			assert.EqualValues(t, 0, count)
+			for _, countCase := range countCases {
+				t.Run(countCase.name, func(t *testing.T) {
+					require.NoError(t, store.Clear())
+					requirePopulateStore(t, store, countCase.records...)
 
-			requirePopulateStore(
-				t,
-				store,
-				"user:1", "value-1",
-				"user:2", "value-2",
-				"session:1", "value-3",
-			)
+					for _, check := range countCase.checks {
+						count := requireCountMatchesScan(t, store, check.prefix)
+						assert.Equal(t, check.want, count)
+					}
+				})
+			}
+		})
+	}
+}
 
-			count, err = store.Count("")
-			require.NoError(t, err)
-			assert.EqualValues(t, 3, count)
+// TestMemoryStore_Count_MutationParity verifies Count remains consistent with Scan
+// after common key lifecycle mutations, including creation-through-CAS and IncrementBy.
+func TestMemoryStore_Count_MutationParity(t *testing.T) {
+	t.Parallel()
 
-			count, err = store.Count("user:")
-			require.NoError(t, err)
-			assert.EqualValues(t, 2, count)
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
 
-			count, err = store.Count("missing:")
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+			assertCounts := func(userCount, counterCount, totalCount int64) {
+				t.Helper()
+
+				assert.Equal(t, userCount, requireCountMatchesScan(t, store, "user:"))
+				assert.Equal(t, counterCount, requireCountMatchesScan(t, store, "counter:user:"))
+				assert.Equal(t, totalCount, requireCountMatchesScan(t, store, ""))
+			}
+
+			require.NoError(t, store.Clear())
+			assertCounts(0, 0, 0)
+
+			require.NoError(t, store.Set("user:1", "value-1"))
+			assertCounts(1, 0, 1)
+
+			_, loaded, err := store.GetOrSet("user:2", "value-2")
 			require.NoError(t, err)
-			assert.EqualValues(t, 0, count)
+			assert.False(t, loaded)
+			assertCounts(2, 0, 2)
+
+			_, loaded, err = store.Swap("user:3", "value-3")
+			require.NoError(t, err)
+			assert.False(t, loaded)
+			assertCounts(3, 0, 3)
+
+			swapped, err := store.CompareAndSwap("user:4", nil, "value-4")
+			require.NoError(t, err)
+			assert.True(t, swapped)
+			assertCounts(4, 0, 4)
+
+			counterValue, err := store.IncrementBy("counter:user:1", 1)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, counterValue)
+			assertCounts(4, 1, 5)
+
+			deleted, err := store.CompareAndDelete("user:2", "value-2")
+			require.NoError(t, err)
+			assert.True(t, deleted)
+			assertCounts(3, 1, 4)
+
+			deleted, err = store.DeleteIfExists("user:3")
+			require.NoError(t, err)
+			assert.True(t, deleted)
+			assertCounts(2, 1, 3)
 
 			require.NoError(t, store.Delete("user:1"))
+			assertCounts(1, 1, 2)
 
-			count, err = store.Count("user:")
-			require.NoError(t, err)
-			assert.EqualValues(t, 1, count)
+			require.NoError(t, store.RebuildKeyList())
+			assertCounts(1, 1, 2)
+
+			require.NoError(t, store.Clear())
+			assertCounts(0, 0, 0)
 		})
 	}
 }

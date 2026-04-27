@@ -36,7 +36,7 @@ export default async function () {
   console.log(`Store has ${size} keys`);
 
   // Count keys by prefix.
-  const userCount = await kv.count('user:');
+  const userCount = await kv.count({ prefix: 'user:' });
   const totalCount = await kv.count();
   console.log(`Users count: ${userCount}, total count via count(): ${totalCount}`);
 

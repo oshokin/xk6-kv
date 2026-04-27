@@ -184,7 +184,7 @@ func TestKVAsync_Count_ResolvesPromise(t *testing.T) {
 			__kv.set("user:2", "b"),
 			__kv.set("order:1", "c")
 		])
-			.then(() => __kv.count("user:"))
+			.then(() => __kv.count({ prefix: "user:" }))
 			.then((count) => {
 				if (count !== 2) {
 					throw new Error("unexpected count for user prefix");
@@ -196,6 +196,138 @@ func TestKVAsync_Count_ResolvesPromise(t *testing.T) {
 					throw new Error("unexpected total count");
 				}
 			});
+	`)
+}
+
+func TestKVAsync_Count_InvalidOptions_RejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.count("user:")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_AllOptionsMethods_InvalidOptionsType_RejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		function expectInvalidOptions(promise, label) {
+			return promise
+				.then(() => {
+					throw new Error(label + ": expected rejection");
+				})
+				.catch((err) => {
+					if (!err || err.name !== "InvalidOptionsError") {
+						throw new Error(label + ": unexpected error class: " + String(err && err.name));
+					}
+				});
+		}
+
+		Promise.all([
+			expectInvalidOptions(__kv.scan("bad"), "scan"),
+			expectInvalidOptions(__kv.list("bad"), "list"),
+			expectInvalidOptions(__kv.randomKey("bad"), "randomKey"),
+			expectInvalidOptions(__kv.count("bad"), "count"),
+			expectInvalidOptions(__kv.backup("bad"), "backup"),
+			expectInvalidOptions(__kv.restore("bad"), "restore"),
+			expectInvalidOptions(__kv.compareAndSwapDetailed("k", null, "v", "bad"), "compareAndSwapDetailed"),
+			expectInvalidOptions(__kv.compareAndDeleteDetailed("k", "v", "bad"), "compareAndDeleteDetailed")
+		]);
+	`)
+}
+
+func TestKVAsync_AllOptionsMethods_InvalidOptionFieldType_RejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		function expectInvalidOptions(promise, label) {
+			return promise
+				.then(() => {
+					throw new Error(label + ": expected rejection");
+				})
+				.catch((err) => {
+					if (!err || err.name !== "InvalidOptionsError") {
+						throw new Error(label + ": unexpected error class: " + String(err && err.name));
+					}
+				});
+		}
+
+		Promise.all([
+			expectInvalidOptions(__kv.scan({ prefix: 123 }), "scan.prefix"),
+			expectInvalidOptions(__kv.scan({ limit: "10" }), "scan.limit"),
+			expectInvalidOptions(__kv.scan({ cursor: 99 }), "scan.cursor"),
+			expectInvalidOptions(__kv.list({ prefix: true }), "list.prefix"),
+			expectInvalidOptions(__kv.list({ limit: "10" }), "list.limit"),
+			expectInvalidOptions(__kv.randomKey({ prefix: 7 }), "randomKey.prefix"),
+			expectInvalidOptions(__kv.count({ prefix: 7 }), "count.prefix"),
+			expectInvalidOptions(__kv.backup({ fileName: 100 }), "backup.fileName"),
+			expectInvalidOptions(__kv.backup({ allowConcurrentWrites: "true" }), "backup.allowConcurrentWrites"),
+			expectInvalidOptions(__kv.restore({ fileName: 100 }), "restore.fileName"),
+			expectInvalidOptions(__kv.restore({ maxEntries: "10" }), "restore.maxEntries"),
+			expectInvalidOptions(__kv.restore({ maxBytes: "10" }), "restore.maxBytes"),
+			expectInvalidOptions(
+				__kv.compareAndSwapDetailed("k", null, "v", { includeCurrentOnMismatch: "true" }),
+				"compareAndSwapDetailed.includeCurrentOnMismatch"
+			),
+			expectInvalidOptions(
+				__kv.compareAndDeleteDetailed("k", "v", { includeCurrentOnMismatch: 1 }),
+				"compareAndDeleteDetailed.includeCurrentOnMismatch"
+			)
+		]);
+	`)
+}
+
+func TestKVAsync_KeyMethods_InvalidKeyType_RejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		function expectInvalidOptions(promise, label) {
+			return promise
+				.then(() => {
+					throw new Error(label + ": expected rejection");
+				})
+				.catch((err) => {
+					if (!err || err.name !== "InvalidOptionsError") {
+						throw new Error(label + ": unexpected error class: " + String(err && err.name));
+					}
+				});
+		}
+
+		Promise.all([
+			expectInvalidOptions(__kv.get(1), "get"),
+			expectInvalidOptions(__kv.set(1, "v"), "set"),
+			expectInvalidOptions(__kv.incrementBy(1, 1), "incrementBy"),
+			expectInvalidOptions(__kv.getOrSet(1, "v"), "getOrSet"),
+			expectInvalidOptions(__kv.swap(1, "v"), "swap"),
+			expectInvalidOptions(__kv.delete(1), "delete"),
+			expectInvalidOptions(__kv.exists(1), "exists"),
+			expectInvalidOptions(__kv.deleteIfExists(1), "deleteIfExists"),
+			expectInvalidOptions(__kv.compareAndSwap(1, null, "v"), "compareAndSwap"),
+			expectInvalidOptions(__kv.compareAndSwapDetailed(1, null, "v", {}), "compareAndSwapDetailed"),
+			expectInvalidOptions(__kv.compareAndDelete(1, "v"), "compareAndDelete"),
+			expectInvalidOptions(__kv.compareAndDeleteDetailed(1, "v", {}), "compareAndDeleteDetailed"),
+			expectInvalidOptions(__kv.setIfAbsent(1, "v"), "setIfAbsent")
+		]);
 	`)
 }
 

@@ -273,8 +273,14 @@ All methods return Promises except `close()`.
   }
   ```
 
-- **`count(prefix?: string): Promise<number>`** - Returns number of keys matching prefix.  
-  `count("")` (or omitted prefix) is equivalent to `size()`.
+- **`count(options?: CountOptions): Promise<number>`** - Returns number of keys matching prefix.  
+  `count()` (or omitted options) is equivalent to `size()`.
+
+  ```typescript
+  interface CountOptions {
+    prefix?: string  // Filter by key prefix
+  }
+  ```
 
 - **`randomKey(options?: RandomKeyOptions): Promise<string>`** - Returns a random key, or `""` if none match.
 
@@ -316,6 +322,17 @@ await kv.restore({ fileName: "./backups/kv-latest.kv" });
 - **`trackKeys: true`**: `randomKey()` without prefix -> O(1); with prefix -> O(log n). Achieving those speeds means every key is mirrored in memory across multiple helper structures, so large datasets consume noticeably more RAM and the slices/maps never shrink automatically. Budget for that footprint or rebuild the index periodically.
 - **`trackKeys: false`** (default): `randomKey()` falls back to a two-pass cursor walk in a **single** bbolt read snapshot, so heavy use remains O(n). Enable tracking or redesign workloads that call `randomKey()` frequently to avoid linear-time pauses.
 - **Random key workloads:** Calling `randomKey()` repeatedly with `trackKeys: false` (especially on the disk backend) keeps a read transaction open while it counts and selects keys, which can stall the lone bbolt writer until the call finishes. Turn on `trackKeys` (for O(1)/O(log n) sampling) or throttle/redesign these workloads to avoid head-of-line blocking.
+- **`count()` / `count({ prefix })` complexity:**
+  - `count()` (same as `size()`):
+    - memory backend: O(shards)
+    - disk backend with `trackKeys: true`: O(1)
+    - disk backend with `trackKeys: false`: uses bbolt bucket stats (not guaranteed constant-time)
+  - `count({ prefix })`:
+    - memory + `trackKeys: true`: O(shards * log n)
+    - memory + `trackKeys: false`: O(n)
+    - disk + `trackKeys: true`: O(log n)
+    - disk + `trackKeys: false`: O(k), where `k` is number of keys under prefix
+- **Prefix cardinality on large disk datasets:** If `count({ prefix })` is hot, prefer `trackKeys: true`. Without tracking, the disk path walks a bbolt cursor through matching keys.
 - Both backends are optimized for concurrent workloads, but there's synchronization overhead between VUs
 
 ## Usage Examples
@@ -390,7 +407,7 @@ task build-k6
 ### Available Tasks
 
 | Task | Description |
-|------|-------------|
+| ------ | ------------- |
 | `task install-tools` | Install dev tools (gofumpt, golangci-lint, xk6) |
 | `task lint-fix` | Fix linting issues and format code |
 | `task lint` | Check code without modifications |

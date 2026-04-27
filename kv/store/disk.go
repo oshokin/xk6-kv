@@ -630,7 +630,8 @@ func (s *DiskStore) Clear() error {
 	return nil
 }
 
-// Size returns the number of keys in the store (O(1) from bbolt stats).
+// Size returns the number of keys in the store.
+// Implementation reads KeyN via bbolt bucket stats.
 func (s *DiskStore) Size() (int64, error) {
 	release, err := s.beginOperation()
 	if err != nil {

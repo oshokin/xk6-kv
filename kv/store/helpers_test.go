@@ -162,6 +162,23 @@ func requireMemoryTrackingMatchesStore(t *testing.T, store *MemoryStore) {
 	}
 }
 
+// requireCountMatchesScan verifies Count(prefix) and Scan(prefix, "", 0) stay in sync.
+// It returns Count(prefix) so callers can also assert expected values succinctly.
+func requireCountMatchesScan(t *testing.T, store Store, prefix string) int64 {
+	t.Helper()
+
+	count, err := store.Count(prefix)
+	require.NoErrorf(t, err, "Count(%q) must succeed", prefix)
+
+	page, err := store.Scan(prefix, "", 0)
+	require.NoErrorf(t, err, "Scan(%q, \"\", 0) must succeed", prefix)
+	require.NotNil(t, page)
+	require.Emptyf(t, page.NextKey, "Scan(%q, \"\", 0) must return complete page", prefix)
+	require.EqualValuesf(t, len(page.Entries), count, "Count/Scan mismatch for prefix %q", prefix)
+
+	return count
+}
+
 // scaledStressCount reduces heavy stress-loop sizes on slower platforms/runs while
 // preserving concurrency semantics and invariant coverage.
 func scaledStressCount(baseValue, minValue int) int {
