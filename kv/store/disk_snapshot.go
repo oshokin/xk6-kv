@@ -197,6 +197,11 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 	// Fast path: if restoring from the same file (self-reference), return metadata
 	// without copying. This avoids unnecessary work when snapshot path matches store path.
 	if summary, done := s.tryDiskSelfRestore(opts.FileName); done {
+		// Self-restore still starts a "new world"; drop all persisted claim leases.
+		if err := s.clearDiskClaims(); err != nil {
+			return nil, err
+		}
+
 		return summary, nil
 	}
 
@@ -257,6 +262,11 @@ func (s *DiskStore) restoreFromSnapshotDB(snapshotDB *bolt.DB, opts *RestoreOpti
 		// if the bucket doesn't exist yet (empty store).
 		if err := tx.DeleteBucket(s.bucket); err != nil && !errors.Is(err, boltErrors.ErrBucketNotFound) {
 			return fmt.Errorf("%w: %w", ErrDiskStoreDeleteFailed, err)
+		}
+
+		// Claims are process-local leases, restore always starts a new lease world.
+		if err := clearClaimsBucket(tx); err != nil {
+			return err
 		}
 
 		// Create fresh bucket for restored data.

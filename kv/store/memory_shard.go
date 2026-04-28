@@ -11,6 +11,8 @@ type (
 	memoryShard struct {
 		// container is the map of key-value pairs.
 		container map[string][]byte
+		// claims stores per-key claim metadata for this shard.
+		claims map[string]*memoryClaimRecord
 		// keysList is the list of keys in the shard.
 		keysList []string
 		// keysMap is the map of key-value pairs.
@@ -157,6 +159,12 @@ func (sh *memoryShard) clearLocked(trackKeys bool) {
 		sh.container = make(map[string][]byte)
 	} else {
 		clear(sh.container)
+	}
+
+	if sh.claims == nil {
+		sh.claims = make(map[string]*memoryClaimRecord)
+	} else {
+		clear(sh.claims)
 	}
 
 	if !trackKeys {

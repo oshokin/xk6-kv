@@ -369,6 +369,7 @@ func (s *MemoryStore) applySnapshot(container map[string][]byte) {
 
 	for _, shard := range s.shards {
 		shard.container = make(map[string][]byte)
+		shard.claims = make(map[string]*memoryClaimRecord)
 
 		if s.trackKeys {
 			shard.keysList = []string{}

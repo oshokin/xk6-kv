@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 )
 
 // MaxShardCount is the maximum number of shards allowed.
@@ -39,6 +40,8 @@ type MemoryStore struct {
 	// testRestoreHook is a test-only synchronization hook invoked in Restore()
 	// after mutation blocking is active and before snapshot I/O begins.
 	testRestoreHook func()
+	// claimToken is a process-local monotonically increasing token for claims.
+	claimToken atomic.Int64
 }
 
 // NewMemoryStore creates a MemoryStore with the provided memory configuration.
@@ -59,6 +62,7 @@ func NewMemoryStore(memoryCfg *MemoryConfig) *MemoryStore {
 	for i := range store.shards {
 		shard := &memoryShard{
 			container: make(map[string][]byte),
+			claims:    make(map[string]*memoryClaimRecord),
 		}
 
 		if memoryCfg.TrackKeys {
@@ -263,6 +267,7 @@ func (s *MemoryStore) Delete(key string) error {
 
 	delete(shard.container, key)
 	shard.removeKeyTrackingLocked(key)
+	delete(shard.claims, key)
 	shard.mu.Unlock()
 
 	return nil
@@ -313,6 +318,7 @@ func (s *MemoryStore) DeleteIfExists(key string) (bool, error) {
 
 	delete(shard.container, key)
 	shard.removeKeyTrackingLocked(key)
+	delete(shard.claims, key)
 
 	return true, nil
 }

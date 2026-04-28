@@ -127,6 +127,7 @@ func (s *MemoryStore) CompareAndDeleteDetailed(
 
 	delete(shard.container, key)
 	shard.removeKeyTrackingLocked(key)
+	delete(shard.claims, key)
 
 	return &CompareAndDeleteDetailedResult{
 		Deleted: true,

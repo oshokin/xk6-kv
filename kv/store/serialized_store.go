@@ -275,6 +275,50 @@ func (s *SerializedStore) RandomKey(prefix string) (string, error) {
 	return s.store.RandomKey(prefix)
 }
 
+// PopRandom atomically selects and removes a random matching entry and deserializes its value.
+func (s *SerializedStore) PopRandom(prefix string) (*Entry, error) {
+	entry, err := s.store.PopRandom(prefix)
+	if err != nil || entry == nil {
+		return entry, err
+	}
+
+	decoded, err := s.deserializeValue(entry.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	entry.Value = decoded
+
+	return entry, nil
+}
+
+// ClaimRandom atomically leases a random matching entry and deserializes its value.
+func (s *SerializedStore) ClaimRandom(opts *ClaimOptions) (*EntryClaim, error) {
+	claim, err := s.store.ClaimRandom(opts)
+	if err != nil || claim == nil {
+		return claim, err
+	}
+
+	decoded, err := s.deserializeValue(claim.Entry.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	claim.Entry.Value = decoded
+
+	return claim, nil
+}
+
+// ReleaseClaim delegates claim release to the underlying store.
+func (s *SerializedStore) ReleaseClaim(ref *ClaimRef) (bool, error) {
+	return s.store.ReleaseClaim(ref)
+}
+
+// CompleteClaim delegates claim completion to the underlying store.
+func (s *SerializedStore) CompleteClaim(ref *ClaimRef, opts *CompleteClaimOptions) (bool, error) {
+	return s.store.CompleteClaim(ref, opts)
+}
+
 // RebuildKeyList asks the underlying store to rebuild any in-memory key indices
 // from durable storage. Primarily useful for disk-backed stores.
 func (s *SerializedStore) RebuildKeyList() error {

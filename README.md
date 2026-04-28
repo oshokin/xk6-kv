@@ -290,6 +290,36 @@ All methods return Promises except `close()`.
   }
   ```
 
+  `randomKey()` only returns a key string and does not create/observe leases.
+
+- **`popRandom(options?: { prefix?: string }): Promise<{ key: string, value: any } | null>`** - Atomically picks and removes one random matching entry. Resolves to `null` when no match exists.
+
+- **`claimRandom(options?: { prefix?: string, owner?: string, ttl?: number }): Promise<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } } | null>`** - Atomically leases one random matching entry. Live claims are excluded from later `claimRandom()` and `popRandom()` calls until released/completed or expired. If `ttl` is omitted, the default lease is **30000ms (30 seconds)**.
+
+- **`releaseClaim(claim: { id: string, key: string, token: number }): Promise<boolean>`** - Releases a live claim back to the pool. Returns `false` for stale/expired/missing claims.
+
+- **`completeClaim(claim, options?: { deleteKey?: boolean }): Promise<boolean>`** - Completes a live claim. By default it also deletes the underlying key (`deleteKey: true`).
+
+  Claim lifecycle guidance:
+
+  - Use `completeClaim()` on **success** (`deleteKey: true` consumes the item permanently).
+  - Use `releaseClaim()` on **failure** to return the item to the pool.
+
+  ```javascript
+  const claim = await kv.claimRandom({ prefix: 'user:' });
+  if (claim === null) return;
+
+  try {
+    // do work with claim.entry.value
+    await kv.completeClaim(claim); // success path
+  } catch (err) {
+    await kv.releaseClaim(claim); // failure path
+    throw err;
+  }
+  ```
+
+> ⚠️ `claimRandom()` is a local coordination primitive for VUs sharing the same `xk6-kv` process/store. It is not a distributed lock service.
+
 - **`rebuildKeyList(): Promise<boolean>`** - Rebuilds in-memory key indexes (useful for disk backend with `trackKeys: true`).
 
 #### Snapshot Operations

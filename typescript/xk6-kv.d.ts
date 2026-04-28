@@ -281,6 +281,70 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Options for popRandom().
+   */
+  export interface PopRandomOptions {
+    /**
+     * Filter by key prefix. Only keys starting with this string are considered.
+     */
+    prefix?: string;
+  }
+
+  /**
+   * Options for claimRandom().
+   */
+  export interface ClaimRandomOptions {
+    /**
+     * Filter by key prefix. Only keys starting with this string are considered.
+     */
+    prefix?: string;
+    /**
+     * Optional claim owner for diagnostics (for example VU/scenario labels).
+     */
+    owner?: string;
+    /**
+     * Lease duration in milliseconds.
+     * @default 30000
+     */
+    ttl?: number;
+  }
+
+  /**
+   * Claim reference used by releaseClaim()/completeClaim().
+   */
+  export interface ClaimRef {
+    /** Claim identifier. */
+    id: string;
+    /** Claimed key. */
+    key: string;
+    /** Fence token for stale-holder protection. */
+    token: number;
+  }
+
+  /**
+   * Active claim payload.
+   */
+  export interface Claim<T = any> extends ClaimRef {
+    /** Claimed entry snapshot. */
+    entry: Entry & { value: T };
+    /** Optional diagnostic owner. */
+    owner?: string;
+    /** Expiration timestamp in Unix milliseconds. */
+    expiresAt: number;
+  }
+
+  /**
+   * Options for completeClaim().
+   */
+  export interface CompleteClaimOptions {
+    /**
+     * When true, remove the underlying key on successful completion.
+     * @default true
+     */
+    deleteKey?: boolean;
+  }
+
+  /**
    * Result of scan() operation with cursor-based pagination.
    */
   export interface ScanResult {
@@ -812,6 +876,31 @@ declare module 'k6/x/kv' {
      * ```
      */
     randomKey(options?: RandomKeyOptions): Promise<string>;
+
+    /**
+     * Atomically selects and removes a random matching entry.
+     * Resolves to null when no matching entry exists.
+     */
+    popRandom<T = any>(options?: PopRandomOptions): Promise<(Entry & { value: T }) | null>;
+
+    /**
+     * Atomically leases a random matching entry.
+     * Resolves to null when no free entry exists.
+     * If options.ttl is omitted, lease duration defaults to 30000ms (30 seconds).
+     */
+    claimRandom<T = any>(options?: ClaimRandomOptions): Promise<Claim<T> | null>;
+
+    /**
+     * Releases a live claim.
+     * Returns true only when id/key/token match an active non-expired claim.
+     */
+    releaseClaim(claim: ClaimRef): Promise<boolean>;
+
+    /**
+     * Completes a live claim.
+     * By default, completion also removes the underlying key.
+     */
+    completeClaim(claim: ClaimRef, options?: CompleteClaimOptions): Promise<boolean>;
 
     /**
      * Rebuilds in-memory key indexes from the underlying store.

@@ -11,6 +11,21 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/backup-and-restore.js
    ```
 
+   For claim lease defaults (TTL=30000ms / 30s when omitted), try:
+
+   ```bash
+   k6 run examples/claim-random-default-ttl.js
+   ```
+
+   That script also demonstrates claim lifecycle handling:
+   `completeClaim()` on success and `releaseClaim()` on failure.
+
+   For one-time unique allocation via atomic pop, try:
+
+   ```bash
+   k6 run examples/pop-random-unique-users.js
+   ```
+
    For prefix cardinality checks, try:
 
    ```bash

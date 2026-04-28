@@ -56,6 +56,8 @@ type DiskStore struct {
 	// testRestoreHook is a test-only synchronization hook invoked in Restore()
 	// after any restore lock is acquired and before snapshot I/O begins.
 	testRestoreHook func()
+	// claimToken is a process-local monotonically increasing token for claims.
+	claimToken atomic.Int64
 }
 
 const (
@@ -158,6 +160,12 @@ func (s *DiskStore) Open() error {
 					DefaultBBoltBucket,
 					bucketErr,
 				)
+			}
+
+			// Claims are process-local leases: drop stale persisted claim metadata
+			// whenever a writable process opens the store.
+			if clearErr := clearClaimsBucket(tx); clearErr != nil {
+				return clearErr
 			}
 
 			return nil
@@ -490,7 +498,16 @@ func (s *DiskStore) Delete(key string) error {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
-		return bucket.Delete([]byte(key))
+		if err := bucket.Delete([]byte(key)); err != nil {
+			return err
+		}
+
+		claimsBucket, err := ensureClaimsBucket(tx)
+		if err != nil {
+			return err
+		}
+
+		return deleteClaimForKeyTx(claimsBucket, key)
 	})
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDiskStoreDeleteFailed, err)
@@ -555,14 +572,27 @@ func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
+		claimsBucket, err := ensureClaimsBucket(tx)
+		if err != nil {
+			return err
+		}
+
 		// Check if key exists.
 		if bucket.Get([]byte(key)) == nil {
+			// Defensive cleanup: remove stale claim metadata if present.
+			if err := deleteClaimForKeyTx(claimsBucket, key); err != nil {
+				return err
+			}
+
 			return nil
 		}
 
 		// Delete the key.
-		err := bucket.Delete([]byte(key))
-		if err != nil {
+		if err := bucket.Delete([]byte(key)); err != nil {
+			return err
+		}
+
+		if err := deleteClaimForKeyTx(claimsBucket, key); err != nil {
 			return err
 		}
 
@@ -609,6 +639,10 @@ func (s *DiskStore) Clear() error {
 		_, err = tx.CreateBucket(s.bucket)
 		if err != nil {
 			return fmt.Errorf("%w: bucket %s: %w", ErrDiskStoreWriteFailed, s.bucket, err)
+		}
+
+		if clearErr := clearClaimsBucket(tx); clearErr != nil {
+			return clearErr
 		}
 
 		return nil

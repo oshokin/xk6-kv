@@ -184,6 +184,10 @@ func exportToInt64(v sobek.Value) (int64, error) {
 			return 0, fmt.Errorf("number out of int64 range: %v", x)
 		}
 
+		if math.Trunc(x) != x {
+			return 0, fmt.Errorf("number must be an integer: %v", x)
+		}
+
 		return int64(x), nil
 	case float32:
 		// Check for non-finite numbers and out of int64 range.
@@ -195,6 +199,10 @@ func exportToInt64(v sobek.Value) (int64, error) {
 		// Note: float32 is converted to float64 to avoid overflow.
 		if float64(x) > maxInt64Float || float64(x) < minInt64Float {
 			return 0, fmt.Errorf("number out of int64 range: %v", x)
+		}
+
+		if math.Trunc(float64(x)) != float64(x) {
+			return 0, fmt.Errorf("number must be an integer: %v", x)
 		}
 
 		return int64(x), nil

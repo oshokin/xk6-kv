@@ -368,6 +368,213 @@ func TestKVAsync_Set_Concurrent_NoRaceOrPanic(t *testing.T) {
 	assert.EqualValues(t, operations, size, "all concurrent writes must be persisted")
 }
 
+func TestKVAsync_PopRandom_ResolvesEntry(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", "Oleg")
+			.then(() => __kv.popRandom({ prefix: "user:" }))
+			.then((entry) => {
+				if (!entry) {
+					throw new Error("missing entry");
+				}
+				if (entry.key !== "user:1") {
+					throw new Error("wrong key");
+				}
+				if (entry.value === undefined) {
+					throw new Error("wrong value");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_PopRandom_EmptyResolvesNull(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.popRandom({ prefix: "missing:" })
+			.then((entry) => {
+				if (entry !== null) {
+					throw new Error("expected null");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_ClaimRandom_ResolvesClaim(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", "Oleg")
+			.then(() => __kv.claimRandom({ prefix: "user:", owner: "vu:1", ttl: 30000 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing claim");
+				}
+				if (claim.id === "") {
+					throw new Error("missing id");
+				}
+				if (claim.key !== "user:1") {
+					throw new Error("wrong key");
+				}
+				if (typeof claim.token !== "number") {
+					throw new Error("invalid token");
+				}
+				if (typeof claim.expiresAt !== "number") {
+					throw new Error("invalid expiresAt");
+				}
+				if (!claim.entry || claim.entry.key !== "user:1" || claim.entry.value === undefined) {
+					throw new Error("invalid entry payload");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_ClaimRandom_EmptyResolvesNull(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.claimRandom({ prefix: "missing:" })
+			.then((claim) => {
+				if (claim !== null) {
+					throw new Error("expected null");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_ReleaseClaim_ReturnsTrue(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", "Oleg")
+			.then(() => __kv.claimRandom({ prefix: "user:", ttl: 30000 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing claim");
+				}
+				return __kv.releaseClaim(claim);
+			})
+			.then((released) => {
+				if (released !== true) {
+					throw new Error("expected true");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_CompleteClaim_ReturnsTrue(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", "Oleg")
+			.then(() => __kv.claimRandom({ prefix: "user:", ttl: 30000 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing claim");
+				}
+				return __kv.completeClaim(claim);
+			})
+			.then((completed) => {
+				if (completed !== true) {
+					throw new Error("expected true");
+				}
+				return __kv.exists("user:1");
+			})
+			.then((exists) => {
+				if (exists !== false) {
+					throw new Error("expected key deletion");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_Claim_InvalidOptions_RejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		function expectInvalidOptions(promise, label) {
+			return promise
+				.then(() => {
+					throw new Error(label + ": expected rejection");
+				})
+				.catch((err) => {
+					if (!err || err.name !== "InvalidOptionsError") {
+						throw new Error(label + ": unexpected error class: " + String(err && err.name));
+					}
+				});
+		}
+
+		Promise.all([
+			expectInvalidOptions(__kv.popRandom("bad"), "popRandom.options"),
+			expectInvalidOptions(__kv.claimRandom({ ttl: 0 }), "claimRandom.ttl.positive"),
+			expectInvalidOptions(__kv.claimRandom({ ttl: 1.5 }), "claimRandom.ttl.integer"),
+			expectInvalidOptions(__kv.releaseClaim("bad"), "releaseClaim.claim"),
+			expectInvalidOptions(__kv.completeClaim("bad"), "completeClaim.claim"),
+			expectInvalidOptions(__kv.completeClaim({ id: "x", key: "k", token: 1 }, "bad"), "completeClaim.options")
+		]);
+	`)
+}
+
+func TestKVAsync_IncrementBy_FractionalDelta_RejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.incrementBy("counter", 1.5)
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "ValueNumberRequiredError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_Scan_FractionalLimit_RejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.scan({ limit: 1.2 })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
 func runKVScript(t *testing.T, runtime *modulestest.Runtime, kv *KV, script string) {
 	t.Helper()
 

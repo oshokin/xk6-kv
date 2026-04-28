@@ -45,7 +45,7 @@ func parseOptionalStringOption(method, field string, value sobek.Value) (string,
 
 // parseRequiredStringArg reads a required string argument (e.g., key).
 //
-//nolint:unparam // key is not always an option in the method.
+
 func parseRequiredStringArg(method, arg string, value sobek.Value) (string, error) {
 	if common.IsNullish(value) {
 		return "", NewError(

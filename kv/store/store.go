@@ -20,6 +20,7 @@ type (
 	//     serialization constraints at the storage layer, etc.).
 	//   - RandomKey(prefix) returns "" and a nil error when there are no matching
 	//     keys; this is an intentional, user-friendly behavior.
+	//nolint:interfacebloat // store is intentionally broad to keep backend parity behind one shared contract.
 	Store interface {
 		// Open ensures the store is ready to accept operations by initializing any
 		// deferred resources (file handles, background workers, etc.).
@@ -147,6 +148,22 @@ type (
 		// If there are no matching keys (including an empty store),
 		// RandomKey returns the empty string "" and a nil error.
 		RandomKey(prefix string) (string, error)
+
+		// PopRandom atomically selects and removes a random free matching entry.
+		// If there are no free matching entries, it returns nil, nil.
+		PopRandom(prefix string) (*Entry, error)
+
+		// ClaimRandom atomically leases a random matching entry.
+		// If no free (unclaimed or expired-claim) entry exists, it returns nil, nil.
+		ClaimRandom(opts *ClaimOptions) (*EntryClaim, error)
+
+		// ReleaseClaim releases a live claim.
+		// It returns true only when id/key/token match a non-expired live claim.
+		ReleaseClaim(ref *ClaimRef) (bool, error)
+
+		// CompleteClaim completes a live claim.
+		// When opts.DeleteKey is true, the underlying key is removed.
+		CompleteClaim(ref *ClaimRef, opts *CompleteClaimOptions) (bool, error)
 
 		// RebuildKeyList rebuilds any in-memory key indexes maintained by the
 		// implementation (e.g., after a crash or when optional indexing is enabled).
