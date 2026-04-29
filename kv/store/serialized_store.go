@@ -1,6 +1,9 @@
 package store
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // SerializedStore wraps an underlying Store and transparently applies a Serializer
 // to values on write/read. This allows callers to work with rich types while the
@@ -323,6 +326,22 @@ func (s *SerializedStore) CompleteClaim(ref *ClaimRef, opts *CompleteClaimOption
 // from durable storage. Primarily useful for disk-backed stores.
 func (s *SerializedStore) RebuildKeyList() error {
 	return s.store.RebuildKeyList()
+}
+
+// Stats returns a diagnostic snapshot and enriches it with serializer details.
+func (s *SerializedStore) Stats() (*StatsSnapshot, error) {
+	snapshot, err := s.store.Stats()
+	if err != nil {
+		return nil, err
+	}
+
+	if snapshot == nil {
+		return nil, errors.New("store stats returned nil snapshot")
+	}
+
+	snapshot.Serialization = s.serializer.Type()
+
+	return snapshot, nil
 }
 
 // Backup streams the underlying store contents into a bbolt snapshot.

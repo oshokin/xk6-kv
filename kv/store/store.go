@@ -186,6 +186,10 @@ type (
 		// Returns a summary indicating how many entries were hydrated.
 		Restore(opts *RestoreOptions) (*RestoreSummary, error)
 
+		// Stats returns a diagnostic snapshot of the current store state.
+		// The snapshot is intended for explicit observability calls and debugging.
+		Stats() (*StatsSnapshot, error)
+
 		// Close releases any resources held by the store (file handles, caches,
 		// background workers, etc.). After Close returns, the Store should not be
 		// used. Close SHOULD be idempotent.

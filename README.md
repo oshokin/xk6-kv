@@ -322,6 +322,35 @@ All methods return Promises except `close()`.
 
 - **`rebuildKeyList(): Promise<boolean>`** - Rebuilds in-memory key indexes (useful for disk backend with `trackKeys: true`).
 
+- **`stats(): Promise<KVStats>`** - Returns a structured diagnostic snapshot of the current store state.
+
+  ```typescript
+  interface KVStats {
+    backend: "memory" | "disk"
+    serialization: "json" | "string"
+    trackKeys: boolean
+    count: number
+    claims: { live: number; expired: number }
+    index?: {
+      enabled: boolean
+      keysList?: number
+      keysMap?: number
+      ost?: number
+      consistent: boolean
+    } | null
+    disk?: {
+      path: string
+      sizeBytes: number
+      readOnly?: boolean
+    } | null
+  }
+  ```
+
+  ```javascript
+  const snapshot = await kv.stats();
+  console.log(snapshot.count, snapshot.claims.live);
+  ```
+
 #### Snapshot Operations
 
 - **`backup(options?: BackupOptions): Promise<BackupSummary>`**  

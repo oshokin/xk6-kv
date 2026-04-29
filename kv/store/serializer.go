@@ -15,6 +15,9 @@ type Serializer interface {
 	// Stores already return defensive copies of data, so implementations
 	// should treat data as read-only and avoid unnecessary cloning.
 	Deserialize(data []byte) (any, error)
+
+	// Type returns serializer type identifier for diagnostics (e.g. "json", "string").
+	Type() string
 }
 
 // JSONSerializer implements the Serializer interface using JSON encoding.
@@ -55,6 +58,11 @@ func (s *JSONSerializer) Deserialize(data []byte) (any, error) {
 	return value, nil
 }
 
+// Type returns the serializer type identifier.
+func (s *JSONSerializer) Type() string {
+	return serializationJSONName
+}
+
 // StringSerializer is a simple serializer that treats values as strings.
 // This is useful for simple string-based storage.
 type StringSerializer struct{}
@@ -86,4 +94,9 @@ func (s *StringSerializer) Serialize(value any) ([]byte, error) {
 // Deserialize converts bytes back to a string.
 func (s *StringSerializer) Deserialize(data []byte) (any, error) {
 	return string(data), nil
+}
+
+// Type returns the serializer type identifier.
+func (s *StringSerializer) Type() string {
+	return serializationStringName
 }

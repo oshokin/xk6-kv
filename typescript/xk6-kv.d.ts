@@ -271,6 +271,39 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Diagnostic snapshot returned by stats().
+   */
+  export interface KVStats {
+    /** Active backend implementation. */
+    backend: Backend;
+    /** Active serialization mode. */
+    serialization: Serialization;
+    /** Whether key tracking indexes are enabled. */
+    trackKeys: boolean;
+    /** Current number of user keys. */
+    count: number;
+    /** Current claim counters. */
+    claims: {
+      live: number;
+      expired: number;
+    };
+    /** Index counters and consistency (present when trackKeys=true, otherwise null/omitted). */
+    index?: {
+      enabled: boolean;
+      keysList?: number;
+      keysMap?: number;
+      ost?: number;
+      consistent: boolean;
+    } | null;
+    /** Disk backend details (present for disk backend, otherwise null/omitted). */
+    disk?: {
+      path: string;
+      sizeBytes: number;
+      readOnly?: boolean;
+    } | null;
+  }
+
+  /**
    * A single key-value entry.
    */
   export interface Entry {
@@ -923,6 +956,13 @@ declare module 'k6/x/kv' {
      * ```
      */
     rebuildKeyList(): Promise<boolean>;
+
+    /**
+     * Returns a structured snapshot of current store diagnostics.
+     *
+     * This call is intended for explicit observability/debugging checks.
+     */
+    stats(): Promise<KVStats>;
 
     // ==================== Snapshot Operations ====================
 

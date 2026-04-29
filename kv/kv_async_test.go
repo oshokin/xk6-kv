@@ -218,6 +218,79 @@ func TestKVAsync_Count_InvalidOptions_RejectsPromise(t *testing.T) {
 	`)
 }
 
+func TestKVAsync_Stats_ResolvesSnapshot(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		Promise.all([
+			__kv.set("user:1", { name: "Alice" }),
+			__kv.set("user:2", { name: "Bob" })
+		])
+			.then(() => __kv.stats())
+			.then((snapshot) => {
+				if (!snapshot) {
+					throw new Error("missing stats snapshot");
+				}
+				if (snapshot.backend !== "memory") {
+					throw new Error("unexpected backend");
+				}
+				if (snapshot.serialization !== "json") {
+					throw new Error("unexpected serialization");
+				}
+				if (snapshot.trackKeys !== true) {
+					throw new Error("unexpected trackKeys");
+				}
+				if (snapshot.count !== 2) {
+					throw new Error("unexpected key count");
+				}
+				if (!snapshot.claims || typeof snapshot.claims.live !== "number" || typeof snapshot.claims.expired !== "number") {
+					throw new Error("invalid claim stats");
+				}
+				if (!snapshot.index || snapshot.index.enabled !== true || snapshot.index.consistent !== true) {
+					throw new Error("invalid index stats: " + JSON.stringify(snapshot.index));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_Stats_NullsUnavailableOptionalFields(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: false}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", { name: "Alice" })
+			.then(() => __kv.stats())
+			.then((snapshot) => {
+				if (!snapshot) {
+					throw new Error("missing stats snapshot");
+				}
+				if (snapshot.index !== null) {
+					throw new Error("index must be null when trackKeys=false");
+				}
+				if (snapshot.disk !== null) {
+					throw new Error("disk must be null for memory backend");
+				}
+			});
+	`)
+}
+
 func TestKVAsync_AllOptionsMethods_InvalidOptionsType_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
