@@ -78,6 +78,28 @@ declare module 'k6/x/kv' {
      * Disk backend specific settings.
      */
     disk?: DiskOptions;
+
+    /**
+     * Optional extension-emitted k6 metrics configuration.
+     */
+    metrics?: OpenKvMetricsOptions;
+  }
+
+  /**
+   * Optional metrics configuration for openKv().
+   */
+  export interface OpenKvMetricsOptions {
+    /**
+     * Enable automatic per-operation metrics.
+     * Emits:
+     * - xk6_kv_operations_total
+     * - xk6_kv_operation_duration
+     * - xk6_kv_operation_failed
+     * - xk6_kv_errors_total
+     * - xk6_kv_empty_result
+     * @default false
+     */
+    operations?: boolean;
   }
 
   /**
@@ -963,6 +985,13 @@ declare module 'k6/x/kv' {
      * This call is intended for explicit observability/debugging checks.
      */
     stats(): Promise<KVStats>;
+
+    /**
+     * Emits current state gauges into k6 custom metrics.
+     *
+     * Call this explicitly at points where you want state samples.
+     */
+    reportStats(): Promise<void>;
 
     // ==================== Snapshot Operations ====================
 

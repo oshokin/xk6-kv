@@ -16,10 +16,11 @@ import (
 func (k *KV) Get(key sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("get", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opGet, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opGet,
 		func(s store.Store) (any, error) {
 			return s.Get(keyString)
 		},
@@ -43,13 +44,14 @@ func (k *KV) Get(key sobek.Value) *sobek.Promise {
 func (k *KV) Set(key sobek.Value, value sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("set", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opSet, err)
 	}
 
 	// Convert Sobek value to Go 'any' for the store.
 	exportedValue := value.Export()
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opSet,
 		func(s store.Store) (any, error) {
 			return value, s.Set(keyString, exportedValue)
 		},
@@ -70,29 +72,19 @@ func (k *KV) Set(key sobek.Value, value sobek.Value) *sobek.Promise {
 func (k *KV) IncrementBy(key sobek.Value, delta sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("incrementBy", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opIncrementBy, err)
 	}
 
 	// We must not rely on rt.ExportTo(...) here because we are not on the VU event loop.
 	// We instead use sobek.Value.Export(), then coerce to int64 synchronously before we spawn the goroutine.
 	deltaInt, err := exportToInt64(delta)
 	if err != nil {
-		// We are still on the VU's thread when exportToInt64() rejects the delta,
-		// so we have to hand craft a promise and enqueue its rejection back onto the event loop.
-		rt := k.vu.Runtime()
-		promise, _, reject := rt.NewPromise()
-		callback := k.vu.RegisterCallback()
-
 		kvErr := NewError(ValueNumberRequiredError, fmt.Sprintf("delta must be a number: %v", err))
-
-		callback(func() error {
-			return reject(kvErr.ToSobekValue(rt))
-		})
-
-		return promise
+		return k.rejectedPromiseObserved(opIncrementBy, kvErr)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opIncrementBy,
 		func(s store.Store) (any, error) {
 			return s.IncrementBy(keyString, deltaInt)
 		},
@@ -110,12 +102,13 @@ func (k *KV) IncrementBy(key sobek.Value, delta sobek.Value) *sobek.Promise {
 func (k *KV) GetOrSet(key sobek.Value, value sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("getOrSet", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opGetOrSet, err)
 	}
 
 	exportedValue := value.Export()
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opGetOrSet,
 		func(s store.Store) (any, error) {
 			actualValue, wasLoaded, err := s.GetOrSet(keyString, exportedValue)
 			if err != nil {
@@ -141,12 +134,13 @@ func (k *KV) GetOrSet(key sobek.Value, value sobek.Value) *sobek.Promise {
 func (k *KV) Swap(key sobek.Value, value sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("swap", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opSwap, err)
 	}
 
 	exportedValue := value.Export()
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opSwap,
 		func(s store.Store) (any, error) {
 			previousValue, loaded, err := s.Swap(keyString, exportedValue)
 			if err != nil {

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 
+	"go.k6.io/k6/js/modules"
+
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
@@ -32,9 +34,10 @@ func (rm *RootModule) getOrCreateStore(options Options) (store.Store, bool, erro
 		// Reject re-configuration attempts to prevent confusion and data loss.
 		// Users must use consistent options across all VUs in a test.
 		return nil, false, fmt.Errorf(
-			"%w: backend=%q path=%q serialization=%q trackKeys=%t",
+			"%w: backend=%q path=%q serialization=%q trackKeys=%t metrics.operations=%t",
 			store.ErrKVOptionsConflict,
 			rm.opts.Backend, rm.opts.Path, rm.opts.Serialization, rm.opts.TrackKeys,
+			rm.opts.Metrics.operationsEnabled(),
 		)
 	}
 
@@ -113,6 +116,65 @@ func (rm *RootModule) createSerializer(options Options) (store.Serializer, error
 	}
 }
 
+// ensureStateMetrics initializes reportStats() metrics during openKv()
+// when k6 registry access is available.
+func (rm *RootModule) ensureStateMetrics(vu modules.VU) error {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if rm.stateMetrics != nil {
+		return nil
+	}
+
+	initEnv := vu.InitEnv()
+	if initEnv == nil || initEnv.Registry == nil {
+		// openKv() is expected in init context; keep behavior non-breaking and
+		// let reportStats() return a clear runtime error when metrics are unavailable.
+		return nil
+	}
+
+	stateMetrics, err := newKVStateMetrics(initEnv.Registry)
+	if err != nil {
+		return err
+	}
+
+	rm.stateMetrics = stateMetrics
+
+	return nil
+}
+
+// ensureOperationMetrics initializes optional automatic operation metrics during openKv().
+// When metrics.operations is enabled, metric registry access must be available.
+func (rm *RootModule) ensureOperationMetrics(vu modules.VU, options Options) error {
+	if !options.Metrics.operationsEnabled() {
+		return nil
+	}
+
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+
+	if rm.operationMetrics != nil {
+		return nil
+	}
+
+	initEnv := vu.InitEnv()
+	if initEnv == nil || initEnv.Registry == nil {
+		return fmt.Errorf(
+			"%w: metrics.operations=true requires openKv() in init context with registry access",
+			store.ErrKVOptionsInvalid,
+		)
+	}
+
+	operationMetrics, err := newKVOperationMetrics(initEnv.Registry, options)
+	if err != nil {
+		return err
+	}
+
+	rm.operationMetrics = operationMetrics
+
+	return nil
+}
+
 // clearStoreOnFailure resets the store reference if initialization failed.
 // This prevents partially-initialized stores from being reused by subsequent calls.
 // Only applicable when this goroutine created the store (isNewlyCreated == true).
@@ -133,5 +195,7 @@ func (rm *RootModule) clearStoreOnFailure(candidate store.Store, isNewlyCreated 
 	// Only nil it out if it still points to our candidate.
 	if rm.store == candidate {
 		rm.store = nil
+		rm.stateMetrics = nil
+		rm.operationMetrics = nil
 	}
 }

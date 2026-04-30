@@ -11,10 +11,11 @@ import (
 func (k *KV) PopRandom(options sobek.Value) *sobek.Promise {
 	popOptions, err := importPopRandomOptions(k.vu.Runtime(), options)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opPopRandom, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opPopRandom,
 		func(s store.Store) (any, error) {
 			return s.PopRandom(popOptions.Prefix)
 		},
@@ -33,10 +34,11 @@ func (k *KV) PopRandom(options sobek.Value) *sobek.Promise {
 func (k *KV) ClaimRandom(options sobek.Value) *sobek.Promise {
 	claimOptions, err := importClaimRandomOptions(k.vu.Runtime(), options)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opClaimRandom, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opClaimRandom,
 		func(s store.Store) (any, error) {
 			return s.ClaimRandom(&store.ClaimOptions{
 				Prefix: claimOptions.Prefix,
@@ -58,10 +60,11 @@ func (k *KV) ClaimRandom(options sobek.Value) *sobek.Promise {
 func (k *KV) ReleaseClaim(claim sobek.Value) *sobek.Promise {
 	claimRef, err := importClaimRefPayload(k.vu.Runtime(), "releaseClaim", claim)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opReleaseClaim, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opReleaseClaim,
 		func(s store.Store) (any, error) {
 			return s.ReleaseClaim(&store.ClaimRef{
 				ID:    claimRef.ID,
@@ -79,15 +82,16 @@ func (k *KV) ReleaseClaim(claim sobek.Value) *sobek.Promise {
 func (k *KV) CompleteClaim(claim sobek.Value, options sobek.Value) *sobek.Promise {
 	claimRef, err := importClaimRefPayload(k.vu.Runtime(), "completeClaim", claim)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opCompleteClaim, err)
 	}
 
 	completeOptions, err := importCompleteClaimOptions(k.vu.Runtime(), options)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opCompleteClaim, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opCompleteClaim,
 		func(s store.Store) (any, error) {
 			return s.CompleteClaim(
 				&store.ClaimRef{

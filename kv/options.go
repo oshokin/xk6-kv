@@ -36,6 +36,9 @@ type Options struct {
 	// DiskOptions contains bbolt-specific configuration for the "disk" backend.
 	// Ignored by the "memory" backend.
 	DiskOptions *DiskOptions `js:"disk"`
+
+	// Metrics configures optional k6 custom metric emission.
+	Metrics *MetricsOptions `js:"metrics"`
 }
 
 // NewOptionsFrom converts a Sobek (JS) value into an Options instance, applying defaults
@@ -97,5 +100,6 @@ func (o Options) Equal(other Options) bool {
 		o.Serialization == other.Serialization &&
 		o.TrackKeys == other.TrackKeys &&
 		o.MemoryOptions.Equal(other.MemoryOptions) &&
-		o.DiskOptions.Equal(other.DiskOptions)
+		o.DiskOptions.Equal(other.DiskOptions) &&
+		o.Metrics.Equal(other.Metrics)
 }

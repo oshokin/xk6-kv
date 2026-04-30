@@ -14,7 +14,7 @@ import (
 func (k *KV) CompareAndSwap(key, oldValue, newValue sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("compareAndSwap", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opCompareAndSwap, err)
 	}
 
 	var (
@@ -22,7 +22,8 @@ func (k *KV) CompareAndSwap(key, oldValue, newValue sobek.Value) *sobek.Promise 
 		exportedNew = newValue.Export()
 	)
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opCompareAndSwap,
 		func(s store.Store) (any, error) {
 			return s.CompareAndSwap(keyString, exportedOld, exportedNew)
 		},
@@ -42,7 +43,7 @@ func (k *KV) CompareAndSwap(key, oldValue, newValue sobek.Value) *sobek.Promise 
 func (k *KV) CompareAndSwapDetailed(key, oldValue, newValue, options sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("compareAndSwapDetailed", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opCompareAndSwapDetailed, err)
 	}
 
 	includeCurrentOnMismatch, err := importIncludeCurrentOnMismatchOption(
@@ -51,7 +52,7 @@ func (k *KV) CompareAndSwapDetailed(key, oldValue, newValue, options sobek.Value
 		options,
 	)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opCompareAndSwapDetailed, err)
 	}
 
 	var (
@@ -59,7 +60,8 @@ func (k *KV) CompareAndSwapDetailed(key, oldValue, newValue, options sobek.Value
 		exportedNew = newValue.Export()
 	)
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opCompareAndSwapDetailed,
 		func(s store.Store) (any, error) {
 			detailed, err := s.CompareAndSwapDetailed(keyString, exportedOld, exportedNew, includeCurrentOnMismatch)
 			if err != nil {
@@ -85,10 +87,11 @@ func (k *KV) CompareAndSwapDetailed(key, oldValue, newValue, options sobek.Value
 func (k *KV) Delete(key sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("delete", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opDelete, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opDelete,
 		func(s store.Store) (any, error) {
 			return true, s.Delete(keyString)
 		},
@@ -102,10 +105,11 @@ func (k *KV) Delete(key sobek.Value) *sobek.Promise {
 func (k *KV) Exists(key sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("exists", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opExists, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opExists,
 		func(s store.Store) (any, error) {
 			return s.Exists(keyString)
 		},
@@ -120,10 +124,11 @@ func (k *KV) Exists(key sobek.Value) *sobek.Promise {
 func (k *KV) DeleteIfExists(key sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("deleteIfExists", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opDeleteIfExists, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opDeleteIfExists,
 		func(s store.Store) (any, error) {
 			return s.DeleteIfExists(keyString)
 		},
@@ -138,12 +143,13 @@ func (k *KV) DeleteIfExists(key sobek.Value) *sobek.Promise {
 func (k *KV) CompareAndDelete(key, old sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("compareAndDelete", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opCompareAndDelete, err)
 	}
 
 	exportedOld := old.Export()
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opCompareAndDelete,
 		func(s store.Store) (any, error) {
 			return s.CompareAndDelete(keyString, exportedOld)
 		},
@@ -163,7 +169,7 @@ func (k *KV) CompareAndDelete(key, old sobek.Value) *sobek.Promise {
 func (k *KV) CompareAndDeleteDetailed(key, old, options sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("compareAndDeleteDetailed", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opCompareAndDeleteDetailed, err)
 	}
 
 	includeCurrentOnMismatch, err := importIncludeCurrentOnMismatchOption(
@@ -172,12 +178,13 @@ func (k *KV) CompareAndDeleteDetailed(key, old, options sobek.Value) *sobek.Prom
 		options,
 	)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opCompareAndDeleteDetailed, err)
 	}
 
 	exportedOld := old.Export()
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opCompareAndDeleteDetailed,
 		func(s store.Store) (any, error) {
 			detailed, err := s.CompareAndDeleteDetailed(keyString, exportedOld, includeCurrentOnMismatch)
 			if err != nil {
@@ -201,12 +208,13 @@ func (k *KV) CompareAndDeleteDetailed(key, old, options sobek.Value) *sobek.Prom
 func (k *KV) SetIfAbsent(key, value sobek.Value) *sobek.Promise {
 	keyString, err := parseRequiredStringArg("setIfAbsent", "key", key)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opSetIfAbsent, err)
 	}
 
 	exportedValue := value.Export()
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opSetIfAbsent,
 		func(s store.Store) (any, error) {
 			return s.CompareAndSwap(keyString, nil, exportedValue)
 		},

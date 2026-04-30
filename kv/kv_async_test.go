@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.k6.io/k6/js/modulestest"
+	"go.k6.io/k6/lib"
+	k6metrics "go.k6.io/k6/metrics"
 
 	"github.com/oshokin/xk6-kv/kv/store"
 )
@@ -289,6 +291,291 @@ func TestKVAsync_Stats_NullsUnavailableOptionalFields(t *testing.T) {
 				}
 			});
 	`)
+}
+
+func TestKVAsync_ReportStats_ResolvesAndEmitsMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.stateMetrics, err = newKVStateMetrics(registry)
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		Promise.all([
+			__kv.set("user:1", { name: "Alice" }),
+			__kv.set("user:2", { name: "Bob" })
+		])
+			.then(() => __kv.reportStats())
+			.then((result) => {
+				if (result !== undefined) {
+					throw new Error("reportStats must resolve undefined");
+				}
+			});
+	`)
+
+	metricHits := make(map[string]int)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			metricHits[sample.Metric.Name]++
+		}
+	}
+
+	assert.Equal(t, 1, metricHits[metricKVKeys])
+	assert.Equal(t, 1, metricHits[metricKVClaimsLive])
+	assert.Equal(t, 1, metricHits[metricKVClaimsExpired])
+	assert.Equal(t, 3, metricHits[metricKVIndexKeys])
+	assert.Equal(t, 1, metricHits[metricKVIndexConsistent])
+	assert.Zero(t, metricHits[metricKVDiskSizeBytes])
+}
+
+func TestKVAsync_ReportStats_MetricsUnavailable_RejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.reportStats()
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "MetricsUnavailableError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_OperationMetrics_EmitsExpectedSamples(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 64)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", { name: "Alice" })
+			.then(() => __kv.get("user:1"))
+			.then(() => __kv.randomKey({ prefix: "missing:" }))
+			.then((key) => {
+				if (key !== "") {
+					throw new Error("expected empty random key");
+				}
+				return __kv.get("missing")
+					.catch((err) => {
+						if (!err || err.name !== "KeyNotFoundError") {
+							throw new Error("unexpected error class: " + String(err && err.name));
+						}
+					});
+			});
+	`)
+
+	metricHits := make(map[string]int)
+
+	var (
+		failedNonZero int
+		failedZero    int
+		emptyNonZero  int
+		emptyZero     int
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			metricHits[sample.Metric.Name]++
+
+			switch sample.Metric.Name {
+			case metricKVOperationFailed:
+				if sample.Value > 0 {
+					failedNonZero++
+				} else {
+					failedZero++
+				}
+			case metricKVEmptyResult:
+				if sample.Value > 0 {
+					emptyNonZero++
+				} else {
+					emptyZero++
+				}
+			}
+		}
+	}
+
+	assert.Equal(t, 4, metricHits[metricKVOperationsTotal])
+	assert.Equal(t, 4, metricHits[metricKVOperationDuration])
+	assert.Equal(t, 4, metricHits[metricKVOperationFailed])
+	assert.Equal(t, 1, metricHits[metricKVErrorsTotal])
+	assert.Equal(t, 1, metricHits[metricKVEmptyResult])
+
+	assert.Equal(t, 1, failedNonZero, "one operation should fail")
+	assert.Equal(t, 3, failedZero, "three operations should succeed")
+	assert.Equal(t, 1, emptyNonZero, "one allocation op should return empty")
+	assert.Zero(t, emptyZero, "empty-result metric should be emitted only for allocation operations")
+}
+
+func TestKVAsync_OperationMetrics_EmitsValidationError(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.count("bad")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+
+	metricHits := make(map[string]int)
+
+	var (
+		seenOperationFailed bool
+		seenOperationTotal  bool
+		seenDuration        bool
+		seenErrorsTotal     bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			metricHits[sample.Metric.Name]++
+
+			switch sample.Metric.Name {
+			case metricKVOperationFailed:
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+				op, ok := sample.Tags.Get(tagOp)
+				require.True(t, ok)
+				assert.Equal(t, opCount, op)
+
+				seenOperationFailed = true
+			case metricKVOperationsTotal:
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+				op, ok := sample.Tags.Get(tagOp)
+				require.True(t, ok)
+				assert.Equal(t, opCount, op)
+
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusError, status)
+
+				seenOperationTotal = true
+			case metricKVOperationDuration:
+				op, ok := sample.Tags.Get(tagOp)
+				require.True(t, ok)
+				assert.Equal(t, opCount, op)
+
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusError, status)
+
+				seenDuration = true
+			case metricKVErrorsTotal:
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+				op, ok := sample.Tags.Get(tagOp)
+				require.True(t, ok)
+				assert.Equal(t, opCount, op)
+
+				errorType, ok := sample.Tags.Get(tagErrorType)
+				require.True(t, ok)
+				assert.Equal(t, string(InvalidOptionsError), errorType)
+
+				seenErrorsTotal = true
+			}
+		}
+	}
+
+	assert.Equal(t, 1, metricHits[metricKVOperationsTotal])
+	assert.Equal(t, 1, metricHits[metricKVOperationDuration])
+	assert.Equal(t, 1, metricHits[metricKVOperationFailed])
+	assert.Equal(t, 1, metricHits[metricKVErrorsTotal])
+	assert.Zero(t, metricHits[metricKVEmptyResult])
+
+	assert.True(t, seenOperationFailed)
+	assert.True(t, seenOperationTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenErrorsTotal)
 }
 
 func TestKVAsync_AllOptionsMethods_InvalidOptionsType_RejectsPromise(t *testing.T) {

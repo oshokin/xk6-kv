@@ -20,6 +20,12 @@ type (
 		// opts holds the options used when the store was created.
 		opts Options
 
+		// stateMetrics holds k6 custom metrics used by reportStats().
+		stateMetrics *kvStateMetrics
+
+		// operationMetrics holds optional per-operation metric emitters.
+		operationMetrics *kvOperationMetrics
+
 		// mu protects store creation and configuration.
 		mu sync.Mutex
 	}
@@ -118,6 +124,20 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 		return nil
 	}
 
+	if err := mi.rm.ensureStateMetrics(mi.vu); err != nil {
+		mi.rm.clearStoreOnFailure(backingStore, isNewlyCreated)
+		common.Throw(mi.vu.Runtime(), err)
+
+		return nil
+	}
+
+	if err := mi.rm.ensureOperationMetrics(mi.vu, options); err != nil {
+		mi.rm.clearStoreOnFailure(backingStore, isNewlyCreated)
+		common.Throw(mi.vu.Runtime(), err)
+
+		return nil
+	}
+
 	// Each VU invocation calls Open to bump the shared reference counter.
 	if err := backingStore.Open(); err != nil {
 		mi.rm.clearStoreOnFailure(backingStore, isNewlyCreated)
@@ -127,6 +147,8 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 	}
 
 	kv := NewKV(mi.vu, backingStore)
+	kv.stateMetrics = mi.rm.stateMetrics
+	kv.operationMetrics = mi.rm.operationMetrics
 	mi.kv = kv
 
 	return mi.vu.Runtime().ToValue(mi.kv).ToObject(mi.vu.Runtime())

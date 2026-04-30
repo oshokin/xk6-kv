@@ -183,6 +183,9 @@ interface OpenKvOptions {
     mlock?: boolean                   // mlock pages (UNIX); default false
     // when omitted: bbolt defaults are applied
   }
+  metrics?: {
+    operations?: boolean             // default: false
+  }
 }
 ```
 
@@ -195,6 +198,7 @@ interface OpenKvOptions {
 - `memory.shardCount`: (Memory only) Number of shards for concurrent performance. If `<= 0` or omitted, defaults to `runtime.NumCPU()` (automatic, recommended). If `> 65536`, automatically capped at 65536. Ignored by disk backend. When `memory` is omitted, defaults are applied.
 - `disk`: (Disk only) Optional bbolt tuning. When `disk` is omitted, bbolt defaults apply (1s lock timeout, syncs enabled, array freelist, etc.).
 - `disk.readOnly`: Requires the bbolt file (and `k6` bucket) to already exist; opening in read-only mode cannot create the bucket and will fail if the file is missing or empty.
+- `metrics.operations`: Enables automatic per-method metrics (`xk6_kv_operations_total`, `xk6_kv_operation_duration`, `xk6_kv_operation_failed`, `xk6_kv_errors_total`, `xk6_kv_empty_result`).
 
 > ⚠️ **Snapshot path sharing:** If you omit `backup().fileName` or `restore().fileName`, the memory backend deliberately falls back to the same `.k6.kv` file the disk backend uses. This lets you run ultra-fast tests with `backend: "memory"` and then immediately replay the generated dataset via `backend: "disk"` without touching paths. If you *don't* want that coupling (for example, you run disk workloads concurrently), always pass an explicit `fileName`.
 
@@ -349,6 +353,36 @@ All methods return Promises except `close()`.
   ```javascript
   const snapshot = await kv.stats();
   console.log(snapshot.count, snapshot.claims.live);
+  ```
+
+- **`reportStats(): Promise<void>`** - Emits state gauges to k6 custom metrics using the current snapshot.
+
+  Emitted metrics:
+  - `xk6_kv_keys`
+  - `xk6_kv_claims_live`
+  - `xk6_kv_claims_expired`
+  - `xk6_kv_index_keys` (with `index=keys_list|keys_map|ost`)
+  - `xk6_kv_index_consistent`
+  - `xk6_kv_disk_size_bytes` (disk backend only)
+
+  ```javascript
+  await kv.reportStats();
+  ```
+
+- **`metrics.operations` (openKv option)** - Enables automatic operation metrics for every async KV method except sync `close()`.
+
+  Emitted metrics:
+  - `xk6_kv_operations_total` (Counter, tags: `op`, `backend`, `status`, `track_keys`, `serialization`)
+  - `xk6_kv_operation_duration` (Trend in milliseconds, tags: `op`, `backend`, `status`, `track_keys`, `serialization`)
+  - `xk6_kv_operation_failed` (Rate, tags: `op`, `backend`, `track_keys`, `serialization`)
+  - `xk6_kv_errors_total` (Counter, tags: `op`, `backend`, `error_type`, `track_keys`, `serialization`)
+  - `xk6_kv_empty_result` (Rate for `random_key`/`pop_random`/`claim_random`, tags: `op`, `backend`, `track_keys`, `serialization`)
+
+  ```javascript
+  const kv = openKv({
+    backend: "memory",
+    metrics: { operations: true },
+  });
   ```
 
 #### Snapshot Operations

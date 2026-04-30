@@ -135,6 +135,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | `KVOptionsConflictError` | `openKv()` called multiple times with different options (first call wins, later calls must match). | `ErrKVOptionsConflict` |
 | `BackupOptionsRequiredError` | `kv.backup()` called with `null`/`undefined` options. | `ErrBackupOptionsNil` |
 | `RestoreOptionsRequiredError` | `kv.restore()` called without options. | `ErrRestoreOptionsNil` |
+| `MetricsUnavailableError` | `reportStats()` called when custom metrics are unavailable (for example, metrics were not initialized in `openKv()` or no active VU metric sink exists). | (JS-layer metrics guard) |
 | `SnapshotBudgetExceededError` | `restore()` exceeds `maxEntries` or `maxBytes` and aborts before applying the snapshot. | `ErrRestoreBudgetEntriesExceeded`, `ErrRestoreBudgetBytesExceeded` |
 | `ValueNumberRequiredError` | `incrementBy()` receives a non-number in JS (validated before Go is touched). | (JS-layer validation) |
 | `UnsupportedValueTypeError` | Attempted to `set()`/`swap()` a value that isn't a string or `[]byte` once it reaches the store. | `ErrUnsupportedValueType` |

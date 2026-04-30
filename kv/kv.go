@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/grafana/sobek"
 	"go.k6.io/k6/js/modules"
@@ -38,6 +39,13 @@ type KV struct {
 	// store is the backing implementation (memory or disk), possibly wrapped with
 	// serialization or synchronization decorators by the caller.
 	store store.Store
+
+	// stateMetrics emits reportStats() gauges into the k6 metrics pipeline.
+	// It is populated by openKv() when k6 registry access is available.
+	stateMetrics *kvStateMetrics
+
+	// operationMetrics emits per-operation k6 custom metrics when enabled.
+	operationMetrics *kvOperationMetrics
 
 	// vu is the owning k6 VU that provides the Sobek runtime and event loop.
 	vu modules.VU
@@ -79,6 +87,26 @@ func (k *KV) rejectedPromise(err error) *sobek.Promise {
 	})
 
 	return promise
+}
+
+// rejectedPromiseObserved emits failed operation metrics and returns a rejected promise.
+func (k *KV) rejectedPromiseObserved(op string, err error) *sobek.Promise {
+	if k.operationMetrics != nil && err != nil {
+		classified := classifyError(err)
+
+		errorType := string(UnknownError)
+		if classified != nil {
+			errorType = string(classified.Name)
+		}
+
+		k.operationMetrics.emit(k.vu.Context(), k.vu.State(), kvOperationSample{
+			operation: op,
+			failed:    true,
+			errorType: errorType,
+		})
+	}
+
+	return k.rejectedPromise(err)
 }
 
 // runAsyncWithStore executes a blocking store operation on a worker goroutine
@@ -153,6 +181,43 @@ func (k *KV) runAsyncWithStore(
 	}()
 
 	return promise
+}
+
+// runAsyncWithStoreObserved wraps runAsyncWithStore with per-operation metric emission.
+func (k *KV) runAsyncWithStoreObserved(
+	op string,
+	operation func(store store.Store) (any, error),
+	toJS func(rt *sobek.Runtime, result any) sobek.Value,
+) *sobek.Promise {
+	if k.operationMetrics == nil {
+		return k.runAsyncWithStore(operation, toJS)
+	}
+
+	ctx := k.vu.Context()
+	state := k.vu.State()
+
+	return k.runAsyncWithStore(
+		func(s store.Store) (any, error) {
+			startedAt := time.Now()
+			result, err := operation(s)
+
+			errorType := ""
+			if err != nil {
+				errorType = string(classifyError(err).Name)
+			}
+
+			k.operationMetrics.emit(ctx, state, kvOperationSample{
+				operation:   op,
+				duration:    time.Since(startedAt),
+				failed:      err != nil,
+				errorType:   errorType,
+				emptyResult: isEmptyAllocationResult(op, result),
+			})
+
+			return result, err
+		},
+		toJS,
+	)
 }
 
 // exportToInt64 converts a Sobek value (we are on the caller's thread here)

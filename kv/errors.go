@@ -70,6 +70,9 @@ const (
 	// KVOptionsConflictError is emitted when openKv is called with different options than the existing store.
 	KVOptionsConflictError ErrorName = "KVOptionsConflictError"
 
+	// MetricsUnavailableError is emitted when custom metric emission is not available.
+	MetricsUnavailableError ErrorName = "MetricsUnavailableError"
+
 	// KeyListRebuildError is emitted when key rebuild logic fails.
 	KeyListRebuildError ErrorName = "KeyListRebuildError"
 

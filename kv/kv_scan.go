@@ -15,10 +15,11 @@ import (
 func (k *KV) Scan(options sobek.Value) *sobek.Promise {
 	scanOptions, err := importScanOptions(k.vu.Runtime(), options)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opScan, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opScan,
 		func(s store.Store) (any, error) {
 			var afterKey string
 
@@ -71,10 +72,11 @@ func (k *KV) List(options sobek.Value) *sobek.Promise {
 	// Import list options from JavaScript (safe on the VU thread now).
 	listOptions, err := importListOptions(k.vu.Runtime(), options)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opList, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opList,
 		func(s store.Store) (any, error) {
 			entries, err := s.List(listOptions.Prefix, listOptions.Limit)
 			if err != nil {
@@ -98,10 +100,11 @@ func (k *KV) List(options sobek.Value) *sobek.Promise {
 func (k *KV) Count(options sobek.Value) *sobek.Promise {
 	countOptions, err := importCountOptions(k.vu.Runtime(), options)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opCount, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opCount,
 		func(s store.Store) (any, error) {
 			return s.Count(countOptions.Prefix)
 		},
@@ -116,10 +119,11 @@ func (k *KV) Count(options sobek.Value) *sobek.Promise {
 func (k *KV) RandomKey(options sobek.Value) *sobek.Promise {
 	randomKeyOptions, err := importRandomKeyOptions(k.vu.Runtime(), options)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opRandomKey, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opRandomKey,
 		func(s store.Store) (any, error) {
 			return s.RandomKey(randomKeyOptions.Prefix)
 		},

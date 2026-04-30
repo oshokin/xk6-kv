@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.k6.io/k6/js/modulestest"
+	k6metrics "go.k6.io/k6/metrics"
 )
 
 // TestOpenKV_ConcurrentInitializationSharesStore tests that
@@ -180,6 +181,163 @@ func TestOpenKV_AllowsEquivalentDiskPaths(t *testing.T) {
 	require.NotPanics(t, func() {
 		moduleInstance.OpenKv(relativePathOptions)
 	})
+}
+
+// TestOpenKV_InitializesReportStatsMetrics verifies that openKv wires reportStats metric emitters.
+func TestOpenKV_InitializesReportStatsMetrics(t *testing.T) {
+	t.Parallel()
+
+	rootModule := newTestRootModule(t)
+	runtime := modulestest.NewRuntime(t)
+	moduleInstance := rootModule.NewModuleInstance(runtime.VU).(*ModuleInstance)
+
+	options := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend":       BackendMemory,
+		"serialization": SerializationJSON,
+		"trackKeys":     true,
+	})
+
+	require.NotPanics(t, func() {
+		moduleInstance.OpenKv(options)
+	})
+
+	require.NotNil(t, moduleInstance.kv)
+	require.NotNil(t, moduleInstance.kv.stateMetrics, "kv handle must have reportStats metrics emitter")
+	require.NotNil(t, rootModule.stateMetrics, "root module must cache reportStats metrics emitter")
+	require.Nil(t, moduleInstance.kv.operationMetrics, "operation metrics must be disabled by default")
+}
+
+// TestOpenKV_ClearsStoreWhenStateMetricsInitFails verifies partially initialized store cleanup
+// when reportStats metric registration fails after store creation.
+func TestOpenKV_ClearsStoreWhenStateMetricsInitFails(t *testing.T) {
+	t.Parallel()
+
+	rootModule := newTestRootModule(t)
+	runtime := modulestest.NewRuntime(t)
+	moduleInstance := rootModule.NewModuleInstance(runtime.VU).(*ModuleInstance)
+
+	_, err := runtime.VU.InitEnv().Registry.NewMetric(metricKVKeys, k6metrics.Counter, k6metrics.Default)
+	require.NoError(t, err)
+
+	options := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend":       BackendMemory,
+		"serialization": SerializationJSON,
+		"trackKeys":     true,
+	})
+
+	require.Panics(t, func() {
+		moduleInstance.OpenKv(options)
+	})
+
+	require.Nil(t, rootModule.store, "store must be cleared on metric init failure")
+	require.Nil(t, rootModule.stateMetrics, "state metrics must not be cached on failure")
+	require.Nil(t, moduleInstance.kv, "KV handle must not be created on metric init failure")
+}
+
+func TestOpenKV_InitializesOperationMetricsWhenEnabled(t *testing.T) {
+	t.Parallel()
+
+	rootModule := newTestRootModule(t)
+	runtime := modulestest.NewRuntime(t)
+	moduleInstance := rootModule.NewModuleInstance(runtime.VU).(*ModuleInstance)
+
+	options := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend":       BackendMemory,
+		"serialization": SerializationJSON,
+		"trackKeys":     true,
+		"metrics": map[string]any{
+			"operations": true,
+		},
+	})
+
+	require.NotPanics(t, func() {
+		moduleInstance.OpenKv(options)
+	})
+
+	require.NotNil(t, moduleInstance.kv)
+	require.NotNil(t, moduleInstance.kv.stateMetrics, "state metrics must be initialized")
+	require.NotNil(t, moduleInstance.kv.operationMetrics, "operation metrics must be initialized")
+	require.NotNil(t, rootModule.operationMetrics, "root module must cache operation metrics emitter")
+}
+
+func TestOpenKV_RejectsConflictingMetricsOperationsOption(t *testing.T) {
+	t.Parallel()
+
+	rootModule := newTestRootModule(t)
+	runtime := modulestest.NewRuntime(t)
+	moduleInstance := rootModule.NewModuleInstance(runtime.VU).(*ModuleInstance)
+
+	enabledOptions := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend":       BackendMemory,
+		"serialization": SerializationJSON,
+		"metrics": map[string]any{
+			"operations": true,
+		},
+	})
+	disabledOptions := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend":       BackendMemory,
+		"serialization": SerializationJSON,
+		"metrics": map[string]any{
+			"operations": false,
+		},
+	})
+
+	require.NotPanics(t, func() {
+		moduleInstance.OpenKv(enabledOptions)
+	})
+
+	require.Panics(t, func() {
+		moduleInstance.OpenKv(disabledOptions)
+	})
+}
+
+func TestOpenKV_ClearsStoreWhenOperationMetricsInitFails(t *testing.T) {
+	t.Parallel()
+
+	rootModule := newTestRootModule(t)
+	runtime := modulestest.NewRuntime(t)
+	moduleInstance := rootModule.NewModuleInstance(runtime.VU).(*ModuleInstance)
+
+	_, err := runtime.VU.InitEnv().Registry.NewMetric(metricKVOperationsTotal, k6metrics.Gauge, k6metrics.Default)
+	require.NoError(t, err)
+
+	options := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend":       BackendMemory,
+		"serialization": SerializationJSON,
+		"metrics": map[string]any{
+			"operations": true,
+		},
+	})
+
+	require.Panics(t, func() {
+		moduleInstance.OpenKv(options)
+	})
+
+	require.Nil(t, rootModule.store, "store must be cleared on metric init failure")
+	require.Nil(t, rootModule.stateMetrics, "state metrics must be cleared on operation metric init failure")
+	require.Nil(t, rootModule.operationMetrics, "operation metrics must not be cached on failure")
+	require.Nil(t, moduleInstance.kv, "KV handle must not be created on metric init failure")
+}
+
+func TestOpenKV_RejectsMetricsBooleanShortcut(t *testing.T) {
+	t.Parallel()
+
+	rootModule := newTestRootModule(t)
+	runtime := modulestest.NewRuntime(t)
+	moduleInstance := rootModule.NewModuleInstance(runtime.VU).(*ModuleInstance)
+
+	options := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend":       BackendMemory,
+		"serialization": SerializationJSON,
+		"metrics":       true,
+	})
+
+	require.Panics(t, func() {
+		moduleInstance.OpenKv(options)
+	})
+
+	require.Nil(t, rootModule.store)
+	require.Nil(t, rootModule.operationMetrics)
 }
 
 // newTestRootModule creates a new test root module.

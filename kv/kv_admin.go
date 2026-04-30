@@ -9,7 +9,8 @@ import (
 // Clear returns a Promise that resolves to true after removing all keys.
 // Depending on the backend, this may be an expensive O(n) operation.
 func (k *KV) Clear() *sobek.Promise {
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opClear,
 		func(s store.Store) (any, error) {
 			return true, s.Clear()
 		},
@@ -21,7 +22,8 @@ func (k *KV) Clear() *sobek.Promise {
 
 // Size returns a Promise that resolves to the number of keys currently stored.
 func (k *KV) Size() *sobek.Promise {
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opSize,
 		func(s store.Store) (any, error) {
 			return s.Size()
 		},
@@ -37,7 +39,8 @@ func (k *KV) Size() *sobek.Promise {
 // This is primarily useful for disk-based backends when key-tracking is enabled
 // and a rebuild is needed after a crash or manual intervention.
 func (k *KV) RebuildKeyList() *sobek.Promise {
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opRebuildKeyList,
 		func(s store.Store) (any, error) {
 			return true, s.RebuildKeyList()
 		},
@@ -55,10 +58,11 @@ func (k *KV) RebuildKeyList() *sobek.Promise {
 func (k *KV) Backup(options sobek.Value) *sobek.Promise {
 	backupOptions, err := importBackupOptions(k.vu.Runtime(), options)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opBackup, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opBackup,
 		func(s store.Store) (any, error) {
 			storeSummary, err := s.Backup(&store.BackupOptions{
 				FileName:              backupOptions.FileName,
@@ -87,10 +91,11 @@ func (k *KV) Backup(options sobek.Value) *sobek.Promise {
 func (k *KV) Restore(options sobek.Value) *sobek.Promise {
 	restoreOptions, err := importRestoreOptions(k.vu.Runtime(), options)
 	if err != nil {
-		return k.rejectedPromise(err)
+		return k.rejectedPromiseObserved(opRestore, err)
 	}
 
-	return k.runAsyncWithStore(
+	return k.runAsyncWithStoreObserved(
+		opRestore,
 		func(s store.Store) (any, error) {
 			storeSummary, err := s.Restore(&store.RestoreOptions{
 				FileName:   restoreOptions.FileName,
