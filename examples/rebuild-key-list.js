@@ -1,7 +1,7 @@
 // Demonstrates rebuilding the in-memory key index (useful with disk backend when trackKeys is enabled
 // and you've had out-of-band mutations or crash recovery needs).
 //
-// Covered method: rebuildKeyList; plus we close the disk store during teardown via close().
+// Covered methods: clear, set, rebuildKeyList, list, close.
 
 import { openKv } from "k6/x/kv";
 import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";

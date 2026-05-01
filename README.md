@@ -385,6 +385,35 @@ All methods return Promises except `close()`.
   });
   ```
 
+  Quickstart:
+
+  ```javascript
+  import { openKv } from "k6/x/kv";
+
+  const kv = openKv({
+    backend: "memory",
+    trackKeys: true,
+    metrics: { operations: true },
+  });
+
+  export const options = {
+    thresholds: {
+      "xk6_kv_operation_failed": ["rate==0"],
+      "xk6_kv_empty_result{op:claim_random}": ["rate<0.05"],
+      "xk6_kv_index_consistent{track_keys:true}": ["value==1"],
+    },
+  };
+
+  export default async function () {
+    await kv.claimRandom({ prefix: "user:" });
+    await kv.reportStats();
+  }
+  ```
+
+  > Troubleshooting: if k6 reports `no metric name "xk6_kv_..." found`, make sure:
+  > 1) `openKv({ metrics: { operations: true } })` runs in init context, and
+  > 2) you rebuilt your binary with this extension (`task build-k6`).
+
 #### Snapshot Operations
 
 - **`backup(options?: BackupOptions): Promise<BackupSummary>`**  
@@ -431,6 +460,13 @@ await kv.restore({ fileName: "./backups/kv-latest.kv" });
 ## Usage Examples
 
 Complete examples are available in the [`examples/`](./examples) directory, and production-grade k6 scenarios live under [`e2e/`](./e2e).
+
+Observability-focused scripts:
+
+- Example operation metrics in a worker queue: [`examples/metrics-operations-worker-queue.js`](./examples/metrics-operations-worker-queue.js)
+- Example `stats()` / `reportStats()` health snapshots: [`examples/metrics-report-stats-health.js`](./examples/metrics-report-stats-health.js)
+- E2E lease-worker observability scenario: [`e2e/subscription-renewal-lease-observability.js`](./e2e/subscription-renewal-lease-observability.js)
+- E2E credential pool drain scenario: [`e2e/credential-pool-drain-observability.js`](./e2e/credential-pool-drain-observability.js)
 
 ### Producer / Consumer
 

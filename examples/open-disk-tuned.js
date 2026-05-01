@@ -1,3 +1,8 @@
+// Disk backend example with explicit bbolt tuning knobs.
+//
+// Covered methods: set, get, close.
+// Use this when you need to demonstrate/customize disk options.
+
 import { openKv } from "k6/x/kv";
 
 // Disk backend with explicit bbolt tuning.
@@ -25,5 +30,6 @@ export default async function () {
 }
 
 export async function teardown() {
+  // Close once after the run.
   kv.close();
 }

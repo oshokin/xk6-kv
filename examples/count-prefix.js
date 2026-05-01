@@ -1,5 +1,7 @@
-// Demonstrates kv.count({ prefix }) and kv.count() behavior.
-// Useful for lightweight cardinality checks without materializing entries via list()/scan().
+// Prefix counting example for lightweight cardinality checks.
+//
+// Covered methods: clear, set, count.
+// Compares count({ prefix }) against count() without materializing entries.
 
 import { check } from "k6";
 import { openKv } from "k6/x/kv";
@@ -10,6 +12,7 @@ const kv = openKv({
 });
 
 export async function setup() {
+  // Seed two user keys and one session key.
   await kv.clear();
 
   await kv.set("user:1", { name: "Alice" });
@@ -18,6 +21,7 @@ export async function setup() {
 }
 
 export default async function () {
+  // Compare prefix-scoped counts with total key count.
   const usersCount = await kv.count({ prefix: "user:" });
   const sessionsCount = await kv.count({ prefix: "session:" });
   const totalCount = await kv.count();

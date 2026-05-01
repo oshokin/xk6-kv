@@ -1,3 +1,8 @@
+// Minimal memory backend example with default settings.
+//
+// Covered methods: set, get.
+// Handy quick check that the extension is loaded and writable.
+
 import { openKv } from "k6/x/kv";
 
 // Minimal memory backend: all optional settings omitted.

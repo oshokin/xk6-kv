@@ -1,6 +1,6 @@
 // Demonstrates configuring a custom file path for the persistent disk backend.
 //
-// Methods covered: clear, set, get, close.
+// Covered methods: clear, set, get, close.
 
 import { openKv } from "k6/x/kv";
 import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";

@@ -1,7 +1,7 @@
 // Verifies that close() is synchronous and safe to call once in teardown for disk backends.
 // This is intentionally minimal beyond the close() call to emphasize teardown hygiene.
 //
-// Covered method: close (synchronous).
+// Covered methods: clear, set, get, close (synchronous).
 
 import { openKv } from "k6/x/kv";
 import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";

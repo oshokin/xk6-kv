@@ -1,7 +1,7 @@
 // Demonstrates cursor-based pagination via kv.scan().
 // Useful when listing thousands of keys would exceed test memory.
 //
-// Covered method: scan.
+// Covered methods: clear, set, scan.
 
 import { check } from "k6";
 import { openKv } from "k6/x/kv";

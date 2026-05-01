@@ -1,7 +1,7 @@
 // A focused disk-backend example that writes, reads, deletes, and lists,
 // with explicit teardown to close the persistent store.
 //
-// Methods covered: set, get, exists, delete, list, close.
+// Covered methods: set, get, exists, delete, list, close.
 // Based on and expanding the disk example from the repository.
 
 import { openKv } from "k6/x/kv";

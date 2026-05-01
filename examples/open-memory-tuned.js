@@ -1,3 +1,8 @@
+// Memory backend example with explicit tuning.
+//
+// Covered methods: set, incrementBy.
+// Demonstrates shard tuning plus tracked-key mode.
+
 import { openKv } from "k6/x/kv";
 
 // Memory backend with explicit tuning.

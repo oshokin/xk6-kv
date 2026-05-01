@@ -1,4 +1,7 @@
-// A focused example for list() behavior: sorted output, optional prefix filter, and hard limit.
+// List behavior example with ordering, prefix filtering, and limits.
+//
+// Covered methods: clear, set, list.
+// Demonstrates list() output shape without cursor pagination.
 
 import { openKv } from "k6/x/kv";
 import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";
@@ -6,6 +9,7 @@ import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";
 const kv = openKv({ backend: "memory" });
 
 export async function setup() {
+  // Seed keys that make ordering and prefix behavior obvious.
   await kv.clear();
   await kv.set("a:1", "A1");
   await kv.set("a:2", "A2");

@@ -1,3 +1,8 @@
+// Minimal disk backend example using default on-disk settings.
+//
+// Covered methods: set, get, close.
+// Useful as a first smoke test for disk persistence wiring.
+
 import { openKv } from "k6/x/kv";
 
 // Default disk backend:
@@ -14,5 +19,6 @@ export default async function () {
 }
 
 export async function teardown() {
+  // Close once after the run.
   kv.close();
 }

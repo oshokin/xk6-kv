@@ -3,7 +3,7 @@
 // When disabled, selection is a two-pass scan.
 // The function never throws and returns "" when there are no matches.
 //
-// Covered method: randomKey.
+// Covered methods: clear, set, randomKey.
 
 import { openKv } from "k6/x/kv";
 import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";

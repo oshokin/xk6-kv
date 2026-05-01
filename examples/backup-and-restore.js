@@ -1,6 +1,8 @@
 // Demonstrates how to capture a bbolt snapshot via kv.backup() and later
 // kv.restore() it to roll the dataset back to a known-good state.
 //
+// Covered methods: restore, size, set, delete, backup, close.
+//
 // Highlights:
 //   * Uses the disk backend with a dedicated DB file (not the default .k6.kv)
 //     so we can safely create/destroy data during the example.

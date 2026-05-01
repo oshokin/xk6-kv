@@ -32,6 +32,18 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/count-prefix.js
    ```
 
+   For operation metrics in a realistic worker queue flow, try:
+
+   ```bash
+   k6 run examples/metrics-operations-worker-queue.js
+   ```
+
+   For state gauges via `reportStats()`, try:
+
+   ```bash
+   k6 run examples/metrics-report-stats-health.js
+   ```
+
 3. Many scripts mutate on-disk state (e.g. snapshots). They intentionally write inside the repo so it is easy to inspect the artifacts.
 
 > ⚠️ **Snapshot defaults:** When an example uses the memory backend and omits `backup().fileName`, it writes into `.k6.kv`—the same file the disk backend mounts by default. That’s deliberate so you can run `backend: "memory"` for the hot path, dump the dataset in `teardown()`, and later rerun the very same test with `backend: "disk"` without changing paths. If you need a separate artifact (or run disk workloads concurrently), set `fileName` explicitly before running the example.

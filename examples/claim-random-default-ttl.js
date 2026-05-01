@@ -1,13 +1,20 @@
+// Claim lease example with default TTL behavior.
+//
+// Covered methods: clear, set, claimRandom, completeClaim, releaseClaim.
+// Omits ttlMs intentionally to demonstrate the built-in 30000ms default.
+
 import { openKv } from "k6/x/kv";
 
 const DEFAULT_TTL_MS = 30000;
 
+// Track keys so random claiming is fast and deterministic for the demo.
 const kv = openKv({
   backend: "memory",
   trackKeys: true,
 });
 
 export async function setup() {
+  // Seed a small pool of claimable users.
   await kv.clear();
 
   await kv.set("user:1", { id: 1, name: "Alice" });
@@ -38,6 +45,7 @@ export default async function () {
 }
 
 export function teardown() {
+  // Close once after the run.
   kv.close();
 }
 

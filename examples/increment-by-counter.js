@@ -34,7 +34,7 @@
 //    - Decrementing max int64 by -1 is allowed (stays within bounds)
 //    - Incrementing min int64 by +0 is allowed (no-op)
 //
-// Covered method: incrementBy.
+// Covered methods: clear, set, get, incrementBy.
 
 import { openKv } from "k6/x/kv";
 import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";
