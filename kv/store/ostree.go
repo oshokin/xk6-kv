@@ -2,6 +2,7 @@ package store
 
 import (
 	"math/rand/v2"
+	"slices"
 )
 
 // ostNode is a node in a randomized BST (treap) that stores subtree sizes
@@ -265,8 +266,8 @@ func nextPrefix(prefix string) string {
 
 	b := []byte(prefix)
 	// Iterate right-to-left, looking for a byte we can increment.
-	for i := len(b) - 1; i >= 0; i-- {
-		if b[i] == 0xFF {
+	for i, v := range slices.Backward(b) {
+		if v == 0xFF {
 			// This byte is at max value: incrementing would overflow.
 			// Continue left to find a byte we can increment (carry propagation).
 			continue

@@ -19,9 +19,13 @@ import { getSnapshotPath, createKv, createSetup, createTeardown } from './common
 // - Runtime errors from missing/incorrectly named fields.
 // - Broken integrations when field names change.
 //
-// ATOMIC OPERATIONS TESTED:
-// - Atomic operations (getOrSet, swap).
-// - Query operations (list, scan, randomKey).
+// METHODS TESTED:
+// - Basic operations (get, set, setMany, delete, exists, clear, size).
+// - Atomic operations (incrementBy, getOrSet, swap, compareAndSwap variants,
+//   setIfAbsent, deleteIfExists, compareAndDelete variants).
+// - Query/coordination operations (list, scan, count, randomKey, popRandom,
+//   claimRandom, releaseClaim, completeClaim).
+// - Observability/lifecycle (rebuildKeyList, stats, reportStats, close).
 // - Snapshot operations (backup, restore).
 
 // Test name used for generating test-specific database and snapshot paths.
@@ -38,6 +42,35 @@ export const options = {
   vus: 1,
   iterations: 1,
   thresholds: {
+    'checks{api:set-returns-value}': ['rate>0.999'],
+    'checks{api:get-basic}': ['rate>0.999'],
+    'checks{api:setMany-structure}': ['rate>0.999'],
+    'checks{api:setMany-written}': ['rate>0.999'],
+    'checks{api:setMany-values}': ['rate>0.999'],
+    'checks{api:delete-idempotent}': ['rate>0.999'],
+    'checks{api:exists-true}': ['rate>0.999'],
+    'checks{api:exists-false}': ['rate>0.999'],
+    'checks{api:deleteIfExists-true}': ['rate>0.999'],
+    'checks{api:deleteIfExists-false}': ['rate>0.999'],
+    'checks{api:incrementBy-positive}': ['rate>0.999'],
+    'checks{api:incrementBy-negative}': ['rate>0.999'],
+    'checks{api:compareAndSwap-mismatch}': ['rate>0.999'],
+    'checks{api:compareAndSwap-success}': ['rate>0.999'],
+    'checks{api:compareAndDelete-mismatch}': ['rate>0.999'],
+    'checks{api:compareAndDelete-success}': ['rate>0.999'],
+    'checks{api:count-prefix}': ['rate>0.999'],
+    'checks{api:count-total}': ['rate>0.999'],
+    'checks{api:popRandom-structure}': ['rate>0.999'],
+    'checks{api:popRandom-deletes-key}': ['rate>0.999'],
+    'checks{api:claimRandom-structure}': ['rate>0.999'],
+    'checks{api:releaseClaim-success}': ['rate>0.999'],
+    'checks{api:completeClaim-success}': ['rate>0.999'],
+    'checks{api:completeClaim-deleteKey-false}': ['rate>0.999'],
+    'checks{api:rebuildKeyList-boolean}': ['rate>0.999'],
+    'checks{api:stats-structure}': ['rate>0.999'],
+    'checks{api:stats-claims-fields}': ['rate>0.999'],
+    'checks{api:reportStats-void}': ['rate>0.999'],
+    'checks{api:close-idempotent}': ['rate>0.999'],
     'checks{api:getOrSet-structure}': ['rate>0.999'],
     'checks{api:getOrSet-existing}': ['rate>0.999'],
     'checks{api:getOrSet-new}': ['rate>0.999'],
@@ -137,6 +170,212 @@ export default async function apiOutputValidationTest() {
   await kv.set('deepNestedKey', { level1: { level2: { level3: 'deep' } } });
   await kv.set('unicodeKey', '🚀 Hello 世界 🌍 енот жарит котлеты');
   await kv.set('specialCharsKey', '!@#$%^&*()_+-=[]{}|;:,.<>?');
+
+  // set(): Validate that set returns the value that was written.
+  const setReturn = await kv.set('setReturnKey', { state: 'ok' });
+  check(setReturn, {
+    'api:set-returns-value': () =>
+      typeof setReturn === 'object' && setReturn.state === 'ok'
+  });
+
+  // setMany(): Validate response shape and all-or-nothing success path.
+  const setManyResult = await kv.setMany({
+    setManyKeyA: { role: 'primary' },
+    setManyKeyB: { role: 'secondary' }
+  });
+  const setManyKeys = Object.keys(setManyResult);
+  const setManyValueA = await kv.get('setManyKeyA');
+  const setManyValueB = await kv.get('setManyKeyB');
+  check(setManyResult, {
+    'api:setMany-structure': () =>
+      setManyKeys.includes('written') && setManyKeys.length === 1,
+    'api:setMany-written': () =>
+      typeof setManyResult.written === 'number' && setManyResult.written === 2,
+    'api:setMany-values': () =>
+      setManyValueA.role === 'primary' && setManyValueB.role === 'secondary'
+  });
+
+  // get(): Validate direct scalar retrieval from set() data.
+  const basicGet = await kv.get('foo');
+  check(basicGet, {
+    'api:get-basic': () => basicGet === 'bar'
+  });
+
+  // exists(): Validate true/false responses for present and absent keys.
+  const existsTrue = await kv.exists('foo');
+  const existsFalse = await kv.exists('missing-key');
+  check(true, {
+    'api:exists-true': () => existsTrue === true,
+    'api:exists-false': () => existsFalse === false
+  });
+
+  // delete(): Validate idempotent boolean behavior.
+  await kv.set('deleteKey', { once: true });
+  const deleteFirst = await kv.delete('deleteKey');
+  const deleteSecond = await kv.delete('deleteKey');
+  check(true, {
+    'api:delete-idempotent': () =>
+      typeof deleteFirst === 'boolean' &&
+      deleteFirst === true &&
+      typeof deleteSecond === 'boolean' &&
+      deleteSecond === true
+  });
+
+  // deleteIfExists(): Validate informative first-delete and second-delete behavior.
+  await kv.set('deleteIfExistsKey', { once: true });
+  const deleteIfExistsFirst = await kv.deleteIfExists('deleteIfExistsKey');
+  const deleteIfExistsSecond = await kv.deleteIfExists('deleteIfExistsKey');
+  check(true, {
+    'api:deleteIfExists-true': () =>
+      typeof deleteIfExistsFirst === 'boolean' && deleteIfExistsFirst === true,
+    'api:deleteIfExists-false': () =>
+      typeof deleteIfExistsSecond === 'boolean' && deleteIfExistsSecond === false
+  });
+
+  // incrementBy(): Validate positive and negative deltas.
+  const incrementPositive = await kv.incrementBy('counter:validated', 10);
+  const incrementNegative = await kv.incrementBy('counter:validated', -3);
+  check(true, {
+    'api:incrementBy-positive': () =>
+      typeof incrementPositive === 'number' && incrementPositive === 10,
+    'api:incrementBy-negative': () =>
+      typeof incrementNegative === 'number' && incrementNegative === 7
+  });
+
+  // compareAndSwap(): Validate boolean mismatch/success contract.
+  const casBooleanKey = 'compareAndSwapBooleanKey';
+  await kv.set(casBooleanKey, { version: 1 });
+  const casBooleanMismatch = await kv.compareAndSwap(
+    casBooleanKey,
+    { version: 999 },
+    { version: 2 }
+  );
+  const casBooleanSuccess = await kv.compareAndSwap(
+    casBooleanKey,
+    { version: 1 },
+    { version: 2 }
+  );
+  check(true, {
+    'api:compareAndSwap-mismatch': () => casBooleanMismatch === false,
+    'api:compareAndSwap-success': () => casBooleanSuccess === true
+  });
+
+  // compareAndDelete(): Validate boolean mismatch/success contract.
+  const cadBooleanKey = 'compareAndDeleteBooleanKey';
+  await kv.set(cadBooleanKey, { state: 'active' });
+  const cadBooleanMismatch = await kv.compareAndDelete(
+    cadBooleanKey,
+    { state: 'stale' }
+  );
+  const cadBooleanSuccess = await kv.compareAndDelete(
+    cadBooleanKey,
+    { state: 'active' }
+  );
+  check(true, {
+    'api:compareAndDelete-mismatch': () => cadBooleanMismatch === false,
+    'api:compareAndDelete-success': () => cadBooleanSuccess === true
+  });
+
+  // count(): Validate prefix-scoped and global counters.
+  await kv.setMany({
+    'count:alpha:1': { id: 1 },
+    'count:alpha:2': { id: 2 },
+    'count:beta:1': { id: 3 }
+  });
+  const countAlpha = await kv.count({ prefix: 'count:alpha:' });
+  const countAll = await kv.count();
+  check(true, {
+    'api:count-prefix': () => typeof countAlpha === 'number' && countAlpha === 2,
+    'api:count-total': () => typeof countAll === 'number' && countAll >= 3
+  });
+
+  // popRandom(): Validate returned entry shape and atomic removal.
+  await kv.setMany({
+    'pop:key:1': { id: 1, queue: 'api' },
+    'pop:key:2': { id: 2, queue: 'api' }
+  });
+  const popped = await kv.popRandom({ prefix: 'pop:key:' });
+  let poppedExistsAfterRemoval = false;
+  if (popped) {
+    poppedExistsAfterRemoval = await kv.exists(popped.key);
+  }
+  check(popped, {
+    'api:popRandom-structure': () =>
+      popped &&
+      typeof popped.key === 'string' &&
+      popped.key.startsWith('pop:key:') &&
+      Object.prototype.hasOwnProperty.call(popped, 'value'),
+    'api:popRandom-deletes-key': () =>
+      popped && poppedExistsAfterRemoval === false
+  });
+
+  // claimRandom()/releaseClaim()/completeClaim(): Validate claim lifecycle payloads.
+  await kv.setMany({
+    'claim:key:1': { id: 1, status: 'queued' },
+    'claim:key:2': { id: 2, status: 'queued' }
+  });
+  const claimOne = await kv.claimRandom({
+    prefix: 'claim:key:',
+    owner: 'api-output-validation',
+    ttl: 30000
+  });
+  let releasedClaim = false;
+  if (claimOne) {
+    releasedClaim = await kv.releaseClaim(claimOne);
+  }
+
+  const claimTwo = await kv.claimRandom({
+    prefix: 'claim:key:',
+    owner: 'api-output-validation',
+    ttl: 30000
+  });
+  let completedClaim = false;
+  let completedKeyExists = false;
+  if (claimTwo) {
+    completedClaim = await kv.completeClaim(claimTwo, { deleteKey: false });
+    completedKeyExists = await kv.exists(claimTwo.key);
+  }
+  check(true, {
+    'api:claimRandom-structure': () =>
+      claimOne &&
+      typeof claimOne.id === 'string' &&
+      typeof claimOne.key === 'string' &&
+      typeof claimOne.token === 'number' &&
+      typeof claimOne.expiresAt === 'number' &&
+      typeof claimOne.entry === 'object' &&
+      claimOne.entry.key === claimOne.key,
+    'api:releaseClaim-success': () => claimOne && releasedClaim === true,
+    'api:completeClaim-success': () => claimTwo && completedClaim === true,
+    'api:completeClaim-deleteKey-false': () =>
+      claimTwo && completedKeyExists === true
+  });
+
+  // rebuildKeyList(), stats(), reportStats(): Validate observability/lifecycle helpers.
+  const rebuiltBeforeFlow = await kv.rebuildKeyList();
+  check(rebuiltBeforeFlow, {
+    'api:rebuildKeyList-boolean': () =>
+      typeof rebuiltBeforeFlow === 'boolean' && rebuiltBeforeFlow === true
+  });
+
+  const stats = await kv.stats();
+  const statsKeys = Object.keys(stats);
+  check(stats, {
+    'api:stats-structure': () =>
+      statsKeys.includes('backend') &&
+      statsKeys.includes('serialization') &&
+      statsKeys.includes('trackKeys') &&
+      statsKeys.includes('count') &&
+      statsKeys.includes('claims'),
+    'api:stats-claims-fields': () =>
+      typeof stats.claims === 'object' &&
+      typeof stats.claims.live === 'number' &&
+      typeof stats.claims.expired === 'number'
+  });
+
+  await kv.reportStats();
+  check(true, {
+    'api:reportStats-void': () => true
+  });
 
   // getOrSet(): Validate structure and behavior for existing vs new keys.
   // Verifies that the result object has correct camelCase field names (value, loaded)
@@ -824,5 +1063,18 @@ export default async function apiOutputValidationTest() {
       typeof restoredEmptyObject === 'object' &&
       restoredEmptyObject !== null &&
       Object.keys(restoredEmptyObject).length === 0
+  });
+
+  // close(): Validate synchronous idempotent lifecycle close behavior.
+  let closeIdempotent = true;
+  try {
+    kv.close();
+    kv.close();
+  } catch (err) {
+    closeIdempotent = false;
+  }
+
+  check(closeIdempotent, {
+    'api:close-idempotent': () => closeIdempotent
   });
 }

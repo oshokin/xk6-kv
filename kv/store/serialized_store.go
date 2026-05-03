@@ -56,6 +56,36 @@ func (s *SerializedStore) Set(key string, value any) error {
 	return s.store.Set(key, serializedValue)
 }
 
+// SetMany serializes all values first and writes only when every entry succeeds.
+func (s *SerializedStore) SetMany(entries []Entry) (int64, error) {
+	encoded := make([]Entry, 0, len(entries))
+	entryErrors := make([]EntryError, 0)
+
+	for i := range entries {
+		serializedValue, err := s.serializer.Serialize(entries[i].Value)
+		if err != nil {
+			entryErrors = append(entryErrors, EntryError{
+				Key:     entries[i].Key,
+				Name:    EntryErrorNameSerializer,
+				Message: err.Error(),
+			})
+
+			continue
+		}
+
+		encoded = append(encoded, Entry{
+			Key:   entries[i].Key,
+			Value: serializedValue,
+		})
+	}
+
+	if len(entryErrors) > 0 {
+		return 0, NewEntryListError("setMany", EntryListErrorKindSerialization, entryErrors)
+	}
+
+	return s.store.SetMany(encoded)
+}
+
 // IncrementBy delegates to the underlying store's atomic integer increment.
 // No serialization is applied (the counter value is maintained by the store).
 func (s *SerializedStore) IncrementBy(key string, delta int64) (int64, error) {

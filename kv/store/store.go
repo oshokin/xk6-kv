@@ -36,6 +36,15 @@ type (
 		// Returns an error only if the operation cannot be completed.
 		Set(key string, value any) error
 
+		// SetMany stores a batch of key/value pairs, overwriting existing keys.
+		//
+		// The argument intentionally uses []Entry (values), not []*Entry (pointers):
+		// this keeps batch payloads contiguous and avoids per-item heap allocation
+		// churn. See setmany_slice_shape_benchmark_test.go for measurements.
+		//
+		// Implementations SHOULD apply the whole batch or return an error.
+		SetMany(entries []Entry) (int64, error)
+
 		// IncrementBy atomically adds delta to the numeric value stored at key and
 		// returns the new value. If the key does not exist, implementations MAY
 		// treat the current value as zero. An error is returned if the existing

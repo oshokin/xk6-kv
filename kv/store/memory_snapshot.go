@@ -389,8 +389,8 @@ func (s *MemoryStore) applySnapshot(container map[string][]byte) {
 	}
 
 	// Unlock in reverse order (best practice for nested locks, though not strictly required here).
-	for i := len(s.shards) - 1; i >= 0; i-- {
-		s.shards[i].mu.Unlock()
+	for _, v := range slices.Backward(s.shards) {
+		v.mu.Unlock()
 	}
 }
 

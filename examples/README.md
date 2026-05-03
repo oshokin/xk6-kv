@@ -32,6 +32,12 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/count-prefix.js
    ```
 
+   For all-or-nothing bulk writes with detailed batch diagnostics, try:
+
+   ```bash
+   k6 run examples/set-many-all-or-nothing.js
+   ```
+
    For operation metrics in a realistic worker queue flow, try:
 
    ```bash
@@ -51,7 +57,18 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
 
 ## Error Manual
 
-All `kv.*` Promises reject with a structured error that exposes `err.name` (the error category) and `err.message` (the full diagnostic detail). The Go layer surfaces fine‑grained sentinel errors that are classified into user-facing categories so you can distinguish between recoverable conditions and genuine bugs.
+All `kv.*` Promises reject with a structured error that exposes `err.name` (the error category) and `err.message` (the full diagnostic detail). The Go layer surfaces fine-grained sentinel errors that are classified into user-facing categories so you can distinguish between recoverable conditions and genuine bugs.
+
+Batch APIs such as `setMany()` can also return a stable `err.errors` array for per-entry diagnostics. Each entry detail uses:
+
+- `key` - key associated with the failing entry (when available)
+- `name` - machine-readable per-entry error name
+- `message` - human-readable detail
+
+For `setMany()` in the current API, `err.errors[].name` values are:
+
+- `InvalidEntries` for payload-shape validation failures
+- `SerializerError` for per-entry serialization failures
 
 ### Understanding error classification
 
@@ -63,6 +80,28 @@ This means:
 
 - **`err.name`**: Tells you *what category of problem* occurred (actionable)
 - **`err.message`**: Preserves *full diagnostic detail* from the error chain (for debugging)
+- **`err.errors[]`**: Stable per-entry batch details (for APIs like `setMany()`)
+
+### Batch error details (`setMany`)
+
+```javascript
+try {
+  await kv.setMany({
+    "ok": { name: "Alice" },
+    "bad": () => {},
+  });
+} catch (err) {
+  if (err?.name === "SerializerError") {
+    for (const item of err.errors ?? []) {
+      console.log(item.key);     // failing key
+      console.log(item.name);    // e.g. "SerializerError"
+      console.log(item.message); // serializer message
+    }
+  } else {
+    throw err;
+  }
+}
+```
 
 ### Working with classified errors
 
@@ -142,7 +181,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | err.name | Trigger | Go sentinels |
 | --- | --- | --- |
 | `InvalidBackendError` | `openKv()` called with unsupported backend (not "memory" or "disk"). | `ErrInvalidBackend` |
-| `InvalidOptionsError` | Invalid API arguments/options shape (e.g. non-object passed to options-based methods, wrong option field types, non-string keys), or `openKv()` called with options that cannot be parsed. | `ErrKVOptionsInvalid`, (JS-layer validation) |
+| `InvalidOptionsError` | Invalid API arguments/options shape (e.g. non-object passed to options-based methods, wrong option field types), or `openKv()` called with options that cannot be parsed. For `setMany()` shape errors, inspect `err.errors[]` for per-entry details. | `ErrKVOptionsInvalid`, (JS-layer validation) |
 | `InvalidSerializationError` | `openKv()` called with unsupported serialization (not "json" or "string"). | `ErrInvalidSerialization` |
 | `KVOptionsConflictError` | `openKv()` called multiple times with different options (first call wins, later calls must match). | `ErrKVOptionsConflict` |
 | `BackupOptionsRequiredError` | `kv.backup()` called with `null`/`undefined` options. | `ErrBackupOptionsNil` |
@@ -152,7 +191,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | `ValueNumberRequiredError` | `incrementBy()` receives a non-number in JS (validated before Go is touched). | (JS-layer validation) |
 | `UnsupportedValueTypeError` | Attempted to `set()`/`swap()` a value that isn't a string or `[]byte` once it reaches the store. | `ErrUnsupportedValueType` |
 | `ValueParseError` | Disk increments found a non-integer payload (e.g. you stored `"foo"` and later called `incrementBy`). | `ErrValueParseFailed` |
-| `SerializerError` | JSON/string serializer failed to encode/decode a value. | `ErrSerializerEncodeFailed`, `ErrSerializerDecodeFailed` |
+| `SerializerError` | JSON/string serializer failed to encode/decode a value. `setMany()` serialization failures include per-entry diagnostics in `err.errors[]`. | `ErrSerializerEncodeFailed`, `ErrSerializerDecodeFailed` |
 | `UnexpectedStoreOutputError` | Store returned a nil result without an accompanying error (indicates a buggy or incompatible backend). | `ErrUnexpectedStoreOutput` |
 | `UnknownError` | An error occurred that cannot be classified into any specific category (fallback for unclassified errors). | (Any unclassified error) |
 

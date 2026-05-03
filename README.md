@@ -121,7 +121,19 @@ export async function teardown() {
 
 ## Error Handling
 
-Every rejected `kv.*` promise carries a **typed error object** with `name` and `message` fields. Check `err.name` (or `err.Name` when k6 serialises it as Go struct) instead of matching raw strings:
+Every rejected `kv.*` promise carries a **typed error object** with `name` and `message` fields. Check `err.name` (or `err.Name` when k6 serialises it as Go struct) instead of matching raw strings.
+
+Batch APIs such as `setMany()` may also include a stable `err.errors` array. Each item in `err.errors` has this shape:
+
+```typescript
+{
+  key?: string
+  name: string
+  message: string
+}
+```
+
+General error handling example:
 
 ```javascript
 try {
@@ -131,6 +143,25 @@ try {
     console.log("Another VU is already writing a snapshot—safe to ignore.");
   } else if (err?.name === "SnapshotPermissionError") {
     fail(`Backup path is not writable: ${err.message}`);
+  } else {
+    throw err;
+  }
+}
+```
+
+Batch error details example:
+
+```javascript
+try {
+  await kv.setMany({
+    "ok": { name: "Alice" },
+    "bad": () => {}, // JSON serializer rejects functions
+  });
+} catch (err) {
+  if (err?.name === "SerializerError") {
+    for (const item of err.errors ?? []) {
+      console.log(item.key, item.name, item.message);
+    }
   } else {
     throw err;
   }
@@ -223,6 +254,7 @@ All methods return Promises except `close()`.
 
 - **`get(key: string): Promise<any>`** - Retrieves a value by key. Throws if key doesn't exist.
 - **`set(key: string, value: any): Promise<any>`** - Sets a key-value pair.
+- **`setMany(entries: Record<string, any>): Promise<{ written: number }>`** - Writes an object map in one logical batch. Uses the same key semantics as `set()` (including empty-string keys). Validates the input shape and serializes all values before writing; rejects with `err.errors` and writes nothing if any entry fails. `setMany()` provides all-or-nothing validation/serialization semantics, but is not intended to provide cross-key snapshot isolation for concurrent readers on the memory backend.
 - **`delete(key: string): Promise<boolean>`** - Removes a key-value pair (always resolves to `true`).
 - **`exists(key: string): Promise<boolean>`** - Checks if a key exists.
 - **`clear(): Promise<boolean>`** - Removes all entries (always resolves to `true`).  

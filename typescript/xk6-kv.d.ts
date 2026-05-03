@@ -453,6 +453,87 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Result of setMany() operation.
+   */
+  export interface SetManyResult {
+    /**
+     * Number of entries written.
+     */
+    written: number;
+  }
+
+  /**
+   * Per-entry error details for batch operations.
+   */
+  export interface ManyEntryError {
+    /**
+     * Entry key associated with the failure.
+     */
+    key?: string;
+    /**
+     * Stable error name for programmatic handling.
+     */
+    name: string;
+    /**
+     * Human-readable failure message.
+     */
+    message: string;
+  }
+
+  /**
+   * Stable top-level error names surfaced by rejected kv.* promises.
+   */
+  export type KVErrorName =
+    | 'KeyNotFoundError'
+    | 'InvalidCursorError'
+    | 'InvalidBackendError'
+    | 'InvalidOptionsError'
+    | 'InvalidSerializationError'
+    | 'KVOptionsConflictError'
+    | 'BackupOptionsRequiredError'
+    | 'RestoreOptionsRequiredError'
+    | 'MetricsUnavailableError'
+    | 'SnapshotBudgetExceededError'
+    | 'ValueNumberRequiredError'
+    | 'UnsupportedValueTypeError'
+    | 'ValueParseError'
+    | 'SerializerError'
+    | 'UnexpectedStoreOutputError'
+    | 'UnknownError'
+    | 'BackupInProgressError'
+    | 'RestoreInProgressError'
+    | 'StoreClosedError'
+    | 'DatabaseNotOpenError'
+    | 'SnapshotNotFoundError'
+    | 'SnapshotPermissionError'
+    | 'SnapshotExportError'
+    | 'SnapshotIOError'
+    | 'SnapshotReadError'
+    | 'SnapshotKeyMissingError'
+    | 'DiskPathError'
+    | 'DiskStoreOpenError'
+    | 'DiskStoreReadError'
+    | 'DiskStoreWriteError'
+    | 'DiskStoreDeleteError'
+    | 'DiskStoreExistsError'
+    | 'DiskStoreScanError'
+    | 'DiskStoreSizeError'
+    | 'DiskStoreIndexError'
+    | 'KeyListRebuildError'
+    | 'BucketNotFoundError';
+
+  /**
+   * Structured error payload thrown by kv.* methods.
+   *
+   * Batch APIs such as setMany() may include per-entry diagnostics in errors[].
+   */
+  export interface KVError extends Error {
+    name: KVErrorName;
+    message: string;
+    errors?: ManyEntryError[];
+  }
+
+  /**
    * Options for compareAndSwapDetailed() and compareAndDeleteDetailed().
    */
   export interface CompareDetailedOptions {
@@ -571,6 +652,21 @@ declare module 'k6/x/kv' {
      * ```
      */
     set(key: string, value: any): Promise<any>;
+
+    /**
+     * Sets many key-value pairs in one logical batch.
+     *
+     * The method validates input and serializes every value before mutating the store.
+     * On any validation/serialization failure, it rejects and writes nothing.
+     * This all-or-nothing guarantee applies to validation/serialization outcomes;
+     * it is not a cross-key snapshot-isolation contract for concurrent readers on
+     * the memory backend.
+     * Rejected errors may include a stable `errors` array with `ManyEntryError` items.
+     *
+     * @param entries - Object map of key/value pairs to write
+     * @returns Promise that resolves to { written }
+     */
+    setMany<T = any>(entries: Record<string, T>): Promise<SetManyResult>;
 
     /**
      * Removes a key-value pair.

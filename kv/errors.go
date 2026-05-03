@@ -139,6 +139,22 @@ type Error struct {
 
 	// Message represents message or description associated with the given error name.
 	Message string
+
+	// Errors carries per-entry details for batch APIs.
+	//
+	// We intentionally use []ErrorDetail (values), not []*ErrorDetail (pointers),
+	// to avoid per-detail heap churn. See store/setmany_slice_shape_benchmark_test.go.
+	Errors []ErrorDetail
+}
+
+// ErrorDetail describes a single entry-level validation/serialization error.
+type ErrorDetail struct {
+	// Key is the key that caused the error.
+	Key string `js:"key,omitempty"`
+	// Name is the name of the error.
+	Name string `js:"name"`
+	// Message is the message of the error.
+	Message string `js:"message"`
 }
 
 // NewError returns a new Error instance.
@@ -146,6 +162,15 @@ func NewError(name ErrorName, message string) *Error {
 	return &Error{
 		Name:    name,
 		Message: message,
+	}
+}
+
+// NewErrorWithDetails returns a new Error instance with per-entry details.
+func NewErrorWithDetails(name ErrorName, message string, details []ErrorDetail) *Error {
+	return &Error{
+		Name:    name,
+		Message: message,
+		Errors:  details,
 	}
 }
 
@@ -172,6 +197,14 @@ func (e *Error) ToSobekValue(rt *sobek.Runtime) sobek.Value {
 		return rt.ToValue(errorMessage)
 	}
 
+	if len(e.Errors) > 0 {
+		err = obj.Set("errors", e.Errors)
+		if err != nil {
+			// Fallback: return error message as plain string.
+			return rt.ToValue(errorMessage)
+		}
+	}
+
 	return obj
 }
 
@@ -186,6 +219,25 @@ func classifyError(err error) *Error {
 	var kvErr *Error
 	if errors.As(err, &kvErr) {
 		return kvErr
+	}
+
+	var entryListErr *store.EntryListError
+	if errors.As(err, &entryListErr) {
+		details := make([]ErrorDetail, 0, len(entryListErr.Errors))
+		for _, item := range entryListErr.Errors {
+			details = append(details, ErrorDetail{
+				Key:     item.Key,
+				Name:    item.Name,
+				Message: item.Message,
+			})
+		}
+
+		switch entryListErr.Kind {
+		case store.EntryListErrorKindSerialization:
+			return NewErrorWithDetails(SerializerError, entryListErr.Message, details)
+		default:
+			return NewErrorWithDetails(UnknownError, entryListErr.Message, details)
+		}
 	}
 
 	switch {

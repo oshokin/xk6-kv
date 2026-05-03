@@ -18,6 +18,14 @@ export default async function () {
   await kv.set('user:2', { name: 'Bob', age: 25 });
   await kv.set('config', { theme: 'dark', lang: 'en' });
 
+  // setMany writes a whole object map in one logical batch.
+  // If any entry fails validation/serialization, the call rejects and writes nothing.
+  const batchWrite = await kv.setMany({
+    'user:3': { name: 'Carol', age: 28 },
+    'user:4': { name: 'Dave', age: 32 }
+  });
+  console.log(`Batch write inserted ${batchWrite.written} entries`);
+
   // Get values (throws if key doesn't exist).
   const counter = await kv.get('counter');
   const user1 = await kv.get('user:1');
@@ -146,10 +154,61 @@ export default async function () {
     console.log(`Random user: ${randomUser}`);
   }
 
+  // Pop one random entry and remove it atomically.
+  await kv.setMany({
+    'alloc:user:1': { id: 1, role: 'admin' },
+    'alloc:user:2': { id: 2, role: 'viewer' }
+  });
+  const poppedUser = await kv.popRandom({ prefix: 'alloc:user:' });
+  if (poppedUser) {
+    console.log(`Popped user: ${poppedUser.key}`);
+  }
+
+  // Claim lifecycle: claim -> release (failure path) -> claim -> complete (success path).
+  await kv.setMany({
+    'lease:task:1': { id: 1, state: 'queued' },
+    'lease:task:2': { id: 2, state: 'queued' }
+  });
+  const firstClaim = await kv.claimRandom({
+    prefix: 'lease:task:',
+    owner: 'vu:1',
+    ttl: 10000
+  });
+  if (firstClaim) {
+    const released = await kv.releaseClaim(firstClaim);
+    console.log(`Released claim: ${released}`);
+  }
+  const secondClaim = await kv.claimRandom({
+    prefix: 'lease:task:',
+    owner: 'vu:1',
+    ttl: 10000
+  });
+  if (secondClaim) {
+    const completed = await kv.completeClaim(secondClaim, { deleteKey: false });
+    console.log(`Completed claim: ${completed}`);
+  }
+
   // Rebuild key index (only useful if trackKeys=true).
   // Typically called in setup() after external DB changes.
   const rebuilt = await kv.rebuildKeyList();
   console.log(`Key list rebuilt: ${rebuilt}`);
+
+  // Runtime diagnostics and explicit gauge reporting.
+  const stats = await kv.stats();
+  console.log(`Stats count=${stats.count}, liveClaims=${stats.claims.live}`);
+  await kv.reportStats();
+
+  // Snapshot operations.
+  const backupSummary = await kv.backup({
+    fileName: '.k6.kv.example.snapshot',
+    allowConcurrentWrites: true
+  });
+  console.log(
+    `Backup entries=${backupSummary.totalEntries}, bytes=${backupSummary.bytesWritten}`
+  );
+  await kv.clear();
+  const restoreSummary = await kv.restore({ fileName: '.k6.kv.example.snapshot' });
+  console.log(`Restore entries=${restoreSummary.totalEntries}`);
 
   // Clear all entries (for test isolation).
   await kv.clear();
