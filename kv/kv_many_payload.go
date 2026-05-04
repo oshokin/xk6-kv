@@ -12,7 +12,43 @@ import (
 
 const (
 	setManyErrorNameInvalidEntries = "InvalidEntries"
+	setManyErrorNameEmptyKey       = "EmptyKey"
 )
+
+func importGetManyKeys(value sobek.Value) ([]string, error) {
+	if common.IsNullish(value) {
+		return nil, NewError(
+			InvalidOptionsError,
+			"getMany keys must be an array of strings; got null or undefined",
+		)
+	}
+
+	exported := value.Export()
+
+	rawItems, ok := exported.([]any)
+	if !ok {
+		return nil, NewError(
+			InvalidOptionsError,
+			fmt.Sprintf("getMany keys must be an array of strings; got %T", exported),
+		)
+	}
+
+	keys := make([]string, len(rawItems))
+
+	for i, raw := range rawItems {
+		key, ok := raw.(string)
+		if !ok {
+			return nil, NewError(
+				InvalidOptionsError,
+				fmt.Sprintf("getMany keys[%d] must be a string; got %T", i, raw),
+			)
+		}
+
+		keys[i] = key
+	}
+
+	return keys, nil
+}
 
 func importSetManyEntries(entriesValue sobek.Value) ([]store.Entry, error) {
 	if common.IsNullish(entriesValue) {
@@ -53,12 +89,36 @@ func importSetManyEntries(entriesValue sobek.Value) ([]store.Entry, error) {
 	sort.Strings(keys)
 
 	entries := make([]store.Entry, 0, len(keys))
+	details := make([]ErrorDetail, 0)
 
 	for _, key := range keys {
+		if key == "" {
+			details = append(details, ErrorDetail{
+				Key:     key,
+				Name:    setManyErrorNameEmptyKey,
+				Message: "key must be a non-empty string",
+			})
+
+			continue
+		}
+
 		entries = append(entries, store.Entry{
 			Key:   key,
 			Value: rawEntries[key],
 		})
+	}
+
+	if len(details) > 0 {
+		message := fmt.Sprintf("setMany validation failed: %d invalid entries", len(details))
+		if len(details) == 1 {
+			message = "setMany validation failed: 1 invalid entry"
+		}
+
+		return nil, NewErrorWithDetails(
+			InvalidOptionsError,
+			message,
+			details,
+		)
 	}
 
 	return entries, nil

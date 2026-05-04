@@ -463,6 +463,24 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Per-key result item returned by getMany().
+   */
+  export interface GetManyItem<T = any> {
+    /**
+     * Requested key (same order/position as input).
+     */
+    key: string;
+    /**
+     * True when the key exists in the store.
+     */
+    exists: boolean;
+    /**
+     * Stored value when exists=true; null when missing or when stored value is JSON null.
+     */
+    value: T | null;
+  }
+
+  /**
    * Per-entry error details for batch operations.
    */
   export interface ManyEntryError {
@@ -639,10 +657,20 @@ declare module 'k6/x/kv' {
     get(key: string): Promise<any>;
 
     /**
+     * Reads many keys and returns per-key results in the same order as the input keys.
+     *
+     * Missing keys return { exists: false, value: null }.
+     * Stored JSON null values return { exists: true, value: null }.
+     *
+     * Duplicate keys are allowed and produce duplicate values.
+     */
+    getMany<T = any>(keys: string[]): Promise<Array<GetManyItem<T>>>;
+
+    /**
      * Sets a key-value pair.
      * Creates the key if absent, overwrites if present.
      *
-     * @param key - The key to set
+     * @param key - The key to set (must be a non-empty string)
      * @param value - The value to store (must be JSON-serializable if serialization="json")
      * @returns Promise that resolves to the value that was set
      *
@@ -662,8 +690,9 @@ declare module 'k6/x/kv' {
      * it is not a cross-key snapshot-isolation contract for concurrent readers on
      * the memory backend.
      * Rejected errors may include a stable `errors` array with `ManyEntryError` items.
+     * Common per-entry names are `InvalidEntries`, `EmptyKey`, and `SerializerError`.
      *
-     * @param entries - Object map of key/value pairs to write
+     * @param entries - Object map of key/value pairs to write (keys must be non-empty strings)
      * @returns Promise that resolves to { written }
      */
     setMany<T = any>(entries: Record<string, T>): Promise<SetManyResult>;

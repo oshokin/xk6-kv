@@ -20,7 +20,7 @@ import { getSnapshotPath, createKv, createSetup, createTeardown } from './common
 // - Broken integrations when field names change.
 //
 // METHODS TESTED:
-// - Basic operations (get, set, setMany, delete, exists, clear, size).
+// - Basic operations (get, getMany, set, setMany, delete, exists, clear, size).
 // - Atomic operations (incrementBy, getOrSet, swap, compareAndSwap variants,
 //   setIfAbsent, deleteIfExists, compareAndDelete variants).
 // - Query/coordination operations (list, scan, count, randomKey, popRandom,
@@ -47,6 +47,15 @@ export const options = {
     'checks{api:setMany-structure}': ['rate>0.999'],
     'checks{api:setMany-written}': ['rate>0.999'],
     'checks{api:setMany-values}': ['rate>0.999'],
+    'checks{api:setMany-empty-key-rejects}': ['rate>0.999'],
+    'checks{api:setMany-empty-key-has-errors}': ['rate>0.999'],
+    'checks{api:setMany-empty-key-detail-name}': ['rate>0.999'],
+    'checks{api:setMany-empty-key-no-partial-write}': ['rate>0.999'],
+    'checks{api:getMany-returns-array}': ['rate>0.999'],
+    'checks{api:getMany-preserves-length}': ['rate>0.999'],
+    'checks{api:getMany-item-shape}': ['rate>0.999'],
+    'checks{api:getMany-missing-exists-false}': ['rate>0.999'],
+    'checks{api:getMany-null-exists-true}': ['rate>0.999'],
     'checks{api:delete-idempotent}': ['rate>0.999'],
     'checks{api:exists-true}': ['rate>0.999'],
     'checks{api:exists-false}': ['rate>0.999'],
@@ -193,6 +202,50 @@ export default async function apiOutputValidationTest() {
       typeof setManyResult.written === 'number' && setManyResult.written === 2,
     'api:setMany-values': () =>
       setManyValueA.role === 'primary' && setManyValueB.role === 'secondary'
+  });
+
+  // setMany(): Validate empty-key rejection shape and all-or-nothing behavior.
+  const setManyGuardKey = 'setManyEmptyKeyGuard';
+  let setManyEmptyKeyError = null;
+  try {
+    await kv.setMany({
+      [setManyGuardKey]: { role: 'must-not-write' },
+      '': 'invalid-empty-key'
+    });
+  } catch (err) {
+    setManyEmptyKeyError = err;
+  }
+  const setManyGuardExists = await kv.exists(setManyGuardKey);
+  check(true, {
+    'api:setMany-empty-key-rejects': () =>
+      setManyEmptyKeyError && setManyEmptyKeyError.name === 'InvalidOptionsError',
+    'api:setMany-empty-key-has-errors': () =>
+      Array.isArray(setManyEmptyKeyError?.errors) && setManyEmptyKeyError.errors.length === 1,
+    'api:setMany-empty-key-detail-name': () =>
+      setManyEmptyKeyError?.errors?.[0]?.name === 'EmptyKey',
+    'api:setMany-empty-key-no-partial-write': () => setManyGuardExists === false
+  });
+
+  const getManyItems = await kv.getMany([
+    'setManyKeyA',
+    'api:missing',
+    'nullKey'
+  ]);
+  check(getManyItems, {
+    'api:getMany-returns-array': (items) => Array.isArray(items),
+    'api:getMany-preserves-length': (items) => items.length === 3,
+    'api:getMany-item-shape': (items) =>
+      items.every(
+        (item) =>
+          item &&
+          typeof item.key === 'string' &&
+          typeof item.exists === 'boolean' &&
+          Object.prototype.hasOwnProperty.call(item, 'value')
+      ),
+    'api:getMany-missing-exists-false': (items) =>
+      items[1].key === 'api:missing' && items[1].exists === false && items[1].value === null,
+    'api:getMany-null-exists-true': (items) =>
+      items[2].key === 'nullKey' && items[2].exists === true && items[2].value === null
   });
 
   // get(): Validate direct scalar retrieval from set() data.

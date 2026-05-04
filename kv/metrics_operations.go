@@ -26,6 +26,7 @@ const (
 	statusError = "error"
 
 	opGet                      = "get"
+	opGetMany                  = "get_many"
 	opSet                      = "set"
 	opSetMany                  = "set_many"
 	opDelete                   = "delete"

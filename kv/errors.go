@@ -299,7 +299,8 @@ func classifyError(err error) *Error {
 		return NewError(InvalidSerializationError, err.Error())
 	case errors.Is(err, store.ErrKVOptionsConflict):
 		return NewError(KVOptionsConflictError, err.Error())
-	case errors.Is(err, store.ErrKVOptionsInvalid):
+	case errors.Is(err, store.ErrKVOptionsInvalid),
+		errors.Is(err, store.ErrKeyEmpty):
 		return NewError(InvalidOptionsError, err.Error())
 	case errors.Is(err, store.ErrBackupDirectoryFailed),
 		errors.Is(err, store.ErrBackupTempFileFailed),

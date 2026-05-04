@@ -70,7 +70,7 @@ Expand-Archive -Path k6.zip -DestinationPath .
 go install go.k6.io/xk6/cmd/xk6@latest
 ```
 
-2. Build k6 with xk6-kv:
+1. Build k6 with xk6-kv:
 
 ```bash
 # Latest version
@@ -80,7 +80,7 @@ xk6 build --with github.com/oshokin/xk6-kv@latest
 xk6 build --with github.com/oshokin/xk6-kv@v1.3.6
 ```
 
-3. Verify:
+1. Verify:
 
 ```bash
 ./k6 version
@@ -253,13 +253,24 @@ All methods return Promises except `close()`.
 #### Basic Operations
 
 - **`get(key: string): Promise<any>`** - Retrieves a value by key. Throws if key doesn't exist.
-- **`set(key: string, value: any): Promise<any>`** - Sets a key-value pair.
-- **`setMany(entries: Record<string, any>): Promise<{ written: number }>`** - Writes an object map in one logical batch. Uses the same key semantics as `set()` (including empty-string keys). Validates the input shape and serializes all values before writing; rejects with `err.errors` and writes nothing if any entry fails. `setMany()` provides all-or-nothing validation/serialization semantics, but is not intended to provide cross-key snapshot isolation for concurrent readers on the memory backend.
+- **`getMany(keys: string[]): Promise<Array<{ key: string, exists: boolean, value: any | null }>>`** - Reads many keys in one logical batch and preserves input order. Missing keys return `{ exists: false, value: null }`; stored JSON `null` returns `{ exists: true, value: null }`; duplicate keys are allowed.
+  > `getMany()` backend note: disk reads run inside one bbolt read transaction; memory reads use per-shard locks and do not provide cross-key snapshot isolation under concurrent writes.
+- **`set(key: string, value: any): Promise<any>`** - Sets a key-value pair. Empty-string keys are rejected.
+- **`setMany(entries: Record<string, any>): Promise<{ written: number }>`** - Writes an object map in one logical batch. Keys must be non-empty strings. Validates the input shape and serializes all values before writing; rejects with `err.errors` and writes nothing if any entry fails. `setMany()` provides all-or-nothing validation/serialization semantics, but is not intended to provide cross-key snapshot isolation for concurrent readers on the memory backend.
 - **`delete(key: string): Promise<boolean>`** - Removes a key-value pair (always resolves to `true`).
 - **`exists(key: string): Promise<boolean>`** - Checks if a key exists.
 - **`clear(): Promise<boolean>`** - Removes all entries (always resolves to `true`).  
   > `clear()` drops and recreates the underlying bbolt bucket, so treat it like a destructive maintenance operation. Run it while writers are idle (or immediately call `rebuildKeyList()` afterward when `trackKeys: true`) to avoid brief indexing drift for keys inserted concurrently with the wipe.
 - **`size(): Promise<number>`** - Returns current store size (number of keys).
+
+`getMany()` example:
+
+```javascript
+const items = await kv.getMany(["user:1", "user:missing", "user:null"]);
+// items[0] -> { key: "user:1", exists: true,  value: ... }
+// items[1] -> { key: "user:missing", exists: false, value: null }
+// items[2] -> { key: "user:null", exists: true, value: null }
+```
 
 #### Atomic Operations
 

@@ -38,6 +38,12 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/set-many-all-or-nothing.js
    ```
 
+   For ordered bulk reads with missing/null behavior, try:
+
+   ```bash
+   k6 run examples/get-many.js
+   ```
+
    For operation metrics in a realistic worker queue flow, try:
 
    ```bash
@@ -68,7 +74,20 @@ Batch APIs such as `setMany()` can also return a stable `err.errors` array for p
 For `setMany()` in the current API, `err.errors[].name` values are:
 
 - `InvalidEntries` for payload-shape validation failures
+- `EmptyKey` for empty-string keys in `setMany()` payloads
 - `SerializerError` for per-entry serialization failures
+
+`set()` and `setMany()` reject empty-string keys with `InvalidOptionsError`.
+
+`getMany()` input errors are reported as `InvalidOptionsError`.
+Missing keys are not errors: they are returned as `{ exists: false, value: null }`.
+Stored JSON `null` values are returned as `{ exists: true, value: null }`.
+
+Examples:
+
+- `kv.getMany(null)` -> `InvalidOptionsError`
+- `kv.getMany({})` -> `InvalidOptionsError`
+- `kv.getMany(["ok", 123])` -> `InvalidOptionsError`
 
 ### Understanding error classification
 

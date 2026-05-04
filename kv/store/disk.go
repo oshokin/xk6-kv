@@ -244,6 +244,10 @@ func (s *DiskStore) Get(key string) (any, error) {
 // Set inserts or updates the value for a given key.
 // If this is a new key and tracking is enabled, we update indexes.
 func (s *DiskStore) Set(key string, value any) error {
+	if key == "" {
+		return ErrKeyEmpty
+	}
+
 	release, err := s.beginOperation()
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)

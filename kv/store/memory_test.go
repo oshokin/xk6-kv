@@ -88,6 +88,9 @@ func TestMemoryStore_GetSet_RoundtripAndTypes(t *testing.T) {
 
 	// Unsupported type must error.
 	require.Error(t, store.Set("invalid-key", 123), "Set of unsupported type must error")
+
+	// Empty key must be rejected.
+	require.ErrorIs(t, store.Set("", "value"), ErrKeyEmpty)
 }
 
 // TestMemoryStore_GetSet_Concurrency performs concurrent Set/Get loops to smoke-test

@@ -79,6 +79,8 @@ var (
 	ErrInvalidCursor = errors.New("invalid cursor")
 	// ErrInvalidSerialization is returned when an unsupported serialization format is specified.
 	ErrInvalidSerialization = errors.New("invalid serialization")
+	// ErrKeyEmpty is returned when an operation receives an empty key.
+	ErrKeyEmpty = errors.New("key must not be empty")
 	// ErrKeyListRebuildFailed indicates rebuilding the key list failed.
 	ErrKeyListRebuildFailed = errors.New("key list rebuild failed")
 	// ErrKeyNotFound is returned when a requested key does not exist in the store.

@@ -1,5 +1,34 @@
 package store
 
+import (
+	"fmt"
+	"slices"
+)
+
+// GetMany returns entries in the same order as keys.
+// Missing keys are represented as nil entries.
+func (s *MemoryStore) GetMany(keys []string) ([]*Entry, error) {
+	result := make([]*Entry, len(keys))
+
+	for i, key := range keys {
+		shard := s.getShardByKey(key)
+
+		shard.mu.RLock()
+
+		value, exists := shard.container[key]
+		if exists {
+			result[i] = &Entry{
+				Key:   key,
+				Value: slices.Clone(value),
+			}
+		}
+
+		shard.mu.RUnlock()
+	}
+
+	return result, nil
+}
+
 // SetMany stores all entries in one logical batch.
 //
 // We normalize every value before mutating any shard so unsupported values fail
@@ -19,6 +48,10 @@ func (s *MemoryStore) SetMany(entries []Entry) (int64, error) {
 
 	normalizedValues := make([][]byte, len(entries))
 	for i := range entries {
+		if entries[i].Key == "" {
+			return 0, fmt.Errorf("%w: entries[%d]", ErrKeyEmpty, i)
+		}
+
 		valueBytes, normalizeErr := normalizeToBytes(entries[i].Value)
 		if normalizeErr != nil {
 			return 0, normalizeErr

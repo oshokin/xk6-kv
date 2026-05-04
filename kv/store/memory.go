@@ -108,6 +108,10 @@ func (s *MemoryStore) Get(key string) (any, error) {
 // Set associates value with key, overwriting any previous value.
 // The value must be a []byte or string; other types result in an error.
 func (s *MemoryStore) Set(key string, value any) error {
+	if key == "" {
+		return ErrKeyEmpty
+	}
+
 	release, err := s.guardMutation()
 	if err != nil {
 		return err

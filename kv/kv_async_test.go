@@ -107,7 +107,26 @@ func TestKVAsync_SetMany_InvalidShapeRejectsPromise(t *testing.T) {
 	`)
 }
 
-func TestKVAsync_SetMany_EmptyKeyMatchesSetBehavior(t *testing.T) {
+func TestKVAsync_Set_EmptyKeyRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("", "value")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_SetMany_EmptyKeyRejectsPromise(t *testing.T) {
 	t.Parallel()
 
 	runtime := modulestest.NewRuntime(t)
@@ -121,15 +140,18 @@ func TestKVAsync_SetMany_EmptyKeyMatchesSetBehavior(t *testing.T) {
 
 	runKVScript(t, runtime, kv, `
 		__kv.setMany({ "": "batch-value" })
-			.then((result) => {
-				if (!result || result.written !== 1) {
-					throw new Error("unexpected written count");
-				}
-				return __kv.get("");
+			.then(() => {
+				throw new Error("expected rejection");
 			})
-			.then((value) => {
-				if (value !== "batch-value") {
-					throw new Error("unexpected stored value for empty key");
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (!Array.isArray(err.errors) || err.errors.length !== 1) {
+					throw new Error("expected single setMany entry error");
+				}
+				if (err.errors[0].name !== "EmptyKey") {
+					throw new Error("unexpected setMany entry error name");
 				}
 			});
 	`)
@@ -170,6 +192,159 @@ func TestKVAsync_SetMany_SerializationFailureRejectsAndWritesNothing(t *testing.
 			.then((exists) => {
 				if (exists !== false) {
 					throw new Error("setMany must be all-or-nothing");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_GetMany_ResolvesItemsAndExistsFlags(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:1": { name: "Alice" },
+			"user:2": { name: "Bob" },
+		})
+			.then(() => __kv.getMany(["user:2", "missing", "user:1"]))
+			.then((items) => {
+				if (!Array.isArray(items) || items.length !== 3) {
+					throw new Error("unexpected getMany result shape");
+				}
+				if (items[0].key !== "user:2" || items[0].exists !== true || items[0].value.name !== "Bob") {
+					throw new Error("unexpected first value");
+				}
+				if (items[1].key !== "missing" || items[1].exists !== false || items[1].value !== null) {
+					throw new Error("missing key must have exists=false and value=null");
+				}
+				if (items[2].key !== "user:1" || items[2].exists !== true || items[2].value.name !== "Alice") {
+					throw new Error("unexpected third value");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_GetMany_EmptyArrayResolvesEmptyArray(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.getMany([])
+			.then((items) => {
+				if (!Array.isArray(items) || items.length !== 0) {
+					throw new Error("expected empty array");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_GetMany_InvalidShapeRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.getMany({})
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_GetMany_InvalidElementRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.getMany(["ok", 123])
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (!String(err.message).includes("keys[1]")) {
+					throw new Error("error message must mention invalid index");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_GetMany_DuplicateKeys(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", { name: "Alice" })
+			.then(() => __kv.getMany(["user:1", "user:1"]))
+			.then((items) => {
+				if (items.length !== 2) {
+					throw new Error("expected two results");
+				}
+				if (
+					items[0].key !== "user:1" ||
+					items[1].key !== "user:1" ||
+					items[0].exists !== true ||
+					items[1].exists !== true ||
+					items[0].value.name !== "Alice" ||
+					items[1].value.name !== "Alice"
+				) {
+					throw new Error("duplicate keys must return duplicate values");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_GetMany_DistinguishesMissingAndStoredJSONNull(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"json:null": null,
+		})
+			.then(() => __kv.getMany(["missing", "json:null"]))
+			.then((items) => {
+				if (items[0].key !== "missing" || items[0].exists !== false || items[0].value !== null) {
+					throw new Error("missing key must have exists=false and value=null");
+				}
+				if (items[1].key !== "json:null" || items[1].exists !== true || items[1].value !== null) {
+					throw new Error("stored JSON null must have exists=true and value=null");
 				}
 			});
 	`)
@@ -802,6 +977,200 @@ func TestKVAsync_SetMany_OperationMetrics(t *testing.T) {
 	assert.True(t, seenTotal)
 	assert.True(t, seenDuration)
 	assert.True(t, seenFailed)
+}
+
+func TestKVAsync_GetMany_OperationMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:1": { name: "Alice" },
+			"user:2": { name: "Bob" },
+			"json:null": null,
+		})
+			.then(() => __kv.getMany(["user:1", "missing", "json:null"]))
+			.then((items) => {
+				if (!Array.isArray(items) || items.length !== 3) {
+					throw new Error("unexpected getMany shape");
+				}
+				if (items[1].exists !== false || items[1].value !== null) {
+					throw new Error("missing item must have exists=false");
+				}
+				if (items[2].exists !== true || items[2].value !== null) {
+					throw new Error("stored null item must have exists=true");
+				}
+			});
+	`)
+
+	var (
+		seenTotal    bool
+		seenDuration bool
+		seenFailed   bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, hasOp := sample.Tags.Get(tagOp)
+			if !hasOp || op != opGetMany {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				assert.InDelta(t, 0.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+}
+
+func TestKVAsync_GetMany_InvalidShapeMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.getMany({})
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+
+	var (
+		seenTotal      bool
+		seenDuration   bool
+		seenFailed     bool
+		seenErrors     bool
+		seenEmpty      bool
+		seenFailedZero bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, ok := sample.Tags.Get(tagOp)
+			if !ok || op != opGetMany {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				if sample.Value == 0 {
+					seenFailedZero = true
+				}
+
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			case metricKVErrorsTotal:
+				errorType, hasErrorType := sample.Tags.Get(tagErrorType)
+				require.True(t, hasErrorType)
+				assert.Equal(t, string(InvalidOptionsError), errorType)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenErrors = true
+			case metricKVEmptyResult:
+				seenEmpty = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+	assert.True(t, seenErrors)
+	assert.False(t, seenEmpty, "getMany should not emit empty-result metrics")
+	assert.False(t, seenFailedZero, "failed getMany should not emit failed=0 samples")
 }
 
 func TestKVAsync_SetMany_ValidationFailureMetrics(t *testing.T) {

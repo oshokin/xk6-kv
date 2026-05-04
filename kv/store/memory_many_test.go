@@ -87,6 +87,22 @@ func TestMemoryStore_SetMany_UnsupportedValueTypeDoesNotWrite(t *testing.T) {
 	assert.False(t, exists, "batch must be all-or-nothing")
 }
 
+func TestMemoryStore_SetMany_EmptyKeyDoesNotWrite(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	written, err := store.SetMany([]Entry{
+		{Key: "ok", Value: "value"},
+		{Key: "", Value: "empty"},
+	})
+	require.ErrorIs(t, err, ErrKeyEmpty)
+	assert.EqualValues(t, 0, written)
+
+	exists, existsErr := store.Exists("ok")
+	require.NoError(t, existsErr)
+	assert.False(t, exists, "batch must be all-or-nothing")
+}
+
 func TestMemoryStore_SetMany_DoesNotClearLiveClaim(t *testing.T) {
 	t.Parallel()
 
@@ -183,5 +199,163 @@ func TestMemoryStore_SetMany_Concurrent_TrackKeysConsistency(t *testing.T) {
 				requireMemoryTrackingMatchesStore(t, store)
 			}
 		})
+	}
+}
+
+func TestMemoryStore_GetMany_EmptyKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+			entries, err := store.GetMany([]string{})
+			require.NoError(t, err)
+			assert.Empty(t, entries)
+		})
+	}
+}
+
+func TestMemoryStore_GetMany_PreservesOrderAndMissing(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+			require.NoError(t, store.Set("user:1", []byte("one")))
+			require.NoError(t, store.Set("user:2", []byte("two")))
+
+			entries, err := store.GetMany([]string{"user:2", "missing", "user:1"})
+			require.NoError(t, err)
+			require.Len(t, entries, 3)
+
+			require.NotNil(t, entries[0])
+			assert.Equal(t, "user:2", entries[0].Key)
+			assert.Equal(t, []byte("two"), entries[0].Value)
+
+			assert.Nil(t, entries[1])
+
+			require.NotNil(t, entries[2])
+			assert.Equal(t, "user:1", entries[2].Key)
+			assert.Equal(t, []byte("one"), entries[2].Value)
+		})
+	}
+}
+
+func TestMemoryStore_GetMany_DuplicateKeys(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	require.NoError(t, store.Set("user:1", []byte("one")))
+
+	entries, err := store.GetMany([]string{"user:1", "user:1"})
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	require.NotNil(t, entries[0])
+	require.NotNil(t, entries[1])
+	assert.Equal(t, []byte("one"), entries[0].Value)
+	assert.Equal(t, []byte("one"), entries[1].Value)
+}
+
+func TestMemoryStore_GetMany_ReturnsDefensiveCopies(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	require.NoError(t, store.Set("user:1", []byte("one")))
+
+	entries, err := store.GetMany([]string{"user:1"})
+	require.NoError(t, err)
+	require.NotNil(t, entries[0])
+
+	value := entries[0].Value.([]byte)
+	value[0] = 'X'
+
+	actual, err := store.Get("user:1")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("one"), actual)
+}
+
+func TestMemoryStore_GetMany_EmptyKeyReturnsMissingEntry(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+
+	entries, err := store.GetMany([]string{""})
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Nil(t, entries[0])
+}
+
+func TestMemoryStore_GetMany_ConcurrentWithSetMany(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+
+	const (
+		writers    = 8
+		readers    = 16
+		iterations = 100
+	)
+
+	start := make(chan struct{})
+	errCh := make(chan error, writers+readers)
+
+	var wg sync.WaitGroup
+
+	for writerID := range writers {
+		wg.Go(func() {
+			<-start
+
+			for iter := range iterations {
+				entries := make([]Entry, 0, 10)
+				for i := range 10 {
+					entries = append(entries, Entry{
+						Key:   fmt.Sprintf("writer:%d:iter:%d:key:%d", writerID, iter, i),
+						Value: []byte("value"),
+					})
+				}
+
+				if _, err := store.SetMany(entries); err != nil {
+					errCh <- err
+					return
+				}
+			}
+		})
+	}
+
+	for range readers {
+		wg.Go(func() {
+			<-start
+
+			for range iterations {
+				keys := []string{
+					"writer:0:iter:0:key:0",
+					"writer:1:iter:1:key:1",
+					"missing",
+				}
+
+				entries, err := store.GetMany(keys)
+				if err != nil {
+					errCh <- err
+					return
+				}
+
+				if len(entries) != len(keys) {
+					errCh <- fmt.Errorf("unexpected result length: got %d want %d", len(entries), len(keys))
+					return
+				}
+			}
+		})
+	}
+
+	close(start)
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		require.NoError(t, err)
 	}
 }

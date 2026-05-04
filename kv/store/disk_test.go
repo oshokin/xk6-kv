@@ -460,6 +460,9 @@ func TestDiskStore_GetSet_RoundtripAndTypes(t *testing.T) {
 
 	// Unsupported type should error.
 	require.Error(t, store.Set("invalid-key", 123), "Set of unsupported type must error")
+
+	// Empty key must be rejected before entering bbolt.
+	require.ErrorIs(t, store.Set("", "value"), ErrKeyEmpty)
 }
 
 // TestDiskStore_Get_ReturnsDistinctBuffers ensures that Get returns distinct buffers for each call.

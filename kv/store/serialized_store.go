@@ -44,6 +44,35 @@ func (s *SerializedStore) Get(key string) (any, error) {
 	return s.deserializeValue(rawValue)
 }
 
+// GetMany fetches raw values for keys and deserializes each non-missing entry.
+// Missing keys are represented as nil entries.
+func (s *SerializedStore) GetMany(keys []string) ([]*Entry, error) {
+	entries, err := s.store.GetMany(keys)
+	if err != nil {
+		return nil, err
+	}
+
+	decoded := make([]*Entry, len(entries))
+
+	for i, entry := range entries {
+		if entry == nil {
+			continue
+		}
+
+		value, err := s.deserializeValue(entry.Value)
+		if err != nil {
+			return nil, err
+		}
+
+		decoded[i] = &Entry{
+			Key:   entry.Key,
+			Value: value,
+		}
+	}
+
+	return decoded, nil
+}
+
 // Set serializes the provided value to bytes and stores it under the given key.
 func (s *SerializedStore) Set(key string, value any) error {
 	// Serialize the value.

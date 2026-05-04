@@ -1,10 +1,42 @@
 package store
 
 import (
+	"bytes"
 	"fmt"
+	"slices"
 
 	bolt "go.etcd.io/bbolt"
 )
+
+// GetMany returns entries in the same order as keys.
+// Missing keys are represented as nil entries.
+func (s *DiskStore) GetMany(keys []string) ([]*Entry, error) {
+	release, err := s.beginOperation()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
+	}
+	defer release()
+
+	result := make([]*Entry, len(keys))
+
+	err = s.handle.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(s.bucket)
+		if bucket == nil {
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
+		}
+
+		for i, key := range keys {
+			result[i] = getDiskEntryByKey(bucket, key)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreReadFailed, err)
+	}
+
+	return result, nil
+}
 
 // SetMany stores all entries inside a single writable bbolt transaction.
 //
@@ -24,6 +56,10 @@ func (s *DiskStore) SetMany(entries []Entry) (int64, error) {
 
 	normalizedValues := make([][]byte, len(entries))
 	for i := range entries {
+		if entries[i].Key == "" {
+			return 0, fmt.Errorf("%w: entries[%d]", ErrKeyEmpty, i)
+		}
+
 		valueBytes, normalizeErr := normalizeToBytes(entries[i].Value)
 		if normalizeErr != nil {
 			return 0, normalizeErr
@@ -73,4 +109,20 @@ func (s *DiskStore) SetMany(entries []Entry) (int64, error) {
 	}
 
 	return int64(len(normalizedKeys)), nil
+}
+
+func getDiskEntryByKey(bucket *bolt.Bucket, key string) *Entry {
+	keyBytes := []byte(key)
+
+	cursor := bucket.Cursor()
+	foundKey, value := cursor.Seek(keyBytes)
+
+	if foundKey == nil || !bytes.Equal(foundKey, keyBytes) {
+		return nil
+	}
+
+	return &Entry{
+		Key:   key,
+		Value: slices.Clone(value),
+	}
 }

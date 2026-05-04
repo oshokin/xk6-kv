@@ -48,17 +48,23 @@ func TestImportSetManyEntries_EmptyObjectReturnsEmptySlice(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
-func TestImportSetManyEntries_EmptyKeyAllowed(t *testing.T) {
+func TestImportSetManyEntries_EmptyKeyRejectsWithDetails(t *testing.T) {
 	t.Parallel()
 
 	runtime := modulestest.NewRuntime(t)
 	entries, err := importSetManyEntries(runtime.VU.Runtime().ToValue(map[string]any{
 		"": "value",
 	}))
-	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	assert.Empty(t, entries[0].Key)
-	assert.Equal(t, "value", entries[0].Value)
+	require.Error(t, err)
+	assert.Nil(t, entries)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+	assert.Equal(t, "setMany validation failed: 1 invalid entry", kvErr.Message)
+	require.Len(t, kvErr.Errors, 1)
+	assert.Equal(t, setManyErrorNameEmptyKey, kvErr.Errors[0].Name)
+	assert.Equal(t, "key must be a non-empty string", kvErr.Errors[0].Message)
 }
 
 func TestImportSetManyEntries_ValidObject(t *testing.T) {
@@ -73,4 +79,67 @@ func TestImportSetManyEntries_ValidObject(t *testing.T) {
 	require.Len(t, entries, 2)
 	assert.Equal(t, "user:1", entries[0].Key, "entries are sorted for deterministic behavior")
 	assert.Equal(t, "user:2", entries[1].Key, "entries are sorted for deterministic behavior")
+}
+
+func TestImportGetManyKeys_NullRejects(t *testing.T) {
+	t.Parallel()
+
+	_, err := importGetManyKeys(sobek.Undefined())
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+}
+
+func TestImportGetManyKeys_NonArrayRejects(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	_, err := importGetManyKeys(runtime.VU.Runtime().ToValue(map[string]any{}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+}
+
+func TestImportGetManyKeys_NonStringElementRejects(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	_, err := importGetManyKeys(runtime.VU.Runtime().ToValue([]any{"ok", 123}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+	assert.Contains(t, kvErr.Message, "keys[1]")
+}
+
+func TestImportGetManyKeys_EmptyArray(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	keys, err := importGetManyKeys(runtime.VU.Runtime().ToValue([]any{}))
+	require.NoError(t, err)
+	assert.Empty(t, keys)
+}
+
+func TestImportGetManyKeys_ValidArray(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	keys, err := importGetManyKeys(runtime.VU.Runtime().ToValue([]any{"a", "b"}))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b"}, keys)
+}
+
+func TestImportGetManyKeys_AllowsEmptyString(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	keys, err := importGetManyKeys(runtime.VU.Runtime().ToValue([]any{"a", "", "b"}))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "", "b"}, keys)
 }

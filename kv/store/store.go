@@ -32,6 +32,12 @@ type (
 		// If the key does not exist, an error is returned.
 		Get(key string) (any, error)
 
+		// GetMany returns entries in the same order as keys.
+		//
+		// Missing keys are represented as nil entries at the corresponding indexes.
+		// The method returns an error only when the read operation itself fails.
+		GetMany(keys []string) ([]*Entry, error)
+
 		// Set stores value under key, overwriting any existing value.
 		// Returns an error only if the operation cannot be completed.
 		Set(key string, value any) error
