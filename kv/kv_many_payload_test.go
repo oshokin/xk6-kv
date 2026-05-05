@@ -143,3 +143,75 @@ func TestImportGetManyKeys_AllowsEmptyString(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a", "", "b"}, keys)
 }
+
+func TestImportDeleteManyKeys_NullRejects(t *testing.T) {
+	t.Parallel()
+
+	_, err := importDeleteManyKeys(sobek.Undefined())
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+	assert.Contains(t, kvErr.Message, "deleteMany")
+}
+
+func TestImportDeleteManyKeys_NonArrayRejects(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	_, err := importDeleteManyKeys(runtime.VU.Runtime().ToValue(map[string]any{}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+	assert.Contains(t, kvErr.Message, "deleteMany")
+}
+
+func TestImportDeleteManyKeys_NonStringElementRejects(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	_, err := importDeleteManyKeys(runtime.VU.Runtime().ToValue([]any{"ok", 123}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+	assert.Contains(t, kvErr.Message, "deleteMany")
+	assert.Contains(t, kvErr.Message, "keys[1]")
+}
+
+func TestImportDeleteManyKeys_EmptyStringRejects(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	_, err := importDeleteManyKeys(runtime.VU.Runtime().ToValue([]any{"ok", ""}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+	assert.Contains(t, kvErr.Message, "deleteMany")
+	assert.Contains(t, kvErr.Message, "keys[1]")
+	assert.Contains(t, kvErr.Message, "non-empty")
+}
+
+func TestImportDeleteManyKeys_EmptyArray(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	keys, err := importDeleteManyKeys(runtime.VU.Runtime().ToValue([]any{}))
+	require.NoError(t, err)
+	assert.Empty(t, keys)
+}
+
+func TestImportDeleteManyKeys_ValidArray(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	keys, err := importDeleteManyKeys(runtime.VU.Runtime().ToValue([]any{"a", "b"}))
+	require.NoError(t, err)
+	assert.Equal(t, []string{"a", "b"}, keys)
+}

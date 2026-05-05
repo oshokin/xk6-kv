@@ -463,6 +463,21 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Result of deleteMany() operation.
+   */
+  export interface DeleteManyResult {
+    /**
+     * Number of requested keys that existed and were deleted.
+     */
+    deleted: number;
+
+    /**
+     * Number of requested keys that did not exist at deletion time.
+     */
+    missing: number;
+  }
+
+  /**
    * Per-key result item returned by getMany().
    */
   export interface GetManyItem<T = any> {
@@ -696,6 +711,17 @@ declare module 'k6/x/kv' {
      * @returns Promise that resolves to { written }
      */
     setMany<T = any>(entries: Record<string, T>): Promise<SetManyResult>;
+
+    /**
+     * Deletes many explicit non-empty keys.
+     *
+     * Missing keys are not errors and are counted in `missing`.
+     * Duplicate keys are processed in input order.
+     *
+     * @param keys - Array of explicit keys to delete (every key must be a non-empty string)
+     * @returns Promise that resolves to { deleted, missing }
+     */
+    deleteMany(keys: string[]): Promise<DeleteManyResult>;
 
     /**
      * Removes a key-value pair.

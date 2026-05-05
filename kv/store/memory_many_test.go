@@ -359,3 +359,224 @@ func TestMemoryStore_GetMany_ConcurrentWithSetMany(t *testing.T) {
 		require.NoError(t, err)
 	}
 }
+
+func TestMemoryStore_DeleteMany_EmptyKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+
+			result, err := store.DeleteMany([]string{})
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.EqualValues(t, 0, result.Deleted)
+			assert.EqualValues(t, 0, result.Missing)
+		})
+	}
+}
+
+func TestMemoryStore_DeleteMany_EmptyKeyRejectsWithoutPartialDelete(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	require.NoError(t, store.Set("ok", []byte("value")))
+
+	result, err := store.DeleteMany([]string{"ok", ""})
+	require.ErrorIs(t, err, ErrKeyEmpty)
+	assert.Nil(t, result)
+
+	exists, existsErr := store.Exists("ok")
+	require.NoError(t, existsErr)
+	assert.True(t, exists, "DeleteMany must validate first and avoid partial delete")
+}
+
+func TestMemoryStore_DeleteMany_DeletesExistingAndCountsMissing(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+			require.NoError(t, store.Set("user:1", []byte("one")))
+			require.NoError(t, store.Set("user:2", []byte("two")))
+
+			result, err := store.DeleteMany([]string{"user:1", "missing", "user:2"})
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.EqualValues(t, 2, result.Deleted)
+			assert.EqualValues(t, 1, result.Missing)
+
+			items, getErr := store.GetMany([]string{"user:1", "user:2"})
+			require.NoError(t, getErr)
+			require.Len(t, items, 2)
+			assert.Nil(t, items[0])
+			assert.Nil(t, items[1])
+		})
+	}
+}
+
+func TestMemoryStore_DeleteMany_DuplicateKeys(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	require.NoError(t, store.Set("user:1", []byte("one")))
+
+	result, err := store.DeleteMany([]string{"user:1", "user:1"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.EqualValues(t, 1, result.Deleted)
+	assert.EqualValues(t, 1, result.Missing)
+}
+
+func TestMemoryStore_DeleteMany_UpdatesCountAndTracking(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	_, err := store.SetMany([]Entry{
+		{Key: "user:1", Value: []byte("one")},
+		{Key: "user:2", Value: []byte("two")},
+		{Key: "order:1", Value: []byte("order")},
+	})
+	require.NoError(t, err)
+
+	result, err := store.DeleteMany([]string{"user:1", "user:2"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.EqualValues(t, 2, result.Deleted)
+	assert.EqualValues(t, 0, result.Missing)
+
+	count, countErr := store.Count("user:")
+	require.NoError(t, countErr)
+	assert.EqualValues(t, 0, count)
+
+	count, countErr = store.Count("order:")
+	require.NoError(t, countErr)
+	assert.EqualValues(t, 1, count)
+
+	requireMemoryTrackingMatchesStore(t, store)
+}
+
+func TestMemoryStore_DeleteMany_CleansClaims(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	require.NoError(t, store.Set("user:1", []byte("one")))
+
+	claim, err := store.ClaimRandom(&ClaimOptions{
+		Prefix: "user:",
+		TTLMs:  60_000,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, claim)
+
+	result, err := store.DeleteMany([]string{"user:1"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.EqualValues(t, 1, result.Deleted)
+	assert.EqualValues(t, 0, result.Missing)
+
+	released, releaseErr := store.ReleaseClaim(&ClaimRef{
+		ID:    claim.ID,
+		Key:   claim.Key,
+		Token: claim.Token,
+	})
+	require.NoError(t, releaseErr)
+	assert.False(t, released, "claim metadata for deleted key must be removed")
+}
+
+func TestMemoryStore_DeleteMany_ConcurrentWithSetAndGet(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+
+	const (
+		writers    = 6
+		deleters   = 4
+		readers    = 8
+		iterations = 80
+	)
+
+	start := make(chan struct{})
+	errCh := make(chan error, writers+deleters+readers)
+
+	var wg sync.WaitGroup
+
+	for writerID := range writers {
+		wg.Go(func() {
+			<-start
+
+			for iter := range iterations {
+				entries := make([]Entry, 0, 4)
+				for i := range 4 {
+					entries = append(entries, Entry{
+						Key:   fmt.Sprintf("dm:w:%d:i:%d:k:%d", writerID, iter, i),
+						Value: []byte("value"),
+					})
+				}
+
+				if _, err := store.SetMany(entries); err != nil {
+					errCh <- err
+					return
+				}
+			}
+		})
+	}
+
+	for deleterID := range deleters {
+		wg.Go(func() {
+			<-start
+
+			for iter := range iterations {
+				keys := []string{
+					fmt.Sprintf("dm:w:%d:i:%d:k:%d", deleterID%writers, iter, 0),
+					fmt.Sprintf("dm:w:%d:i:%d:k:%d", (deleterID+1)%writers, iter, 1),
+					fmt.Sprintf("dm:missing:%d:%d", deleterID, iter),
+				}
+
+				if _, err := store.DeleteMany(keys); err != nil {
+					errCh <- err
+					return
+				}
+			}
+		})
+	}
+
+	for range readers {
+		wg.Go(func() {
+			<-start
+
+			for range iterations {
+				keys := []string{
+					"dm:w:0:i:0:k:0",
+					"dm:w:1:i:1:k:1",
+					"dm:missing",
+				}
+
+				entries, err := store.GetMany(keys)
+				if err != nil {
+					errCh <- err
+					return
+				}
+
+				if len(entries) != len(keys) {
+					errCh <- fmt.Errorf("unexpected result length: got %d want %d", len(entries), len(keys))
+					return
+				}
+			}
+		})
+	}
+
+	close(start)
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+
+	requireMemoryTrackingMatchesStore(t, store)
+}

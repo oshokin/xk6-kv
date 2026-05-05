@@ -44,6 +44,12 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/get-many.js
    ```
 
+   For explicit bulk deletions with deleted/missing counts, try:
+
+   ```bash
+   k6 run examples/delete-many.js
+   ```
+
    For operation metrics in a realistic worker queue flow, try:
 
    ```bash
@@ -83,11 +89,19 @@ For `setMany()` in the current API, `err.errors[].name` values are:
 Missing keys are not errors: they are returned as `{ exists: false, value: null }`.
 Stored JSON `null` values are returned as `{ exists: true, value: null }`.
 
+`deleteMany()` accepts only an array of non-empty strings.
+Input errors are reported as `InvalidOptionsError`.
+Missing keys are not errors and are counted in `{ deleted, missing }`.
+
 Examples:
 
 - `kv.getMany(null)` -> `InvalidOptionsError`
 - `kv.getMany({})` -> `InvalidOptionsError`
 - `kv.getMany(["ok", 123])` -> `InvalidOptionsError`
+- `kv.deleteMany(null)` -> `InvalidOptionsError`
+- `kv.deleteMany({})` -> `InvalidOptionsError`
+- `kv.deleteMany(["ok", 123])` -> `InvalidOptionsError`
+- `kv.deleteMany([""])` -> `InvalidOptionsError`
 
 ### Understanding error classification
 

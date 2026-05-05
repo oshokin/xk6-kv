@@ -350,6 +350,167 @@ func TestKVAsync_GetMany_DistinguishesMissingAndStoredJSONNull(t *testing.T) {
 	`)
 }
 
+func TestKVAsync_DeleteMany_ResolvesDeletedAndMissingCounts(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:1": { name: "Alice" },
+			"user:2": { name: "Bob" },
+		})
+			.then(() => __kv.deleteMany(["user:1", "user:2", "missing"]))
+			.then((result) => {
+				if (!result || result.deleted !== 2 || result.missing !== 1) {
+					throw new Error("unexpected deleteMany result");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_DeleteMany_RemovesKeys(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:1": { name: "Alice" },
+			"user:2": { name: "Bob" },
+		})
+			.then(() => __kv.deleteMany(["user:1", "user:2"]))
+			.then(() => __kv.getMany(["user:1", "user:2"]))
+			.then((items) => {
+				if (!Array.isArray(items) || items.length !== 2) {
+					throw new Error("unexpected getMany shape after deleteMany");
+				}
+				if (items[0].exists !== false || items[1].exists !== false) {
+					throw new Error("deleteMany must remove requested keys");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_DeleteMany_EmptyArrayResolvesZeroCounts(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.deleteMany([])
+			.then((result) => {
+				if (!result || result.deleted !== 0 || result.missing !== 0) {
+					throw new Error("expected {deleted:0, missing:0}");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_DeleteMany_DuplicateKeys(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", { name: "Alice" })
+			.then(() => __kv.deleteMany(["user:1", "user:1"]))
+			.then((result) => {
+				if (!result || result.deleted !== 1 || result.missing !== 1) {
+					throw new Error("duplicate deleteMany semantics broken");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_DeleteMany_InvalidShapeRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.deleteMany({})
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (!String(err.message).includes("deleteMany")) {
+					throw new Error("message must mention deleteMany");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_DeleteMany_InvalidElementRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.deleteMany(["ok", 123])
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (!String(err.message).includes("keys[1]")) {
+					throw new Error("error message must mention invalid index");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_DeleteMany_EmptyKeyRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.deleteMany([""])
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (!String(err.message).includes("non-empty")) {
+					throw new Error("error message must mention non-empty key");
+				}
+			});
+	`)
+}
+
 func TestKVAsync_GetMissingKey_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1070,6 +1231,296 @@ func TestKVAsync_GetMany_OperationMetrics(t *testing.T) {
 	assert.True(t, seenFailed)
 }
 
+func TestKVAsync_DeleteMany_OperationMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:1": { name: "Alice" },
+			"user:2": { name: "Bob" },
+		})
+			.then(() => __kv.deleteMany(["user:1", "user:2", "missing"]))
+			.then((result) => {
+				if (!result || result.deleted !== 2 || result.missing !== 1) {
+					throw new Error("unexpected deleteMany result");
+				}
+			});
+	`)
+
+	var (
+		seenTotal    bool
+		seenDuration bool
+		seenFailed   bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, hasOp := sample.Tags.Get(tagOp)
+			if !hasOp || op != opDeleteMany {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				assert.InDelta(t, 0.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+}
+
+func TestKVAsync_DeleteMany_InvalidShapeMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.deleteMany({})
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+
+	var (
+		seenTotal      bool
+		seenDuration   bool
+		seenFailed     bool
+		seenErrors     bool
+		seenEmpty      bool
+		seenFailedZero bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, ok := sample.Tags.Get(tagOp)
+			if !ok || op != opDeleteMany {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				if sample.Value == 0 {
+					seenFailedZero = true
+				}
+
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			case metricKVErrorsTotal:
+				errorType, hasErrorType := sample.Tags.Get(tagErrorType)
+				require.True(t, hasErrorType)
+				assert.Equal(t, string(InvalidOptionsError), errorType)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenErrors = true
+			case metricKVEmptyResult:
+				seenEmpty = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+	assert.True(t, seenErrors)
+	assert.False(t, seenEmpty, "deleteMany should not emit empty-result metrics")
+	assert.False(t, seenFailedZero, "failed deleteMany should not emit failed=0 samples")
+}
+
+func TestKVAsync_DeleteMany_EmptyKeyMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.deleteMany([""])
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+
+	var (
+		seenTotal      bool
+		seenDuration   bool
+		seenFailed     bool
+		seenErrors     bool
+		seenEmpty      bool
+		seenFailedZero bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, ok := sample.Tags.Get(tagOp)
+			if !ok || op != opDeleteMany {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				if sample.Value == 0 {
+					seenFailedZero = true
+				}
+
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			case metricKVErrorsTotal:
+				errorType, hasErrorType := sample.Tags.Get(tagErrorType)
+				require.True(t, hasErrorType)
+				assert.Equal(t, string(InvalidOptionsError), errorType)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenErrors = true
+			case metricKVEmptyResult:
+				seenEmpty = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+	assert.True(t, seenErrors)
+	assert.False(t, seenEmpty, "deleteMany should not emit empty-result metrics")
+	assert.False(t, seenFailedZero, "failed deleteMany should not emit failed=0 samples")
+}
+
 func TestKVAsync_GetMany_InvalidShapeMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -1485,6 +1936,46 @@ func TestKVAsync_KeyMethods_InvalidKeyType_RejectsPromise(t *testing.T) {
 			expectInvalidOptions(__kv.compareAndDelete(1, "v"), "compareAndDelete"),
 			expectInvalidOptions(__kv.compareAndDeleteDetailed(1, "v", {}), "compareAndDeleteDetailed"),
 			expectInvalidOptions(__kv.setIfAbsent(1, "v"), "setIfAbsent")
+		]);
+	`)
+}
+
+func TestKVAsync_KeyMethods_EmptyKey_RejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		function expectInvalidOptionsWithNonEmptyHint(promise, label) {
+			return promise
+				.then(() => {
+					throw new Error(label + ": expected rejection");
+				})
+				.catch((err) => {
+					if (!err || err.name !== "InvalidOptionsError") {
+						throw new Error(label + ": unexpected error class: " + String(err && err.name));
+					}
+					if (!String(err.message).includes("non-empty")) {
+						throw new Error(label + ": expected non-empty validation hint");
+					}
+				});
+		}
+
+		Promise.all([
+			expectInvalidOptionsWithNonEmptyHint(__kv.get(""), "get"),
+			expectInvalidOptionsWithNonEmptyHint(__kv.set("", "v"), "set"),
+			expectInvalidOptionsWithNonEmptyHint(__kv.incrementBy("", 1), "incrementBy"),
+			expectInvalidOptionsWithNonEmptyHint(__kv.getOrSet("", "v"), "getOrSet"),
+			expectInvalidOptionsWithNonEmptyHint(__kv.swap("", "v"), "swap"),
+			expectInvalidOptionsWithNonEmptyHint(__kv.delete(""), "delete"),
+			expectInvalidOptionsWithNonEmptyHint(__kv.exists(""), "exists"),
+			expectInvalidOptionsWithNonEmptyHint(__kv.deleteIfExists(""), "deleteIfExists"),
+			expectInvalidOptionsWithNonEmptyHint(__kv.compareAndSwap("", null, "v"), "compareAndSwap"),
+			expectInvalidOptionsWithNonEmptyHint(__kv.compareAndSwapDetailed("", null, "v", {}), "compareAndSwapDetailed"),
+			expectInvalidOptionsWithNonEmptyHint(__kv.compareAndDelete("", "v"), "compareAndDelete"),
+			expectInvalidOptionsWithNonEmptyHint(__kv.compareAndDeleteDetailed("", "v", {}), "compareAndDeleteDetailed"),
+			expectInvalidOptionsWithNonEmptyHint(__kv.setIfAbsent("", "v"), "setIfAbsent")
 		]);
 	`)
 }

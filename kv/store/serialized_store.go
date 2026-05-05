@@ -228,6 +228,11 @@ func (s *SerializedStore) Delete(key string) error {
 	return s.store.Delete(key)
 }
 
+// DeleteMany deletes explicit keys and returns delete/missing counts.
+func (s *SerializedStore) DeleteMany(keys []string) (*DeleteManyResult, error) {
+	return s.store.DeleteMany(keys)
+}
+
 // Exists returns whether the key is present in the underlying store.
 func (s *SerializedStore) Exists(key string) (bool, error) {
 	return s.store.Exists(key)

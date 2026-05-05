@@ -89,3 +89,22 @@ func (k *KV) SetMany(entriesValue sobek.Value) *sobek.Promise {
 		},
 	)
 }
+
+// DeleteMany deletes explicit non-empty keys and resolves delete/missing counts.
+// Missing keys are counted in the result and are not errors.
+func (k *KV) DeleteMany(keysValue sobek.Value) *sobek.Promise {
+	keys, err := importDeleteManyKeys(keysValue)
+	if err != nil {
+		return k.rejectedPromiseObserved(opDeleteMany, err)
+	}
+
+	return k.runAsyncWithStoreObserved(
+		opDeleteMany,
+		func(s store.Store) (any, error) {
+			return s.DeleteMany(keys)
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
+}

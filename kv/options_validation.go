@@ -44,8 +44,6 @@ func parseOptionalStringOption(method, field string, value sobek.Value) (string,
 }
 
 // parseRequiredStringArg reads a required string argument (e.g., key).
-//
-
 func parseRequiredStringArg(method, arg string, value sobek.Value) (string, error) {
 	if common.IsNullish(value) {
 		return "", NewError(
@@ -61,6 +59,25 @@ func parseRequiredStringArg(method, arg string, value sobek.Value) (string, erro
 		return "", NewError(
 			InvalidOptionsError,
 			fmt.Sprintf("%s %s must be a string; got %T", method, arg, exported),
+		)
+	}
+
+	return parsedValue, nil
+}
+
+// parseRequiredNonEmptyStringArg reads a required non-empty string argument.
+//
+//nolint:unparam // Method and arg are used for error messages.
+func parseRequiredNonEmptyStringArg(method, arg string, value sobek.Value) (string, error) {
+	parsedValue, err := parseRequiredStringArg(method, arg, value)
+	if err != nil {
+		return "", err
+	}
+
+	if parsedValue == "" {
+		return "", NewError(
+			InvalidOptionsError,
+			fmt.Sprintf("%s %s must be a non-empty string", method, arg),
 		)
 	}
 

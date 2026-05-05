@@ -50,6 +50,48 @@ func importGetManyKeys(value sobek.Value) ([]string, error) {
 	return keys, nil
 }
 
+func importDeleteManyKeys(value sobek.Value) ([]string, error) {
+	if common.IsNullish(value) {
+		return nil, NewError(
+			InvalidOptionsError,
+			"deleteMany keys must be an array of non-empty strings; got null or undefined",
+		)
+	}
+
+	exported := value.Export()
+
+	rawItems, ok := exported.([]any)
+	if !ok {
+		return nil, NewError(
+			InvalidOptionsError,
+			fmt.Sprintf("deleteMany keys must be an array of non-empty strings; got %T", exported),
+		)
+	}
+
+	keys := make([]string, len(rawItems))
+
+	for i, raw := range rawItems {
+		key, ok := raw.(string)
+		if !ok {
+			return nil, NewError(
+				InvalidOptionsError,
+				fmt.Sprintf("deleteMany keys[%d] must be a string; got %T", i, raw),
+			)
+		}
+
+		if key == "" {
+			return nil, NewError(
+				InvalidOptionsError,
+				fmt.Sprintf("deleteMany keys[%d] must be a non-empty string", i),
+			)
+		}
+
+		keys[i] = key
+	}
+
+	return keys, nil
+}
+
 func importSetManyEntries(entriesValue sobek.Value) ([]store.Entry, error) {
 	if common.IsNullish(entriesValue) {
 		return nil, NewErrorWithDetails(

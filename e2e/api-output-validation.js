@@ -56,6 +56,11 @@ export const options = {
     'checks{api:getMany-item-shape}': ['rate>0.999'],
     'checks{api:getMany-missing-exists-false}': ['rate>0.999'],
     'checks{api:getMany-null-exists-true}': ['rate>0.999'],
+    'checks{api:deleteMany-returns-object}': ['rate>0.999'],
+    'checks{api:deleteMany-deleted-count}': ['rate>0.999'],
+    'checks{api:deleteMany-missing-count}': ['rate>0.999'],
+    'checks{api:deleteMany-removed-first-key}': ['rate>0.999'],
+    'checks{api:deleteMany-removed-second-key}': ['rate>0.999'],
     'checks{api:delete-idempotent}': ['rate>0.999'],
     'checks{api:exists-true}': ['rate>0.999'],
     'checks{api:exists-false}': ['rate>0.999'],
@@ -246,6 +251,36 @@ export default async function apiOutputValidationTest() {
       items[1].key === 'api:missing' && items[1].exists === false && items[1].value === null,
     'api:getMany-null-exists-true': (items) =>
       items[2].key === 'nullKey' && items[2].exists === true && items[2].value === null
+  });
+
+  await kv.setMany({
+    'api:delete:1': { value: 1 },
+    'api:delete:2': { value: 2 }
+  });
+
+  const deleteManyResult = await kv.deleteMany([
+    'api:delete:1',
+    'api:delete:2',
+    'api:delete:missing'
+  ]);
+
+  check(deleteManyResult, {
+    'api:deleteMany-returns-object': (result) =>
+      result !== null && typeof result === 'object',
+    'api:deleteMany-deleted-count': (result) =>
+      result.deleted === 2,
+    'api:deleteMany-missing-count': (result) =>
+      result.missing === 1
+  });
+
+  const deleteManyItems = await kv.getMany([
+    'api:delete:1',
+    'api:delete:2'
+  ]);
+
+  check(deleteManyItems, {
+    'api:deleteMany-removed-first-key': (items) => items[0].exists === false,
+    'api:deleteMany-removed-second-key': (items) => items[1].exists === false
   });
 
   // get(): Validate direct scalar retrieval from set() data.

@@ -14,7 +14,7 @@ import (
 //   - The database is not open.
 //   - The key does not exist (error is forwarded from the store).
 func (k *KV) Get(key sobek.Value) *sobek.Promise {
-	keyString, err := parseRequiredStringArg("get", "key", key)
+	keyString, err := parseRequiredNonEmptyStringArg("get", "key", key)
 	if err != nil {
 		return k.rejectedPromiseObserved(opGet, err)
 	}
@@ -42,7 +42,7 @@ func (k *KV) Get(key sobek.Value) *sobek.Promise {
 //   - database is not open,
 //   - store-level serialization/validation errors.
 func (k *KV) Set(key sobek.Value, value sobek.Value) *sobek.Promise {
-	keyString, err := parseRequiredStringArg("set", "key", key)
+	keyString, err := parseRequiredNonEmptyStringArg("set", "key", key)
 	if err != nil {
 		return k.rejectedPromiseObserved(opSet, err)
 	}
@@ -70,7 +70,7 @@ func (k *KV) Set(key sobek.Value, value sobek.Value) *sobek.Promise {
 //   - Absent keys are treated as 0 prior to the increment.
 //   - The existing value must parse as an integer; otherwise the Promise is rejected.
 func (k *KV) IncrementBy(key sobek.Value, delta sobek.Value) *sobek.Promise {
-	keyString, err := parseRequiredStringArg("incrementBy", "key", key)
+	keyString, err := parseRequiredNonEmptyStringArg("incrementBy", "key", key)
 	if err != nil {
 		return k.rejectedPromiseObserved(opIncrementBy, err)
 	}
@@ -100,7 +100,7 @@ func (k *KV) IncrementBy(key sobek.Value, delta sobek.Value) *sobek.Promise {
 //   - If the key exists -> { value: existing, loaded: true }.
 //   - If the key is absent -> stores the provided value and resolves { value: stored, loaded: false }.
 func (k *KV) GetOrSet(key sobek.Value, value sobek.Value) *sobek.Promise {
-	keyString, err := parseRequiredStringArg("getOrSet", "key", key)
+	keyString, err := parseRequiredNonEmptyStringArg("getOrSet", "key", key)
 	if err != nil {
 		return k.rejectedPromiseObserved(opGetOrSet, err)
 	}
@@ -132,7 +132,7 @@ func (k *KV) GetOrSet(key sobek.Value, value sobek.Value) *sobek.Promise {
 //   - If key existed -> it is replaced; resolves previous value with loaded=true.
 //   - If key was absent -> it is created; resolves previous=null with loaded=false.
 func (k *KV) Swap(key sobek.Value, value sobek.Value) *sobek.Promise {
-	keyString, err := parseRequiredStringArg("swap", "key", key)
+	keyString, err := parseRequiredNonEmptyStringArg("swap", "key", key)
 	if err != nil {
 		return k.rejectedPromiseObserved(opSwap, err)
 	}

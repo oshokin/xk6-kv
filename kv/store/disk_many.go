@@ -111,6 +111,95 @@ func (s *DiskStore) SetMany(entries []Entry) (int64, error) {
 	return int64(len(normalizedKeys)), nil
 }
 
+// DeleteMany deletes explicit non-empty keys and returns delete/missing counts.
+//
+// The disk backend applies all mutations in a single writable bbolt transaction.
+func (s *DiskStore) DeleteMany(keys []string) (*DeleteManyResult, error) {
+	release, err := s.beginOperation()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
+	}
+	defer release()
+
+	for i, key := range keys {
+		if key == "" {
+			return nil, fmt.Errorf("%w: keys[%d]", ErrKeyEmpty, i)
+		}
+	}
+
+	if len(keys) == 0 {
+		return &DeleteManyResult{}, nil
+	}
+
+	if s.trackKeys {
+		// Keep bbolt mutation and index update as one logical operation.
+		s.keysLock.Lock()
+		defer s.keysLock.Unlock()
+	}
+
+	result := &DeleteManyResult{}
+
+	err = s.handle.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(s.bucket)
+		if bucket == nil {
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
+		}
+
+		claimsBucket, err := ensureClaimsBucket(tx)
+		if err != nil {
+			return err
+		}
+
+		for _, key := range keys {
+			keyBytes := []byte(key)
+
+			if !diskKeyExists(bucket, keyBytes) {
+				// Keep behavior aligned with single-key delete paths: stale claims
+				// should be cleaned even when the user key is already absent.
+				if claimErr := deleteClaimForKeyTx(claimsBucket, key); claimErr != nil {
+					return claimErr
+				}
+
+				result.Missing++
+
+				continue
+			}
+
+			if deleteErr := bucket.Delete(keyBytes); deleteErr != nil {
+				return deleteErr
+			}
+
+			if claimErr := deleteClaimForKeyTx(claimsBucket, key); claimErr != nil {
+				return claimErr
+			}
+
+			result.Deleted++
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreDeleteFailed, err)
+	}
+
+	if s.trackKeys {
+		// Defensive cleanup: remove all requested keys from the in-memory
+		// index (idempotent) so stale-positive index entries are also cleared.
+		for _, key := range keys {
+			s.removeKeyIndexLocked(key)
+		}
+	}
+
+	return result, nil
+}
+
+func diskKeyExists(bucket *bolt.Bucket, key []byte) bool {
+	cursor := bucket.Cursor()
+	foundKey, _ := cursor.Seek(key)
+
+	return foundKey != nil && bytes.Equal(foundKey, key)
+}
+
 func getDiskEntryByKey(bucket *bolt.Bucket, key string) *Entry {
 	keyBytes := []byte(key)
 

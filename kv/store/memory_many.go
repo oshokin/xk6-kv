@@ -80,3 +80,41 @@ func (s *MemoryStore) SetMany(entries []Entry) (int64, error) {
 
 	return int64(len(normalizedKeys)), nil
 }
+
+// DeleteMany deletes explicit non-empty keys and returns delete/missing counts.
+//
+// Missing keys are not errors. Duplicate keys are processed in input order.
+func (s *MemoryStore) DeleteMany(keys []string) (*DeleteManyResult, error) {
+	release, err := s.guardMutation()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	for i, key := range keys {
+		if key == "" {
+			return nil, fmt.Errorf("%w: keys[%d]", ErrKeyEmpty, i)
+		}
+	}
+
+	result := &DeleteManyResult{}
+
+	for _, key := range keys {
+		shard := s.getShardByKey(key)
+		shard.mu.Lock()
+
+		if _, exists := shard.container[key]; exists {
+			delete(shard.container, key)
+			shard.removeKeyTrackingLocked(key)
+			delete(shard.claims, key)
+
+			result.Deleted++
+		} else {
+			result.Missing++
+		}
+
+		shard.mu.Unlock()
+	}
+
+	return result, nil
+}

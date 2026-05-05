@@ -95,3 +95,22 @@ func TestSerializedStore_GetMany_JSONNullAndMissingBothReturnNil(t *testing.T) {
 	require.NotNil(t, entries[1], "stored JSON null exists as an entry")
 	assert.Nil(t, entries[1].Value, "JSON null deserializes to nil value")
 }
+
+func TestSerializedStore_DeleteMany_DelegatesAndReturnsCounts(t *testing.T) {
+	t.Parallel()
+
+	mem := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	serialized := NewSerializedStore(mem, NewJSONSerializer())
+
+	_, err := serialized.SetMany([]Entry{
+		{Key: "user:1", Value: map[string]any{"name": "Alice"}},
+		{Key: "user:2", Value: map[string]any{"name": "Bob"}},
+	})
+	require.NoError(t, err)
+
+	result, err := serialized.DeleteMany([]string{"user:1", "missing", "user:2"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.EqualValues(t, 2, result.Deleted)
+	assert.EqualValues(t, 1, result.Missing)
+}

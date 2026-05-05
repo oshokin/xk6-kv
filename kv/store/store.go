@@ -106,6 +106,12 @@ type (
 		// It is not an error to delete a non-existent key (the operation is a no-op).
 		Delete(key string) error
 
+		// DeleteMany removes explicit keys and returns deletion statistics.
+		//
+		// Missing keys are not errors and are counted in the result.
+		// Implementations should process duplicate keys in input order.
+		DeleteMany(keys []string) (*DeleteManyResult, error)
+
 		// Exists reports whether key is present in the store.
 		Exists(key string) (bool, error)
 
@@ -250,6 +256,15 @@ type (
 		// Value holds the stored value in the implementation's native representation
 		// (commonly a []byte produced/consumed by a higher-level serializer).
 		Value any `js:"value"`
+	}
+
+	// DeleteManyResult reports the outcome of DeleteMany().
+	// Fields are tagged for JavaScript camelCase convention when exposed via Sobek.
+	DeleteManyResult struct {
+		// Deleted is the number of requested keys that existed and were deleted.
+		Deleted int64 `js:"deleted"`
+		// Missing is the number of requested keys that did not exist at deletion time.
+		Missing int64 `js:"missing"`
 	}
 
 	// ScanPage represents a single page of results from Scan().

@@ -257,6 +257,7 @@ All methods return Promises except `close()`.
   > `getMany()` backend note: disk reads run inside one bbolt read transaction; memory reads use per-shard locks and do not provide cross-key snapshot isolation under concurrent writes.
 - **`set(key: string, value: any): Promise<any>`** - Sets a key-value pair. Empty-string keys are rejected.
 - **`setMany(entries: Record<string, any>): Promise<{ written: number }>`** - Writes an object map in one logical batch. Keys must be non-empty strings. Validates the input shape and serializes all values before writing; rejects with `err.errors` and writes nothing if any entry fails. `setMany()` provides all-or-nothing validation/serialization semantics, but is not intended to provide cross-key snapshot isolation for concurrent readers on the memory backend.
+- **`deleteMany(keys: string[]): Promise<{ deleted: number, missing: number }>`** - Deletes an explicit list of non-empty keys. Missing keys are not errors and are counted in `missing`; duplicate keys are processed in input order. Rejects invalid input before deleting anything.
 - **`delete(key: string): Promise<boolean>`** - Removes a key-value pair (always resolves to `true`).
 - **`exists(key: string): Promise<boolean>`** - Checks if a key exists.
 - **`clear(): Promise<boolean>`** - Removes all entries (always resolves to `true`).  
@@ -270,6 +271,13 @@ const items = await kv.getMany(["user:1", "user:missing", "user:null"]);
 // items[0] -> { key: "user:1", exists: true,  value: ... }
 // items[1] -> { key: "user:missing", exists: false, value: null }
 // items[2] -> { key: "user:null", exists: true, value: null }
+```
+
+`deleteMany()` example:
+
+```javascript
+const result = await kv.deleteMany(["user:1", "user:2", "user:missing"]);
+// result -> { deleted: 2, missing: 1 }
 ```
 
 #### Atomic Operations

@@ -29,6 +29,7 @@ const (
 	opGetMany                  = "get_many"
 	opSet                      = "set"
 	opSetMany                  = "set_many"
+	opDeleteMany               = "delete_many"
 	opDelete                   = "delete"
 	opExists                   = "exists"
 	opClear                    = "clear"
