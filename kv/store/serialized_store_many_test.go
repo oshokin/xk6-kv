@@ -114,3 +114,16 @@ func TestSerializedStore_DeleteMany_DelegatesAndReturnsCounts(t *testing.T) {
 	assert.EqualValues(t, 2, result.Deleted)
 	assert.EqualValues(t, 1, result.Missing)
 }
+
+func TestSerializedStore_ListKeys_DelegatesWithoutDeserializingValues(t *testing.T) {
+	t.Parallel()
+
+	mem := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	serialized := NewSerializedStore(mem, NewJSONSerializer())
+
+	require.NoError(t, mem.Set("user:bad-json", []byte("{")))
+
+	keys, err := serialized.ListKeys("user:", 0)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"user:bad-json"}, keys)
+}

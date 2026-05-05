@@ -45,6 +45,7 @@ const (
 	opDeleteIfExists           = "delete_if_exists"
 	opScan                     = "scan"
 	opList                     = "list"
+	opListKeys                 = "list_keys"
 	opCount                    = "count"
 	opRandomKey                = "random_key"
 	opPopRandom                = "pop_random"

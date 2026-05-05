@@ -98,6 +98,88 @@ func (s *MemoryStore) Count(prefix string) (int64, error) {
 	return total, nil
 }
 
+// ListKeys returns keys matching prefix in ascending lexicographic order.
+func (s *MemoryStore) ListKeys(prefix string, limit int64) ([]string, error) {
+	var keys []string
+
+	if s.trackKeys {
+		keys = s.listKeysWithTracking(prefix)
+	} else {
+		keys = s.listKeysWithoutTracking(prefix)
+	}
+
+	sort.Strings(keys)
+
+	if limit > 0 && int64(len(keys)) > limit {
+		keys = keys[:limit]
+	}
+
+	if keys == nil {
+		return []string{}, nil
+	}
+
+	return keys, nil
+}
+
+func (s *MemoryStore) listKeysWithTracking(prefix string) []string {
+	keys := make([]string, 0)
+
+	for _, shard := range s.shards {
+		shard.mu.RLock()
+
+		if shard.ost == nil || shard.ost.Len() == 0 {
+			shard.mu.RUnlock()
+
+			continue
+		}
+
+		left, right := shard.rangeBounds(prefix)
+		if left >= right {
+			shard.mu.RUnlock()
+
+			continue
+		}
+
+		for i := left; i < right; i++ {
+			key, ok := shard.ost.Kth(i)
+			if !ok {
+				continue
+			}
+
+			// Defensive check: do not return stale-positive keys if index and map diverged.
+			if _, exists := shard.container[key]; !exists {
+				continue
+			}
+
+			keys = append(keys, key)
+		}
+
+		shard.mu.RUnlock()
+	}
+
+	return keys
+}
+
+func (s *MemoryStore) listKeysWithoutTracking(prefix string) []string {
+	keys := make([]string, 0)
+
+	for _, shard := range s.shards {
+		shard.mu.RLock()
+
+		for key := range shard.container {
+			if prefix != "" && !strings.HasPrefix(key, prefix) {
+				continue
+			}
+
+			keys = append(keys, key)
+		}
+
+		shard.mu.RUnlock()
+	}
+
+	return keys
+}
+
 // scanWithoutTracking streams entries via per-shard iterators without global read locks.
 func (s *MemoryStore) scanWithoutTracking(prefix, afterKey string, limit int64) (*ScanPage, error) {
 	iteratorHeap := make(shardIteratorHeap, 0, s.shardCount)

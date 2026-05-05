@@ -95,6 +95,34 @@ func (k *KV) List(options sobek.Value) *sobek.Promise {
 	)
 }
 
+// ListKeys returns a Promise that resolves to an array of key strings,
+// ordered lexicographically by key. Options support prefix and limit.
+func (k *KV) ListKeys(options sobek.Value) *sobek.Promise {
+	listOptions, err := importListKeysOptions(k.vu.Runtime(), options)
+	if err != nil {
+		return k.rejectedPromiseObserved(opListKeys, err)
+	}
+
+	return k.runAsyncWithStoreObserved(
+		opListKeys,
+		func(s store.Store) (any, error) {
+			keys, err := s.ListKeys(listOptions.Prefix, listOptions.Limit)
+			if err != nil {
+				return nil, err
+			}
+
+			if keys == nil {
+				return []string{}, nil
+			}
+
+			return keys, nil
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
+}
+
 // Count returns a Promise that resolves to the number of keys matching an optional prefix.
 // Pass null/undefined (or omit options) to count all keys.
 func (k *KV) Count(options sobek.Value) *sobek.Promise {

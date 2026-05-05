@@ -328,6 +328,28 @@ const result = await kv.deleteMany(["user:1", "user:2", "user:missing"]);
   }
   ```
 
+- **`listKeys(options?: ListKeysOptions): Promise<string[]>`** - Lists key names without reading values.
+
+  ```typescript
+  interface ListKeysOptions {
+    prefix?: string  // Optional key prefix filter
+    limit?: number   // Max keys (<= 0 means no limit)
+  }
+  ```
+
+  `listKeys()` is read-only, returns keys in ascending lexicographic order, and does not deserialize values.
+  Useful flow before destructive calls:
+
+  ```javascript
+  const keys = await kv.listKeys({ prefix: "tmp:", limit: 1000 });
+  await kv.deleteMany(keys);
+  ```
+
+  Backend note:
+  - disk backend uses in-memory key index when `trackKeys: true`, otherwise bbolt cursor scan;
+  - memory backend collects matching keys from shards, sorts globally, then applies `limit`;
+  - `listKeys()` is not cursor-paginated; use `scan()` for cursor-based pagination over entries.
+
 - **`count(options?: CountOptions): Promise<number>`** - Returns number of keys matching prefix.  
   `count()` (or omitted options) is equivalent to `size()`.
 

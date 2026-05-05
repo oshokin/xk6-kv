@@ -39,6 +39,30 @@ func (s *DiskStore) Scan(prefix, afterKey string, limit int64) (*ScanPage, error
 	return page, nil
 }
 
+// ListKeys returns matching keys ordered lexicographically.
+func (s *DiskStore) ListKeys(prefix string, limit int64) ([]string, error) {
+	release, err := s.beginOperation()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
+	}
+	defer release()
+
+	if s.trackKeys {
+		return s.listKeysFromIndex(prefix, limit), nil
+	}
+
+	keys, err := s.listKeysByCursor(prefix, limit)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreScanFailed, err)
+	}
+
+	if keys == nil {
+		return []string{}, nil
+	}
+
+	return keys, nil
+}
+
 // Count returns the number of keys that match prefix.
 // Count("") is equivalent to Size().
 func (s *DiskStore) Count(prefix string) (int64, error) {
@@ -74,6 +98,98 @@ func (s *DiskStore) Count(prefix string) (int64, error) {
 	}
 
 	return total, nil
+}
+
+func (s *DiskStore) listKeysFromIndex(prefix string, limit int64) []string {
+	s.keysLock.RLock()
+	defer s.keysLock.RUnlock()
+
+	if s.ost == nil || s.ost.Len() == 0 {
+		return []string{}
+	}
+
+	keys := make([]string, 0)
+
+	if prefix == "" {
+		for i := 0; i < s.ost.Len(); i++ {
+			if limit > 0 && int64(len(keys)) >= limit {
+				break
+			}
+
+			key, ok := s.ost.Kth(i)
+			if !ok {
+				continue
+			}
+
+			keys = append(keys, key)
+		}
+
+		return keys
+	}
+
+	left, right := s.ost.RangeBounds(prefix)
+	if left >= right {
+		return []string{}
+	}
+
+	for i := left; i < right; i++ {
+		if limit > 0 && int64(len(keys)) >= limit {
+			break
+		}
+
+		key, ok := s.ost.Kth(i)
+		if !ok {
+			continue
+		}
+
+		keys = append(keys, key)
+	}
+
+	return keys
+}
+
+func (s *DiskStore) listKeysByCursor(prefix string, limit int64) ([]string, error) {
+	keys := make([]string, 0)
+
+	err := s.handle.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(s.bucket)
+		if bucket == nil {
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
+		}
+
+		cursor := bucket.Cursor()
+		prefixBytes := []byte(prefix)
+
+		var key []byte
+		if prefix == "" {
+			key, _ = cursor.First()
+		} else {
+			key, _ = cursor.Seek(prefixBytes)
+		}
+
+		for ; key != nil; key, _ = cursor.Next() {
+			if prefix != "" && !bytes.HasPrefix(key, prefixBytes) {
+				break
+			}
+
+			keys = append(keys, string(key))
+
+			if limit > 0 && int64(len(keys)) >= limit {
+				break
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if keys == nil {
+		return []string{}, nil
+	}
+
+	return keys, nil
 }
 
 // fillDiskScanPage populates page with cursor results that match prefix/afterKey/limit constraints.

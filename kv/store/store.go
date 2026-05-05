@@ -163,6 +163,15 @@ type (
 		// Implementations SHOULD return entries ordered by key in ascending lexicographic order.
 		List(prefix string, limit int64) ([]Entry, error)
 
+		// ListKeys returns keys whose names start with prefix.
+		//
+		// If limit > 0, at most limit keys are returned.
+		// If limit <= 0, all matching keys are returned.
+		// Implementations SHOULD return keys ordered by ascending lexicographic order.
+		//
+		// ListKeys is key-only and MUST NOT load, clone, serialize, or deserialize values.
+		ListKeys(prefix string, limit int64) ([]string, error)
+
 		// RandomKey returns a random key from the store. If prefix is non-empty,
 		// the random selection is restricted to keys that start with prefix.
 		//

@@ -51,6 +51,15 @@ type (
 		limitSet bool
 	}
 
+	// listKeysOptions describes filters for listKeys() operations.
+	listKeysOptions struct {
+		// Prefix selects only keys that start with the given string.
+		Prefix string `js:"prefix"`
+
+		// Limit is the maximum number of keys to return; <= 0 means "no limit".
+		Limit int64 `js:"limit"`
+	}
+
 	// randomKeyOptions holds the optional prefix filter for randomKey().
 	randomKeyOptions struct {
 		// Prefix restricts random selection to keys beginning with this string.
@@ -157,6 +166,43 @@ func importListOptions(rt *sobek.Runtime, options sobek.Value) (listOptions, err
 	}
 
 	return listOptions, nil
+}
+
+// importListKeysOptions converts a Sobek value into listKeysOptions, accepting
+// null/undefined and partial objects.
+func importListKeysOptions(rt *sobek.Runtime, options sobek.Value) (listKeysOptions, error) {
+	parsedOptions := listKeysOptions{}
+
+	err := ensureOptionalObjectOptions("listKeys", options)
+	if err != nil {
+		return parsedOptions, err
+	}
+
+	if common.IsNullish(options) {
+		return parsedOptions, nil
+	}
+
+	optionsObj := options.ToObject(rt)
+
+	prefix, prefixSet, err := parseOptionalStringOption("listKeys", "prefix", optionsObj.Get("prefix"))
+	if err != nil {
+		return parsedOptions, err
+	}
+
+	if prefixSet {
+		parsedOptions.Prefix = prefix
+	}
+
+	limit, limitSet, err := parseOptionalInt64Option("listKeys", "limit", optionsObj.Get("limit"))
+	if err != nil {
+		return parsedOptions, err
+	}
+
+	if limitSet {
+		parsedOptions.Limit = limit
+	}
+
+	return parsedOptions, nil
 }
 
 // importRandomKeyOptions converts a Sobek value into RandomKeyOptions.

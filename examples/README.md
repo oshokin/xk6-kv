@@ -50,6 +50,12 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/delete-many.js
    ```
 
+   For key-only listing without loading values, try:
+
+   ```bash
+   k6 run examples/list-keys.js
+   ```
+
    For operation metrics in a realistic worker queue flow, try:
 
    ```bash
@@ -93,6 +99,9 @@ Stored JSON `null` values are returned as `{ exists: true, value: null }`.
 Input errors are reported as `InvalidOptionsError`.
 Missing keys are not errors and are counted in `{ deleted, missing }`.
 
+`listKeys()` accepts an optional object (`{ prefix?, limit? }`) and returns sorted key names.
+Input errors are reported as `InvalidOptionsError`.
+
 Examples:
 
 - `kv.getMany(null)` -> `InvalidOptionsError`
@@ -102,6 +111,9 @@ Examples:
 - `kv.deleteMany({})` -> `InvalidOptionsError`
 - `kv.deleteMany(["ok", 123])` -> `InvalidOptionsError`
 - `kv.deleteMany([""])` -> `InvalidOptionsError`
+- `kv.listKeys([])` -> `InvalidOptionsError`
+- `kv.listKeys({ prefix: 123 })` -> `InvalidOptionsError`
+- `kv.listKeys({ limit: 1.5 })` -> `InvalidOptionsError`
 
 ### Understanding error classification
 

@@ -509,3 +509,133 @@ func TestDiskStore_Count_MutationParity(t *testing.T) {
 		})
 	}
 }
+
+func TestDiskStore_ListKeys_EmptyStore(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+
+			keys, err := store.ListKeys("", 0)
+			require.NoError(t, err)
+			assert.Empty(t, keys)
+		})
+	}
+}
+
+func TestDiskStore_ListKeys_AllKeysOrdered(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			_, err := store.SetMany([]Entry{
+				{Key: "user:2", Value: []byte("two")},
+				{Key: "order:1", Value: []byte("order")},
+				{Key: "user:1", Value: []byte("one")},
+			})
+			require.NoError(t, err)
+
+			keys, err := store.ListKeys("", 0)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"order:1", "user:1", "user:2"}, keys)
+		})
+	}
+}
+
+func TestDiskStore_ListKeys_Prefix(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			_, err := store.SetMany([]Entry{
+				{Key: "user:2", Value: []byte("two")},
+				{Key: "order:1", Value: []byte("order")},
+				{Key: "user:1", Value: []byte("one")},
+			})
+			require.NoError(t, err)
+
+			keys, err := store.ListKeys("user:", 0)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"user:1", "user:2"}, keys)
+		})
+	}
+}
+
+func TestDiskStore_ListKeys_Limit(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			_, err := store.SetMany([]Entry{
+				{Key: "user:3", Value: []byte("three")},
+				{Key: "user:1", Value: []byte("one")},
+				{Key: "user:2", Value: []byte("two")},
+			})
+			require.NoError(t, err)
+
+			keys, err := store.ListKeys("user:", 2)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"user:1", "user:2"}, keys)
+		})
+	}
+}
+
+func TestDiskStore_ListKeys_AfterDeleteMany(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			_, err := store.SetMany([]Entry{
+				{Key: "user:1", Value: []byte("one")},
+				{Key: "user:2", Value: []byte("two")},
+			})
+			require.NoError(t, err)
+
+			_, err = store.DeleteMany([]string{"user:1"})
+			require.NoError(t, err)
+
+			keys, err := store.ListKeys("user:", 0)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"user:2"}, keys)
+		})
+	}
+}
+
+func TestDiskStore_ListKeys_AfterRebuildKeyList(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			_, err := store.SetMany([]Entry{
+				{Key: "user:2", Value: []byte("two")},
+				{Key: "user:1", Value: []byte("one")},
+				{Key: "order:1", Value: []byte("order")},
+			})
+			require.NoError(t, err)
+
+			require.NoError(t, store.RebuildKeyList())
+
+			keys, err := store.ListKeys("user:", 0)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"user:1", "user:2"}, keys)
+		})
+	}
+}

@@ -188,6 +188,23 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Options for listing key names without loading values.
+   */
+  export interface ListKeysOptions {
+    /**
+     * Optional prefix filter.
+     * Empty or omitted prefix means all user keys.
+     */
+    prefix?: string;
+
+    /**
+     * Maximum number of keys to return.
+     * If omitted or <= 0, all matching keys are returned.
+     */
+    limit?: number;
+  }
+
+  /**
    * Options for scanning entries with cursor-based pagination.
    */
   export interface ScanOptions {
@@ -1038,6 +1055,14 @@ declare module 'k6/x/kv' {
      * ```
      */
     list(options?: ListOptions): Promise<Entry[]>;
+
+    /**
+     * Lists key names without reading values.
+     *
+     * Keys are returned in ascending lexicographic order.
+     * This method is read-only and does not deserialize values.
+     */
+    listKeys(options?: ListKeysOptions): Promise<string[]>;
 
     /**
      * Returns the number of keys that start with the provided prefix.

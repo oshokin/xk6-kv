@@ -92,6 +92,9 @@ export const options = {
     'checks{api:swap-new}': ['rate>0.999'],
     'checks{api:swap-existing}': ['rate>0.999'],
     'checks{api:list-structure}': ['rate>0.999'],
+    'checks{api:listKeys:returns array}': ['rate==1'],
+    'checks{api:listKeys:matching count}': ['rate==1'],
+    'checks{api:listKeys:lexicographic order}': ['rate==1'],
     'checks{api:list-entry-structure}': ['rate>0.999'],
     'checks{api:list-null-values}': ['rate>0.999'],
     'checks{api:scan-structure}': ['rate>0.999'],
@@ -799,6 +802,25 @@ export default async function apiOutputValidationTest() {
       cadUndefinedDelete.reason === 'deleted' &&
       !Object.prototype.hasOwnProperty.call(cadUndefinedDelete, 'current') &&
       !Object.prototype.hasOwnProperty.call(cadUndefinedDelete, 'existed')
+  });
+
+  await kv.setMany({
+    'api:listKeys:user:1': { value: 1 },
+    'api:listKeys:user:2': { value: 2 },
+    'api:listKeys:order:1': { value: 3 }
+  });
+
+  const listKeysResult = await kv.listKeys({
+    prefix: 'api:listKeys:user:',
+    limit: 10
+  });
+
+  check(listKeysResult, {
+    'api:listKeys:returns array': (result) => Array.isArray(result),
+    'api:listKeys:matching count': (result) => result.length === 2,
+    'api:listKeys:lexicographic order': (result) =>
+      result[0] === 'api:listKeys:user:1' &&
+      result[1] === 'api:listKeys:user:2'
   });
 
   // list(): Validate that results are returned as an array of entry objects.
