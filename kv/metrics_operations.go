@@ -56,6 +56,7 @@ const (
 	opRebuildKeyList           = "rebuild_key_list"
 	opBackup                   = "backup"
 	opRestore                  = "restore"
+	opExportJSONL              = "export_jsonl"
 	opStats                    = "stats"
 	opReportStats              = "report_stats"
 )

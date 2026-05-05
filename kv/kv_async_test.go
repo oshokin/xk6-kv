@@ -2512,6 +2512,292 @@ func TestKVAsync_SetMany_SerializationFailureMetrics(t *testing.T) {
 	assert.False(t, seenEmpty, "setMany should not emit empty-result metrics")
 }
 
+func TestKVAsync_ExportJSONL_ResolvesSummary(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	fileName := filepath.Join(t.TempDir(), "export.jsonl")
+	require.NoError(t, runtime.VU.Runtime().Set("fileName", fileName))
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:1": { name: "Alice" },
+			"user:2": { name: "Bob" },
+			"order:1": { total: 42 },
+		})
+			.then(() => __kv.exportJSONL({ fileName: fileName, prefix: "user:" }))
+			.then((result) => {
+				if (!result || typeof result !== "object") {
+					throw new Error("missing exportJSONL result");
+				}
+				if (result.exported !== 2) {
+					throw new Error("unexpected exported count");
+				}
+				if (result.fileName !== fileName) {
+					throw new Error("unexpected fileName");
+				}
+				if (result.bytesWritten <= 0) {
+					throw new Error("expected bytesWritten > 0");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_ExportJSONL_InvalidShapeRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.exportJSONL([])
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_ExportJSONL_MissingFileNameRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.exportJSONL({ prefix: "user:" })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_ExportJSONL_FractionalLimitRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.exportJSONL({ fileName: "./x.jsonl", limit: 1.5 })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_ExportJSONL_OperationMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	fileName := filepath.Join(t.TempDir(), "export.jsonl")
+	require.NoError(t, runtime.VU.Runtime().Set("fileName", fileName))
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:1": { name: "Alice" },
+			"user:2": { name: "Bob" },
+		})
+			.then(() => __kv.exportJSONL({ fileName: fileName, prefix: "user:" }))
+			.then((result) => {
+				if (!result || result.exported !== 2) {
+					throw new Error("unexpected exportJSONL result");
+				}
+			});
+	`)
+
+	var (
+		seenTotal    bool
+		seenDuration bool
+		seenFailed   bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, hasOp := sample.Tags.Get(tagOp)
+			if !hasOp || op != opExportJSONL {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				assert.InDelta(t, 0.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+}
+
+func TestKVAsync_ExportJSONL_InvalidOptionsMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.exportJSONL([])
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+
+	var (
+		seenTotal      bool
+		seenDuration   bool
+		seenFailed     bool
+		seenErrors     bool
+		seenEmpty      bool
+		seenFailedZero bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, ok := sample.Tags.Get(tagOp)
+			if !ok || op != opExportJSONL {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				if sample.Value == 0 {
+					seenFailedZero = true
+				}
+
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			case metricKVErrorsTotal:
+				errorType, hasErrorType := sample.Tags.Get(tagErrorType)
+				require.True(t, hasErrorType)
+				assert.Equal(t, string(InvalidOptionsError), errorType)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenErrors = true
+			case metricKVEmptyResult:
+				seenEmpty = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+	assert.True(t, seenErrors)
+	assert.False(t, seenEmpty, "exportJSONL should not emit empty-result metrics")
+	assert.False(t, seenFailedZero, "failed exportJSONL should not emit failed=0 samples")
+}
+
 func TestKVAsync_AllOptionsMethods_InvalidOptionsType_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -2535,6 +2821,7 @@ func TestKVAsync_AllOptionsMethods_InvalidOptionsType_RejectsPromise(t *testing.
 			expectInvalidOptions(__kv.scan("bad"), "scan"),
 			expectInvalidOptions(__kv.list("bad"), "list"),
 			expectInvalidOptions(__kv.listKeys("bad"), "listKeys"),
+			expectInvalidOptions(__kv.exportJSONL("bad"), "exportJSONL"),
 			expectInvalidOptions(__kv.deleteByPrefix("bad"), "deleteByPrefix"),
 			expectInvalidOptions(__kv.randomKey("bad"), "randomKey"),
 			expectInvalidOptions(__kv.count("bad"), "count"),
@@ -2573,6 +2860,9 @@ func TestKVAsync_AllOptionsMethods_InvalidOptionFieldType_RejectsPromise(t *test
 			expectInvalidOptions(__kv.list({ limit: "10" }), "list.limit"),
 			expectInvalidOptions(__kv.listKeys({ prefix: true }), "listKeys.prefix"),
 			expectInvalidOptions(__kv.listKeys({ limit: "10" }), "listKeys.limit"),
+			expectInvalidOptions(__kv.exportJSONL({ fileName: 100 }), "exportJSONL.fileName"),
+			expectInvalidOptions(__kv.exportJSONL({ fileName: "./x.jsonl", prefix: true }), "exportJSONL.prefix"),
+			expectInvalidOptions(__kv.exportJSONL({ fileName: "./x.jsonl", limit: "10" }), "exportJSONL.limit"),
 			expectInvalidOptions(__kv.deleteByPrefix({ prefix: true, limit: 1 }), "deleteByPrefix.prefix"),
 			expectInvalidOptions(__kv.deleteByPrefix({ prefix: "tmp:", limit: "10" }), "deleteByPrefix.limit"),
 			expectInvalidOptions(__kv.randomKey({ prefix: 7 }), "randomKey.prefix"),

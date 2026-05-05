@@ -67,7 +67,7 @@ func parseRequiredStringArg(method, arg string, value sobek.Value) (string, erro
 
 // parseRequiredNonEmptyStringArg reads a required non-empty string argument.
 //
-//nolint:unparam // Method and arg are used for error messages.
+//nolint:unparam // method and arg are used for error messages.
 func parseRequiredNonEmptyStringArg(method, arg string, value sobek.Value) (string, error) {
 	parsedValue, err := parseRequiredStringArg(method, arg, value)
 	if err != nil {

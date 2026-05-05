@@ -199,6 +199,14 @@ export default async function () {
   await kv.reportStats();
 
   // Snapshot operations.
+  const exportSummary = await kv.exportJSONL({
+    fileName: '.k6.kv.example.export.jsonl',
+    prefix: 'user:'
+  });
+  console.log(
+    `ExportJSONL entries=${exportSummary.exported}, bytes=${exportSummary.bytesWritten}`
+  );
+
   const backupSummary = await kv.backup({
     fileName: '.k6.kv.example.snapshot',
     allowConcurrentWrites: true

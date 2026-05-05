@@ -25,7 +25,7 @@ type (
 	}
 )
 
-//nolint:gochecknoglobals // Benchmark sinks and shared fixtures must be package-level to avoid dead-code elimination and setup skew.
+//nolint:gochecknoglobals // benchmark sinks and shared fixtures must be package-level to avoid dead-code elimination and setup skew.
 var (
 	benchSinkEntriesValue []benchSetManyEntry
 	benchSinkEntriesPtr   []*benchSetManyEntry

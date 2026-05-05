@@ -32,7 +32,7 @@ const (
 	diskClaimsBucketName = "__xk6_kv_claims"
 )
 
-//nolint:gochecknoglobals // Immutable internal bbolt key bytes reused across claim operations.
+//nolint:gochecknoglobals // immutable internal bbolt key bytes reused across claim operations.
 var (
 	// diskClaimsBucket is the internal bbolt bucket key for claims.
 	diskClaimsBucket = []byte(diskClaimsBucketName)
@@ -45,7 +45,7 @@ var (
 // PopRandom atomically selects and removes a random free matching entry.
 // If there are no free matching entries, it returns nil, nil.
 //
-//nolint:gocognit,funlen // Transactional random-retry plus fallback scan keeps lease checks explicit and correct.
+//nolint:gocognit,funlen // transactional random-retry plus fallback scan keeps lease checks explicit and correct.
 func (s *DiskStore) PopRandom(prefix string) (*Entry, error) {
 	release, err := s.beginOperation()
 	if err != nil {

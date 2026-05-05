@@ -1,4 +1,5 @@
 import { check } from 'k6';
+import file from 'k6/x/file';
 import { getSnapshotPath, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
@@ -33,6 +34,9 @@ const TEST_NAME = 'api-output-validation';
 
 // Snapshot file path for backup/restore validation.
 const SNAPSHOT_PATH = getSnapshotPath(TEST_NAME);
+
+// JSONL file path for exportJSONL validation.
+const EXPORT_JSONL_PATH = './tmp/api-output-validation-export.jsonl';
 
 // kv is the shared store client used throughout the scenario.
 const kv = createKv(TEST_NAME);
@@ -100,6 +104,9 @@ export const options = {
     'checks{api:deleteByPrefix:first reports not done}': ['rate==1'],
     'checks{api:deleteByPrefix:second deletes remaining}': ['rate==1'],
     'checks{api:deleteByPrefix:second reports done}': ['rate==1'],
+    'checks{api:exportJSONL:returns object}': ['rate==1'],
+    'checks{api:exportJSONL:exported count}': ['rate==1'],
+    'checks{api:exportJSONL:wrote bytes}': ['rate==1'],
     'checks{api:list-entry-structure}': ['rate>0.999'],
     'checks{api:list-null-values}': ['rate>0.999'],
     'checks{api:scan-structure}': ['rate>0.999'],
@@ -164,8 +171,20 @@ export const options = {
 // setup initializes the store with test data.
 export const setup = createSetup(kv);
 
-// teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+// baseTeardown is the base teardown function that 
+// closes the store and removes the test-specific database file.
+const baseTeardown = createTeardown(kv, TEST_NAME);
+
+// teardown closes stores and removes generated export artifacts.
+export async function teardown() {
+  await baseTeardown();
+
+  try {
+    file.deleteFile(EXPORT_JSONL_PATH);
+  } catch (err) {
+    // Ignore cleanup errors if the file doesn't exist or is already deleted.
+  }
+}
 
 // apiOutputValidationTest validates that all API outputs use camelCase field names
 // and that Go-to-JavaScript marshalling preserves all value types correctly.
@@ -859,6 +878,26 @@ export default async function apiOutputValidationTest() {
       result.deleted === 1,
     'api:deleteByPrefix:second reports done': (result) =>
       result.done === true
+  });
+
+  await kv.setMany({
+    'api:exportJSONL:user:1': { value: 1 },
+    'api:exportJSONL:user:2': { value: 2 },
+    'api:exportJSONL:order:1': { value: 3 }
+  });
+
+  const exportJSONLResult = await kv.exportJSONL({
+    fileName: EXPORT_JSONL_PATH,
+    prefix: 'api:exportJSONL:user:'
+  });
+
+  check(exportJSONLResult, {
+    'api:exportJSONL:returns object': (result) =>
+      result !== null && typeof result === 'object',
+    'api:exportJSONL:exported count': (result) =>
+      result.exported === 2,
+    'api:exportJSONL:wrote bytes': (result) =>
+      result.bytesWritten > 0
   });
 
   // list(): Validate that results are returned as an array of entry objects.

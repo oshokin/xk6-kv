@@ -87,7 +87,8 @@ func (s *MemoryStore) ClaimRandom(opts *ClaimOptions) (*EntryClaim, error) {
 		}
 
 		if key == "" {
-			return nil, nil //nolint:nilnil // No free key is a normal state, not a technical failure.
+			//nolint:nilnil // no free key is a normal state, not a technical failure.
+			return nil, nil
 		}
 
 		claim, claimed := s.tryClaimMemoryKey(key, normalized, now)

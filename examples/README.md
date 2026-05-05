@@ -62,6 +62,12 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/list-keys.js
    ```
 
+   For portable key/value JSONL exports, try:
+
+   ```bash
+   k6 run examples/export-jsonl.js
+   ```
+
    For operation metrics in a realistic worker queue flow, try:
 
    ```bash
@@ -78,6 +84,32 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
 
 > ⚠️ **Snapshot defaults:** When an example uses the memory backend and omits `backup().fileName`, it writes into `.k6.kv`—the same file the disk backend mounts by default. That’s deliberate so you can run `backend: "memory"` for the hot path, dump the dataset in `teardown()`, and later rerun the very same test with `backend: "disk"` without changing paths. If you need a separate artifact (or run disk workloads concurrently), set `fileName` explicitly before running the example.
 > Tip: the `e2e/` directory contains larger, production-style scenarios that stitch multiple APIs together.
+
+### `exportJSONL()`
+
+Use `exportJSONL()` to write portable key/value seed data.
+
+```javascript
+await kv.exportJSONL({
+  fileName: "./exports/users.jsonl",
+  prefix: "user:",
+});
+```
+
+Each line is:
+
+```json
+{"key":"some:key","value":...}
+```
+
+Invalid input rejects with `InvalidOptionsError`.
+
+Examples:
+
+- `kv.exportJSONL(null)` -> `InvalidOptionsError`
+- `kv.exportJSONL({})` -> `InvalidOptionsError`
+- `kv.exportJSONL({ fileName: "" })` -> `InvalidOptionsError`
+- `kv.exportJSONL({ fileName: "./x.jsonl", limit: 1.5 })` -> `InvalidOptionsError`
 
 ## Error Manual
 

@@ -523,6 +523,10 @@ Backend note:
 - **`restore(options?: RestoreOptions): Promise<RestoreSummary>`**  
   Replaces the dataset with a snapshot produced by `backup()`. Optional `maxEntries` / `maxBytes` guards protect against oversized or corrupted inputs.
 
+- **`exportJSONL(options: { fileName: string, prefix?: string, limit?: number }): Promise<{ exported: number, fileName: string, bytesWritten: number }>`**  
+  Exports key/value entries to a JSON Lines file for portable seed data and diff-friendly snapshots. Each line is:
+  `{"key":"...","value":...}`. Values are exported after normal KV deserialization, not as raw backend bytes.
+
 ```typescript
 await kv.backup({
   fileName: "./backups/kv-latest.kv",
@@ -533,6 +537,26 @@ await kv.restore({ fileName: "./backups/kv-latest.kv" });
 ```
 
 > **Disk backend note:** pointing `fileName` at the *currently mounted* bbolt path is treated as a no-op (backup just returns metadata; restore leaves the DB untouched), so when you’re already running `backend: "disk"` you still need a different `fileName`. The “shared `.k6.kv` trick” only applies when you begin on the memory backend and want to seed the disk backend later.
+
+`exportJSONL()` example:
+
+```javascript
+const result = await kv.exportJSONL({
+  fileName: "./exports/users.jsonl",
+  prefix: "user:",
+});
+
+console.log(result.exported);
+console.log(result.bytesWritten);
+```
+
+`exportJSONL()` options:
+
+- `fileName` is required and must be a non-empty string.
+- `prefix` is optional; empty or omitted means all keys.
+- `limit` is optional; if omitted or `<= 0`, all matching entries are exported.
+
+`exportJSONL()` writes a temporary file in the destination directory and renames it into place only after a successful write. This avoids replacing the final file with a partial export if the operation fails.
 
 - **`close(): void`** - Synchronously closes the store. Call once in `teardown()`.
   Do **not** call `close()` from `default()` iterations.

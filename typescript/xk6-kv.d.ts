@@ -326,6 +326,40 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Options for exporting key/value entries to JSON Lines.
+   */
+  export interface ExportJSONLOptions {
+    /**
+     * Required output JSONL file path.
+     */
+    fileName: string;
+
+    /**
+     * Optional key prefix filter.
+     * Empty or omitted prefix means all keys.
+     */
+    prefix?: string;
+
+    /**
+     * Optional maximum number of entries to export.
+     * If omitted or <= 0, all matching entries are exported.
+     */
+    limit?: number;
+  }
+
+  /**
+   * Summary returned by exportJSONL().
+   */
+  export interface ExportJSONLResult {
+    /** Number of entries written to the JSONL file. */
+    exported: number;
+    /** Final output file path. */
+    fileName: string;
+    /** Final file size in bytes. */
+    bytesWritten: number;
+  }
+
+  /**
    * Diagnostic snapshot returned by stats().
    */
   export interface KVStats {
@@ -1233,6 +1267,17 @@ declare module 'k6/x/kv' {
      * @returns Promise that resolves to the number of entries imported.
      */
     restore(options?: RestoreOptions): Promise<RestoreSummary>;
+
+    /**
+     * Exports key/value entries to a JSON Lines file.
+     *
+     * Each line is a JSON object: { "key": string, "value": any }.
+     * Values are exported after normal KV deserialization, not as raw backend bytes.
+     *
+     * @param options - Required export options.
+     * @returns Promise that resolves to export summary metadata.
+     */
+    exportJSONL(options: ExportJSONLOptions): Promise<ExportJSONLResult>;
 
     // ==================== Lifecycle ====================
 
