@@ -50,6 +50,12 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/delete-many.js
    ```
 
+   For bounded destructive prefix deletions, try:
+
+   ```bash
+   k6 run examples/delete-by-prefix.js
+   ```
+
    For key-only listing without loading values, try:
 
    ```bash
@@ -99,6 +105,9 @@ Stored JSON `null` values are returned as `{ exists: true, value: null }`.
 Input errors are reported as `InvalidOptionsError`.
 Missing keys are not errors and are counted in `{ deleted, missing }`.
 
+`deleteByPrefix()` accepts only an object with required `prefix` (non-empty string) and
+required `limit` (positive integer). Input errors are reported as `InvalidOptionsError`.
+
 `listKeys()` accepts an optional object (`{ prefix?, limit? }`) and returns sorted key names.
 Input errors are reported as `InvalidOptionsError`.
 
@@ -111,6 +120,11 @@ Examples:
 - `kv.deleteMany({})` -> `InvalidOptionsError`
 - `kv.deleteMany(["ok", 123])` -> `InvalidOptionsError`
 - `kv.deleteMany([""])` -> `InvalidOptionsError`
+- `kv.deleteByPrefix(null)` -> `InvalidOptionsError`
+- `kv.deleteByPrefix({})` -> `InvalidOptionsError`
+- `kv.deleteByPrefix({ prefix: "", limit: 100 })` -> `InvalidOptionsError`
+- `kv.deleteByPrefix({ prefix: "tmp:", limit: 0 })` -> `InvalidOptionsError`
+- `kv.deleteByPrefix({ prefix: "tmp:", limit: 1.5 })` -> `InvalidOptionsError`
 - `kv.listKeys([])` -> `InvalidOptionsError`
 - `kv.listKeys({ prefix: 123 })` -> `InvalidOptionsError`
 - `kv.listKeys({ limit: 1.5 })` -> `InvalidOptionsError`

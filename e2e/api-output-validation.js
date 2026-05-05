@@ -95,6 +95,11 @@ export const options = {
     'checks{api:listKeys:returns array}': ['rate==1'],
     'checks{api:listKeys:matching count}': ['rate==1'],
     'checks{api:listKeys:lexicographic order}': ['rate==1'],
+    'checks{api:deleteByPrefix:first returns object}': ['rate==1'],
+    'checks{api:deleteByPrefix:first deleted limited count}': ['rate==1'],
+    'checks{api:deleteByPrefix:first reports not done}': ['rate==1'],
+    'checks{api:deleteByPrefix:second deletes remaining}': ['rate==1'],
+    'checks{api:deleteByPrefix:second reports done}': ['rate==1'],
     'checks{api:list-entry-structure}': ['rate>0.999'],
     'checks{api:list-null-values}': ['rate>0.999'],
     'checks{api:scan-structure}': ['rate>0.999'],
@@ -821,6 +826,39 @@ export default async function apiOutputValidationTest() {
     'api:listKeys:lexicographic order': (result) =>
       result[0] === 'api:listKeys:user:1' &&
       result[1] === 'api:listKeys:user:2'
+  });
+
+  await kv.setMany({
+    'api:deleteByPrefix:tmp:1': { value: 1 },
+    'api:deleteByPrefix:tmp:2': { value: 2 },
+    'api:deleteByPrefix:tmp:3': { value: 3 },
+    'api:deleteByPrefix:user:1': { value: 4 }
+  });
+
+  const deleteByPrefixFirst = await kv.deleteByPrefix({
+    prefix: 'api:deleteByPrefix:tmp:',
+    limit: 2
+  });
+
+  check(deleteByPrefixFirst, {
+    'api:deleteByPrefix:first returns object': (result) =>
+      result !== null && typeof result === 'object',
+    'api:deleteByPrefix:first deleted limited count': (result) =>
+      result.deleted === 2,
+    'api:deleteByPrefix:first reports not done': (result) =>
+      result.done === false
+  });
+
+  const deleteByPrefixSecond = await kv.deleteByPrefix({
+    prefix: 'api:deleteByPrefix:tmp:',
+    limit: 2
+  });
+
+  check(deleteByPrefixSecond, {
+    'api:deleteByPrefix:second deletes remaining': (result) =>
+      result.deleted === 1,
+    'api:deleteByPrefix:second reports done': (result) =>
+      result.done === true
   });
 
   // list(): Validate that results are returned as an array of entry objects.

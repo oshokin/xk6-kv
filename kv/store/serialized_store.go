@@ -233,6 +233,11 @@ func (s *SerializedStore) DeleteMany(keys []string) (*DeleteManyResult, error) {
 	return s.store.DeleteMany(keys)
 }
 
+// DeleteByPrefix deletes up to limit keys by non-empty prefix.
+func (s *SerializedStore) DeleteByPrefix(prefix string, limit int64) (*DeleteByPrefixResult, error) {
+	return s.store.DeleteByPrefix(prefix, limit)
+}
+
 // Exists returns whether the key is present in the underlying store.
 func (s *SerializedStore) Exists(key string) (bool, error) {
 	return s.store.Exists(key)

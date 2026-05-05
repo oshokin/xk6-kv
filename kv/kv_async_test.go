@@ -832,6 +832,183 @@ func TestKVAsync_ListKeys_FractionalLimitRejectsPromise(t *testing.T) {
 	`)
 }
 
+func TestKVAsync_DeleteByPrefix_DeletesLimitedBatchAndReportsNotDone(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"tmp:1": { value: 1 },
+			"tmp:2": { value: 2 },
+			"tmp:3": { value: 3 },
+			"user:1": { value: 4 },
+		})
+			.then(() => __kv.deleteByPrefix({ prefix: "tmp:", limit: 2 }))
+			.then((result) => {
+				if (!result || result.deleted !== 2 || result.done !== false) {
+					throw new Error("unexpected deleteByPrefix result");
+				}
+				return Promise.all([
+					__kv.listKeys({ prefix: "tmp:" }),
+					__kv.listKeys({ prefix: "user:" }),
+				]);
+			})
+			.then(([tmpKeys, userKeys]) => {
+				if (!Array.isArray(tmpKeys) || tmpKeys.length !== 1) {
+					throw new Error("expected one tmp key after limited delete");
+				}
+				if (JSON.stringify(userKeys) !== JSON.stringify(["user:1"])) {
+					throw new Error("non-target prefix must stay intact");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_DeleteByPrefix_RepeatedCallsReportDone(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"tmp:1": { value: 1 },
+			"tmp:2": { value: 2 },
+			"tmp:3": { value: 3 },
+		})
+			.then(() => __kv.deleteByPrefix({ prefix: "tmp:", limit: 2 }))
+			.then((first) => {
+				if (!first || first.deleted !== 2 || first.done !== false) {
+					throw new Error("unexpected first result");
+				}
+				return __kv.deleteByPrefix({ prefix: "tmp:", limit: 2 });
+			})
+			.then((second) => {
+				if (!second || second.deleted !== 1 || second.done !== true) {
+					throw new Error("unexpected second result");
+				}
+				return __kv.listKeys({ prefix: "tmp:" });
+			})
+			.then((keys) => {
+				if (!Array.isArray(keys) || keys.length !== 0) {
+					throw new Error("tmp keys should be fully removed");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_DeleteByPrefix_InvalidShapeRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.deleteByPrefix([])
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_DeleteByPrefix_EmptyPrefixRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.deleteByPrefix({ prefix: "", limit: 1 })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (!String(err.message).includes("non-empty")) {
+					throw new Error("error message must mention non-empty prefix");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_DeleteByPrefix_MissingLimitRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.deleteByPrefix({ prefix: "tmp:" })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_DeleteByPrefix_InvalidLimitRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.deleteByPrefix({ prefix: "tmp:", limit: 0 })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_DeleteByPrefix_FractionalLimitRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.deleteByPrefix({ prefix: "tmp:", limit: 1.5 })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
 func TestKVAsync_Stats_ResolvesSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -1448,6 +1625,91 @@ func TestKVAsync_DeleteMany_OperationMetrics(t *testing.T) {
 	assert.True(t, seenFailed)
 }
 
+func TestKVAsync_DeleteByPrefix_OperationMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"tmp:1": { value: 1 },
+			"tmp:2": { value: 2 },
+			"tmp:3": { value: 3 },
+		})
+			.then(() => __kv.deleteByPrefix({ prefix: "tmp:", limit: 2 }))
+			.then((result) => {
+				if (!result || result.deleted !== 2 || result.done !== false) {
+					throw new Error("unexpected deleteByPrefix result");
+				}
+			});
+	`)
+
+	var (
+		seenTotal    bool
+		seenDuration bool
+		seenFailed   bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, hasOp := sample.Tags.Get(tagOp)
+			if !hasOp || op != opDeleteByPrefix {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				assert.InDelta(t, 0.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+}
+
 func TestKVAsync_ListKeys_OperationMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -1530,6 +1792,109 @@ func TestKVAsync_ListKeys_OperationMetrics(t *testing.T) {
 	assert.True(t, seenTotal)
 	assert.True(t, seenDuration)
 	assert.True(t, seenFailed)
+}
+
+func TestKVAsync_DeleteByPrefix_InvalidOptionsMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.deleteByPrefix({ prefix: "", limit: 1 })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+
+	var (
+		seenTotal      bool
+		seenDuration   bool
+		seenFailed     bool
+		seenErrors     bool
+		seenEmpty      bool
+		seenFailedZero bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, ok := sample.Tags.Get(tagOp)
+			if !ok || op != opDeleteByPrefix {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				if sample.Value == 0 {
+					seenFailedZero = true
+				}
+
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			case metricKVErrorsTotal:
+				errorType, hasErrorType := sample.Tags.Get(tagErrorType)
+				require.True(t, hasErrorType)
+				assert.Equal(t, string(InvalidOptionsError), errorType)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenErrors = true
+			case metricKVEmptyResult:
+				seenEmpty = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+	assert.True(t, seenErrors)
+	assert.False(t, seenEmpty, "deleteByPrefix should not emit empty-result metrics")
+	assert.False(t, seenFailedZero, "failed deleteByPrefix should not emit failed=0 samples")
 }
 
 func TestKVAsync_ListKeys_InvalidShapeMetrics(t *testing.T) {
@@ -2170,6 +2535,7 @@ func TestKVAsync_AllOptionsMethods_InvalidOptionsType_RejectsPromise(t *testing.
 			expectInvalidOptions(__kv.scan("bad"), "scan"),
 			expectInvalidOptions(__kv.list("bad"), "list"),
 			expectInvalidOptions(__kv.listKeys("bad"), "listKeys"),
+			expectInvalidOptions(__kv.deleteByPrefix("bad"), "deleteByPrefix"),
 			expectInvalidOptions(__kv.randomKey("bad"), "randomKey"),
 			expectInvalidOptions(__kv.count("bad"), "count"),
 			expectInvalidOptions(__kv.backup("bad"), "backup"),
@@ -2207,6 +2573,8 @@ func TestKVAsync_AllOptionsMethods_InvalidOptionFieldType_RejectsPromise(t *test
 			expectInvalidOptions(__kv.list({ limit: "10" }), "list.limit"),
 			expectInvalidOptions(__kv.listKeys({ prefix: true }), "listKeys.prefix"),
 			expectInvalidOptions(__kv.listKeys({ limit: "10" }), "listKeys.limit"),
+			expectInvalidOptions(__kv.deleteByPrefix({ prefix: true, limit: 1 }), "deleteByPrefix.prefix"),
+			expectInvalidOptions(__kv.deleteByPrefix({ prefix: "tmp:", limit: "10" }), "deleteByPrefix.limit"),
 			expectInvalidOptions(__kv.randomKey({ prefix: 7 }), "randomKey.prefix"),
 			expectInvalidOptions(__kv.count({ prefix: 7 }), "count.prefix"),
 			expectInvalidOptions(__kv.backup({ fileName: 100 }), "backup.fileName"),

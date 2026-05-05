@@ -112,6 +112,15 @@ type (
 		// Implementations should process duplicate keys in input order.
 		DeleteMany(keys []string) (*DeleteManyResult, error)
 
+		// DeleteByPrefix deletes up to limit keys whose names start with prefix.
+		//
+		// Prefix must be non-empty.
+		// Limit must be positive.
+		// Implementations must remove claim metadata for physically deleted keys.
+		//
+		// Done is true when no matching key remains after this call.
+		DeleteByPrefix(prefix string, limit int64) (*DeleteByPrefixResult, error)
+
 		// Exists reports whether key is present in the store.
 		Exists(key string) (bool, error)
 
@@ -274,6 +283,15 @@ type (
 		Deleted int64 `js:"deleted"`
 		// Missing is the number of requested keys that did not exist at deletion time.
 		Missing int64 `js:"missing"`
+	}
+
+	// DeleteByPrefixResult describes the result of deleting keys by prefix.
+	// Fields are tagged for JavaScript camelCase convention when exposed via Sobek.
+	DeleteByPrefixResult struct {
+		// Deleted is the number of keys physically deleted by this call.
+		Deleted int64 `js:"deleted"`
+		// Done is true when no matching keys remain after this call.
+		Done bool `js:"done"`
 	}
 
 	// ScanPage represents a single page of results from Scan().

@@ -258,6 +258,7 @@ All methods return Promises except `close()`.
 - **`set(key: string, value: any): Promise<any>`** - Sets a key-value pair. Empty-string keys are rejected.
 - **`setMany(entries: Record<string, any>): Promise<{ written: number }>`** - Writes an object map in one logical batch. Keys must be non-empty strings. Validates the input shape and serializes all values before writing; rejects with `err.errors` and writes nothing if any entry fails. `setMany()` provides all-or-nothing validation/serialization semantics, but is not intended to provide cross-key snapshot isolation for concurrent readers on the memory backend.
 - **`deleteMany(keys: string[]): Promise<{ deleted: number, missing: number }>`** - Deletes an explicit list of non-empty keys. Missing keys are not errors and are counted in `missing`; duplicate keys are processed in input order. Rejects invalid input before deleting anything.
+- **`deleteByPrefix(options: { prefix: string, limit: number }): Promise<{ deleted: number, done: boolean }>`** - Deletes up to `limit` keys matching a non-empty prefix. This operation is destructive and bounded by explicit limit.
 - **`delete(key: string): Promise<boolean>`** - Removes a key-value pair (always resolves to `true`).
 - **`exists(key: string): Promise<boolean>`** - Checks if a key exists.
 - **`clear(): Promise<boolean>`** - Removes all entries (always resolves to `true`).  
@@ -279,6 +280,30 @@ const items = await kv.getMany(["user:1", "user:missing", "user:null"]);
 const result = await kv.deleteMany(["user:1", "user:2", "user:missing"]);
 // result -> { deleted: 2, missing: 1 }
 ```
+
+`deleteByPrefix()` example:
+
+```javascript
+const result = await kv.deleteByPrefix({
+  prefix: "tmp:",
+  limit: 1000,
+});
+// result -> { deleted: <number>, done: <boolean> }
+```
+
+`deleteByPrefix()` details:
+
+- `prefix` is required and must be a non-empty string.
+- `limit` is required and must be a positive integer.
+- `done === true` means no matching keys remain after this call.
+- If `done === false`, repeat the same call until completion.
+- Use `listKeys({ prefix, limit })` first for a read-only preview.
+
+Backend note:
+
+- disk backend deletes inside one bbolt write transaction;
+- memory backend deletes through shard locks and does not provide cross-key visibility transaction under concurrent writes;
+- claim metadata is removed for physically deleted keys.
 
 #### Atomic Operations
 

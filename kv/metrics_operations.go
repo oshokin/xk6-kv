@@ -30,6 +30,7 @@ const (
 	opSet                      = "set"
 	opSetMany                  = "set_many"
 	opDeleteMany               = "delete_many"
+	opDeleteByPrefix           = "delete_by_prefix"
 	opDelete                   = "delete"
 	opExists                   = "exists"
 	opClear                    = "clear"

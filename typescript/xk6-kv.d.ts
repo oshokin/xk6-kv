@@ -205,6 +205,22 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Options for bounded destructive prefix deletion.
+   */
+  export interface DeleteByPrefixOptions {
+    /**
+     * Required non-empty key prefix.
+     */
+    prefix: string;
+
+    /**
+     * Required positive integer.
+     * Bounds the number of keys deleted by one call.
+     */
+    limit: number;
+  }
+
+  /**
    * Options for scanning entries with cursor-based pagination.
    */
   export interface ScanOptions {
@@ -495,6 +511,21 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Result of deleteByPrefix() operation.
+   */
+  export interface DeleteByPrefixResult {
+    /**
+     * Number of keys physically deleted by this call.
+     */
+    deleted: number;
+
+    /**
+     * True when no matching keys remain after this call.
+     */
+    done: boolean;
+  }
+
+  /**
    * Per-key result item returned by getMany().
    */
   export interface GetManyItem<T = any> {
@@ -739,6 +770,19 @@ declare module 'k6/x/kv' {
      * @returns Promise that resolves to { deleted, missing }
      */
     deleteMany(keys: string[]): Promise<DeleteManyResult>;
+
+    /**
+     * Deletes up to `limit` keys whose names start with `prefix`.
+     *
+     * This is a destructive operation. `prefix` must be non-empty and `limit`
+     * must be a positive integer.
+     *
+     * Use listKeys({ prefix, limit }) first when you want a read-only preview.
+     *
+     * @param options - Required bounded prefix-delete options
+     * @returns Promise that resolves to { deleted, done }
+     */
+    deleteByPrefix(options: DeleteByPrefixOptions): Promise<DeleteByPrefixResult>;
 
     /**
      * Removes a key-value pair.
