@@ -279,6 +279,28 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Options for random key batch selection.
+   */
+  export interface RandomKeysOptions {
+    /**
+     * Filter by key prefix. Only keys starting with this string are considered.
+     */
+    prefix?: string;
+
+    /**
+     * Number of keys to return.
+     * Must be a positive integer.
+     */
+    count: number;
+
+    /**
+     * Whether returned keys must be unique.
+     * Defaults to true.
+     */
+    unique?: boolean;
+  }
+
+  /**
    * Options for counting keys.
    */
   export interface CountOptions {
@@ -1278,6 +1300,20 @@ declare module 'k6/x/kv' {
      * ```
      */
     randomKey(options?: RandomKeyOptions): Promise<string>;
+
+    /**
+     * Returns random key names matching an optional prefix.
+     *
+     * This method returns keys only. It does not clone, deserialize, or return values.
+     *
+     * `count` is required and must be a positive integer.
+     *
+     * `unique` defaults to true. When unique is true and fewer matching keys exist
+     * than requested, all available matching keys are returned in random order.
+     *
+     * Use claimRandom() or popRandom() when you need exclusive allocation.
+     */
+    randomKeys(options: RandomKeysOptions): Promise<string[]>;
 
     /**
      * Atomically selects and removes a random matching entry.

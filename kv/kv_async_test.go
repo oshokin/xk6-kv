@@ -933,6 +933,226 @@ func TestKVAsync_ScanKeys_FractionalLimitRejectsPromise(t *testing.T) {
 	`)
 }
 
+func TestKVAsync_RandomKeys_ResolvesKeys(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:2": { name: "Bob" },
+			"order:1": { id: 1 },
+			"user:1": { name: "Alice" },
+		})
+			.then(() => __kv.randomKeys({ prefix: "user:", count: 2 }))
+			.then((keys) => {
+				if (!Array.isArray(keys) || keys.length !== 2) {
+					throw new Error("randomKeys must resolve an array with requested size");
+				}
+
+				const sorted = [...keys].sort();
+				const expected = ["user:1", "user:2"];
+				if (JSON.stringify(sorted) !== JSON.stringify(expected)) {
+					throw new Error("unexpected randomKeys result: " + JSON.stringify(keys));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_RandomKeys_EmptyReturnsEmptyArray(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.randomKeys({ prefix: "missing:", count: 3 })
+			.then((keys) => {
+				if (!Array.isArray(keys) || keys.length !== 0) {
+					throw new Error("expected empty randomKeys result");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_RandomKeys_UniqueNoDuplicates(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:1": "v1",
+			"user:2": "v2",
+			"user:3": "v3",
+		})
+			.then(() => __kv.randomKeys({ prefix: "user:", count: 2, unique: true }))
+			.then((keys) => {
+				if (!Array.isArray(keys) || keys.length !== 2) {
+					throw new Error("unexpected keys length");
+				}
+
+				if (new Set(keys).size !== keys.length) {
+					throw new Error("unique randomKeys must not contain duplicates");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_RandomKeys_CountLargerThanAvailableReturnsAvailable(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:1": "v1",
+			"user:2": "v2",
+		})
+			.then(() => __kv.randomKeys({ prefix: "user:", count: 10, unique: true }))
+			.then((keys) => {
+				if (!Array.isArray(keys) || keys.length !== 2) {
+					throw new Error("expected all available keys");
+				}
+
+				const sorted = [...keys].sort();
+				const expected = ["user:1", "user:2"];
+				if (JSON.stringify(sorted) !== JSON.stringify(expected)) {
+					throw new Error("unexpected randomKeys result");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_RandomKeys_NonUniqueSingleCandidateRepeats(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", "v1")
+			.then(() => __kv.randomKeys({ prefix: "user:", count: 5, unique: false }))
+			.then((keys) => {
+				const expected = ["user:1", "user:1", "user:1", "user:1", "user:1"];
+				if (JSON.stringify(keys) !== JSON.stringify(expected)) {
+					throw new Error("non-unique sampling should repeat single candidate");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_RandomKeys_InvalidShapeRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.randomKeys([])
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_RandomKeys_MissingCountRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.randomKeys({ prefix: "user:" })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_RandomKeys_NonPositiveCountRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		function expectInvalidOptions(promise) {
+			return promise
+				.then(() => {
+					throw new Error("expected rejection");
+				})
+				.catch((err) => {
+					if (!err || err.name !== "InvalidOptionsError") {
+						throw new Error("unexpected error class: " + String(err && err.name));
+					}
+				});
+		}
+
+		Promise.all([
+			expectInvalidOptions(__kv.randomKeys({ count: 0 })),
+			expectInvalidOptions(__kv.randomKeys({ count: -1 })),
+		]);
+	`)
+}
+
+func TestKVAsync_RandomKeys_FractionalCountRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.randomKeys({ count: 1.5 })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+func TestKVAsync_RandomKeys_InvalidUniqueRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.randomKeys({ count: 1, unique: "yes" })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
 func TestKVAsync_DeleteByPrefix_DeletesLimitedBatchAndReportsNotDone(t *testing.T) {
 	t.Parallel()
 
@@ -1977,6 +2197,182 @@ func TestKVAsync_ScanKeys_OperationMetrics(t *testing.T) {
 	assert.True(t, seenTotal)
 	assert.True(t, seenDuration)
 	assert.True(t, seenFailed)
+}
+
+func TestKVAsync_RandomKeys_OperationMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:1": { name: "Alice" },
+			"user:2": { name: "Bob" },
+		})
+			.then(() => __kv.randomKeys({ prefix: "user:", count: 2 }))
+			.then((keys) => {
+				if (!Array.isArray(keys) || keys.length !== 2) {
+					throw new Error("unexpected randomKeys result");
+				}
+			});
+	`)
+
+	var (
+		seenTotal    bool
+		seenDuration bool
+		seenFailed   bool
+		seenEmpty    bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, hasOp := sample.Tags.Get(tagOp)
+			if !hasOp || op != opRandomKeys {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				assert.InDelta(t, 0.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			case metricKVEmptyResult:
+				assert.InDelta(t, 0.0, sample.Value, 1e-9)
+
+				seenEmpty = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+	assert.True(t, seenEmpty, "randomKeys should emit empty-result metric samples")
+}
+
+func TestKVAsync_RandomKeys_EmptyResultMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.randomKeys({ prefix: "missing:", count: 5 })
+			.then((keys) => {
+				if (!Array.isArray(keys) || keys.length !== 0) {
+					throw new Error("expected empty randomKeys result");
+				}
+			});
+	`)
+
+	var (
+		seenTotal    bool
+		seenDuration bool
+		seenFailed   bool
+		seenEmpty    bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, hasOp := sample.Tags.Get(tagOp)
+			if !hasOp || op != opRandomKeys {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				assert.InDelta(t, 0.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			case metricKVEmptyResult:
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenEmpty = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+	assert.True(t, seenEmpty, "empty randomKeys result should emit empty-result metrics")
 }
 
 func TestKVAsync_DeleteByPrefix_InvalidOptionsMetrics(t *testing.T) {
@@ -3617,6 +4013,7 @@ func TestKVAsync_AllOptionsMethods_InvalidOptionsType_RejectsPromise(t *testing.
 			expectInvalidOptions(__kv.scanKeys("bad"), "scanKeys"),
 			expectInvalidOptions(__kv.list("bad"), "list"),
 			expectInvalidOptions(__kv.listKeys("bad"), "listKeys"),
+			expectInvalidOptions(__kv.randomKeys("bad"), "randomKeys"),
 			expectInvalidOptions(__kv.exportJSONL("bad"), "exportJSONL"),
 			expectInvalidOptions(__kv.importJSONL("bad"), "importJSONL"),
 			expectInvalidOptions(__kv.deleteByPrefix("bad"), "deleteByPrefix"),
@@ -3660,6 +4057,9 @@ func TestKVAsync_AllOptionsMethods_InvalidOptionFieldType_RejectsPromise(t *test
 			expectInvalidOptions(__kv.list({ limit: "10" }), "list.limit"),
 			expectInvalidOptions(__kv.listKeys({ prefix: true }), "listKeys.prefix"),
 			expectInvalidOptions(__kv.listKeys({ limit: "10" }), "listKeys.limit"),
+			expectInvalidOptions(__kv.randomKeys({ prefix: 7, count: 1 }), "randomKeys.prefix"),
+			expectInvalidOptions(__kv.randomKeys({ count: "10" }), "randomKeys.count"),
+			expectInvalidOptions(__kv.randomKeys({ count: 1, unique: "yes" }), "randomKeys.unique"),
 			expectInvalidOptions(__kv.exportJSONL({ fileName: 100 }), "exportJSONL.fileName"),
 			expectInvalidOptions(__kv.exportJSONL({ fileName: "./x.jsonl", prefix: true }), "exportJSONL.prefix"),
 			expectInvalidOptions(__kv.exportJSONL({ fileName: "./x.jsonl", limit: "10" }), "exportJSONL.limit"),

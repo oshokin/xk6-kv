@@ -168,3 +168,359 @@ func TestDiskStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, key, "no-match prefix must return empty key")
 }
+
+func TestDiskStore_RandomKeys_EmptyStore_ReturnsEmptySlice(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		name := "trackKeys=false"
+		if trackKeys {
+			name = "trackKeys=true"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+
+			keys, err := store.RandomKeys("user:", 10, true)
+			require.NoError(t, err)
+			assert.Empty(t, keys)
+
+			keys, err = store.RandomKeys("user:", 0, true)
+			require.NoError(t, err)
+			assert.Empty(t, keys)
+		})
+	}
+}
+
+func TestDiskStore_RandomKeys_PrefixFilter(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		name := "trackKeys=false"
+		if trackKeys {
+			name = "trackKeys=true"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			requirePopulateStore(
+				t,
+				store,
+				"user:1", "v1",
+				"user:2", "v2",
+				"order:1", "v3",
+			)
+
+			keys, err := store.RandomKeys("user:", 2, true)
+			require.NoError(t, err)
+			require.Len(t, keys, 2)
+			assert.ElementsMatch(t, []string{"user:1", "user:2"}, keys)
+		})
+	}
+}
+
+func TestDiskStore_RandomKeys_UniqueNoDuplicates(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		name := "trackKeys=false"
+		if trackKeys {
+			name = "trackKeys=true"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			requirePopulateStore(
+				t,
+				store,
+				"user:1", "v1",
+				"user:2", "v2",
+				"user:3", "v3",
+			)
+
+			keys, err := store.RandomKeys("user:", 2, true)
+			require.NoError(t, err)
+			require.Len(t, keys, 2)
+			assert.NotEqual(t, keys[0], keys[1])
+		})
+	}
+}
+
+func TestDiskStore_RandomKeys_UniqueCountLargerThanAvailableReturnsAll(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		name := "trackKeys=false"
+		if trackKeys {
+			name = "trackKeys=true"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			requirePopulateStore(
+				t,
+				store,
+				"user:1", "v1",
+				"user:2", "v2",
+			)
+
+			keys, err := store.RandomKeys("user:", 10, true)
+			require.NoError(t, err)
+			require.Len(t, keys, 2)
+			assert.ElementsMatch(t, []string{"user:1", "user:2"}, keys)
+		})
+	}
+}
+
+func TestDiskStore_RandomKeys_NonUniqueSingleCandidateRepeats(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		name := "trackKeys=false"
+		if trackKeys {
+			name = "trackKeys=true"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			requirePopulateStore(t, store, "user:1", "v1")
+
+			keys, err := store.RandomKeys("user:", 5, false)
+			require.NoError(t, err)
+			require.Len(t, keys, 5)
+			assert.Equal(t, []string{"user:1", "user:1", "user:1", "user:1", "user:1"}, keys)
+		})
+	}
+}
+
+func TestDiskStore_RandomKeys_ResultSubsetOfListKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		name := "trackKeys=false"
+		if trackKeys {
+			name = "trackKeys=true"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			requirePopulateStore(
+				t,
+				store,
+				"user:1", "v1",
+				"user:2", "v2",
+				"user:3", "v3",
+				"user:4", "v4",
+			)
+
+			allKeys, err := store.ListKeys("user:", 0)
+			require.NoError(t, err)
+			require.NotEmpty(t, allKeys)
+
+			allowed := make(map[string]struct{}, len(allKeys))
+			for _, key := range allKeys {
+				allowed[key] = struct{}{}
+			}
+
+			keys, err := store.RandomKeys("user:", 20, false)
+			require.NoError(t, err)
+			require.Len(t, keys, 20)
+
+			for _, key := range keys {
+				_, exists := allowed[key]
+				assert.Truef(t, exists, "unexpected key: %s", key)
+			}
+		})
+	}
+}
+
+func TestDiskStore_RandomKeys_AfterDeleteManyDoesNotReturnDeletedKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		name := "trackKeys=false"
+		if trackKeys {
+			name = "trackKeys=true"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			requirePopulateStore(
+				t,
+				store,
+				"user:keep:1", "v1",
+				"user:keep:2", "v2",
+				"user:remove:1", "v3",
+			)
+
+			_, err := store.DeleteMany([]string{"user:remove:1"})
+			require.NoError(t, err)
+
+			keys, err := store.RandomKeys("user:", 10, true)
+			require.NoError(t, err)
+			assert.NotContains(t, keys, "user:remove:1")
+		})
+	}
+}
+
+func TestDiskStore_RandomKeys_AfterDeleteByPrefixDoesNotReturnDeletedKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		name := "trackKeys=false"
+		if trackKeys {
+			name = "trackKeys=true"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			requirePopulateStore(
+				t,
+				store,
+				"user:keep:1", "v1",
+				"user:keep:2", "v2",
+				"user:remove:1", "v3",
+				"user:remove:2", "v4",
+			)
+
+			_, err := store.DeleteByPrefix("user:remove:", 10)
+			require.NoError(t, err)
+
+			keys, err := store.RandomKeys("user:", 10, true)
+			require.NoError(t, err)
+			assert.NotContains(t, keys, "user:remove:1")
+			assert.NotContains(t, keys, "user:remove:2")
+		})
+	}
+}
+
+func TestShouldFallbackToCursorRandomKeys(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		unique bool
+		count  int64
+		total  int
+		want   bool
+	}{
+		{
+			name:   "non_unique_never_fallbacks",
+			unique: false,
+			count:  1_000,
+			total:  1_000,
+			want:   false,
+		},
+		{
+			name:   "empty_range_does_not_fallback",
+			unique: true,
+			count:  100,
+			total:  0,
+			want:   false,
+		},
+		{
+			name:   "small_range_does_not_fallback",
+			unique: true,
+			count:  100,
+			total:  200,
+			want:   false,
+		},
+		{
+			name:   "small_sample_does_not_fallback",
+			unique: true,
+			count:  10,
+			total:  10_000,
+			want:   false,
+		},
+		{
+			name:   "near_full_unique_fallbacks",
+			unique: true,
+			count:  5_000,
+			total:  10_000,
+			want:   true,
+		},
+		{
+			name:   "full_unique_fallbacks",
+			unique: true,
+			count:  10_000,
+			total:  10_000,
+			want:   true,
+		},
+		{
+			name:   "over_full_unique_fallbacks",
+			unique: true,
+			count:  20_000,
+			total:  10_000,
+			want:   true,
+		},
+	}
+
+	for testIndex := range tests {
+		testCase := tests[testIndex]
+
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := shouldFallbackToCursorRandomKeys(testCase.unique, testCase.count, testCase.total)
+			assert.Equal(t, testCase.want, got)
+		})
+	}
+}
+
+func TestDiskStore_RandomKeys_TrackedNearFullUnique_ReturnsAvailableKeys(t *testing.T) {
+	t.Parallel()
+
+	const (
+		userCount  = 512
+		orderCount = 88
+	)
+
+	store := newTestDiskStore(t, true, "", true)
+
+	entries := make([]testEntry, 0, userCount+orderCount)
+	expectedUserKeys := make([]string, 0, userCount)
+
+	for i := range userCount {
+		key := fmt.Sprintf("user:%04d", i)
+		entries = append(entries, testEntry{key: key, value: "value"})
+		expectedUserKeys = append(expectedUserKeys, key)
+	}
+
+	for i := range orderCount {
+		entries = append(entries, testEntry{
+			key:   fmt.Sprintf("order:%04d", i),
+			value: "value",
+		})
+	}
+
+	requirePopulateStoreEntries(t, store, entries)
+
+	keys, err := store.RandomKeys("user:", userCount, true)
+	require.NoError(t, err)
+	require.Len(t, keys, userCount)
+	assert.ElementsMatch(t, expectedUserKeys, keys)
+
+	seen := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		assert.Truef(t, strings.HasPrefix(key, "user:"), "unexpected key: %s", key)
+		seen[key] = struct{}{}
+	}
+
+	assert.Len(t, seen, len(keys))
+}

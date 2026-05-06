@@ -29,6 +29,149 @@ func (s *DiskStore) RandomKey(prefix string) (string, error) {
 	return s.randomKeyWithoutTracking(prefix)
 }
 
+// RandomKeys returns random key names matching prefix.
+func (s *DiskStore) RandomKeys(prefix string, count int64, unique bool) ([]string, error) {
+	if count <= 0 {
+		return []string{}, nil
+	}
+
+	release, err := s.beginOperation()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
+	if s.trackKeys {
+		keys, usedTracking := s.randomKeysWithTracking(prefix, count, unique)
+		if usedTracking {
+			return keys, nil
+		}
+	}
+
+	return s.randomKeysWithoutTracking(prefix, count, unique)
+}
+
+func (s *DiskStore) randomKeysWithTracking(prefix string, count int64, unique bool) ([]string, bool) {
+	s.keysLock.RLock()
+	defer s.keysLock.RUnlock()
+
+	if s.ost == nil || s.ost.Len() == 0 {
+		return []string{}, true
+	}
+
+	left, right := 0, s.ost.Len()
+	if prefix != "" {
+		left, right = s.ost.RangeBounds(prefix)
+	}
+
+	total := right - left
+	if total <= 0 {
+		return []string{}, true
+	}
+
+	// For near-full unique sampling, linear cursor scan + in-memory sampling
+	// is usually faster than repeated Kth(rank) lookups.
+	if shouldFallbackToCursorRandomKeys(unique, count, total) {
+		return nil, false
+	}
+
+	if unique {
+		return s.randomUniqueKeysFromTrackingRange(left, total, count), true
+	}
+
+	return s.randomKeysWithReplacementFromTrackingRange(left, total, count), true
+}
+
+// shouldFallbackToCursorRandomKeys is intentionally benchmark-driven.
+// For small unique samples (K << M), indexed rank selection via Kth() is faster
+// because it avoids scanning the full matching range.
+// For near-full unique samples (K ~ M), returning most of the range is
+// inherently linear and a cursor scan is usually faster than many Kth() lookups.
+// Tune thresholds only with stable benchmark evidence.
+func shouldFallbackToCursorRandomKeys(unique bool, count int64, total int) bool {
+	if !unique || total <= 0 {
+		return false
+	}
+
+	// For small prefix ranges, keeping everything in the indexed path is simpler
+	// and avoids extra bbolt cursor scans.
+	const minRangeForFallback = 512
+	if total < minRangeForFallback {
+		return false
+	}
+
+	// Near-full unique sample (K ~ M): prefer cursor path.
+	half := int64(total) / 2
+	if int64(total)%2 != 0 {
+		half++
+	}
+
+	return count >= half
+}
+
+func (s *DiskStore) randomUniqueKeysFromTrackingRange(left, total int, count int64) []string {
+	if count >= int64(total) {
+		keys := make([]string, 0, total)
+
+		for i := range total {
+			key, ok := s.ost.Kth(left + i)
+			if ok {
+				keys = append(keys, key)
+			}
+		}
+
+		return shuffleKeys(keys)
+	}
+
+	offsets := sampleUniqueOffsets(total, int(count))
+	keys := make([]string, 0, len(offsets))
+
+	for _, offset := range offsets {
+		key, ok := s.ost.Kth(left + offset)
+		if ok {
+			keys = append(keys, key)
+		}
+	}
+
+	return keys
+}
+
+func (s *DiskStore) randomKeysWithReplacementFromTrackingRange(left, total int, count int64) []string {
+	keys := make([]string, 0, count)
+
+	for range count {
+		//nolint:gosec // math/rand/v2 is enough for non-crypto sampling.
+		offset := rand.IntN(total)
+
+		key, ok := s.ost.Kth(left + offset)
+		if ok {
+			keys = append(keys, key)
+		}
+	}
+
+	return keys
+}
+
+func (s *DiskStore) randomKeysWithoutTracking(prefix string, count int64, unique bool) ([]string, error) {
+	page := &KeyScanPage{
+		Keys: make([]string, 0),
+	}
+
+	err := s.handle.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(s.bucket)
+		if bucket == nil {
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
+		}
+
+		return s.fillDiskScanKeysPage(page, bucket.Cursor(), prefix, "", 0)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreScanFailed, err)
+	}
+
+	return sampleKeys(page.Keys, count, unique), nil
+}
+
 // addKeyIndexLocked inserts key into in-memory indexes (O(1)).
 // Precondition: caller holds keysLock.
 func (s *DiskStore) addKeyIndexLocked(key string) {

@@ -26,6 +26,12 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/pop-random-unique-users.js
    ```
 
+   For batch random key sampling and hydration via `getMany()`, try:
+
+   ```bash
+   k6 run examples/random-keys.js
+   ```
+
    For prefix cardinality checks, try:
 
    ```bash

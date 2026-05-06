@@ -362,6 +362,11 @@ func (s *SerializedStore) RandomKey(prefix string) (string, error) {
 	return s.store.RandomKey(prefix)
 }
 
+// RandomKeys returns random key names from the underlying store.
+func (s *SerializedStore) RandomKeys(prefix string, count int64, unique bool) ([]string, error) {
+	return s.store.RandomKeys(prefix, count, unique)
+}
+
 // PopRandom atomically selects and removes a random matching entry and deserializes its value.
 func (s *SerializedStore) PopRandom(prefix string) (*Entry, error) {
 	entry, err := s.store.PopRandom(prefix)

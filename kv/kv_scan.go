@@ -215,3 +215,21 @@ func (k *KV) RandomKey(options sobek.Value) *sobek.Promise {
 		},
 	)
 }
+
+// RandomKeys returns a Promise that resolves to random key names.
+func (k *KV) RandomKeys(options sobek.Value) *sobek.Promise {
+	randomKeysOptions, err := importRandomKeysOptions(k.vu.Runtime(), options)
+	if err != nil {
+		return k.rejectedPromiseObserved(opRandomKeys, err)
+	}
+
+	return k.runAsyncWithStoreObserved(
+		opRandomKeys,
+		func(s store.Store) (any, error) {
+			return s.RandomKeys(randomKeysOptions.Prefix, randomKeysOptions.Count, randomKeysOptions.Unique)
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
+}

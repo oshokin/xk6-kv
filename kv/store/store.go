@@ -200,6 +200,16 @@ type (
 		// RandomKey returns the empty string "" and a nil error.
 		RandomKey(prefix string) (string, error)
 
+		// RandomKeys returns random key names matching prefix.
+		//
+		// If unique is true, returned keys are unique. If fewer matching keys exist than
+		// requested, all matching keys are returned in random order.
+		//
+		// If unique is false, keys are sampled with replacement and may repeat.
+		//
+		// RandomKeys is key-only and MUST NOT clone, serialize, deserialize, or return values.
+		RandomKeys(prefix string, count int64, unique bool) ([]string, error)
+
 		// PopRandom atomically selects and removes a random free matching entry.
 		// If there are no free matching entries, it returns nil, nil.
 		PopRandom(prefix string) (*Entry, error)

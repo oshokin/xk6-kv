@@ -2,6 +2,7 @@ package store
 
 import (
 	"math/rand/v2"
+	"sort"
 	"strings"
 )
 
@@ -10,6 +11,21 @@ import (
 // Retries handle cases where keys are deleted between counting and selection.
 const randomKeyMaxAttempts = 8
 
+// keyFromShardRangesLinearCutoff selects linear lookup for small shard range sets.
+// For short slices, a tight loop is typically faster than binary search overhead.
+const keyFromShardRangesLinearCutoff = 32
+
+// Keep shard ranges as values ([]shardRandomRange), not pointers ([]*shardRandomRange):
+// ranges are small immutable snapshots built per call, contiguous layout improves
+// cache locality, and this avoids per-range heap allocations and pointer chasing.
+// When a pointer is needed, we take it from the slice element directly.
+type shardRandomRange struct {
+	shard      *memoryShard
+	left       int
+	right      int
+	cumulative int
+}
+
 // RandomKey returns a random key, optionally filtered by prefix.
 func (s *MemoryStore) RandomKey(prefix string) (string, error) {
 	if s.trackKeys {
@@ -17,6 +33,168 @@ func (s *MemoryStore) RandomKey(prefix string) (string, error) {
 	}
 
 	return s.randomKeyScan(prefix), nil
+}
+
+// RandomKeys returns random key names matching prefix.
+func (s *MemoryStore) RandomKeys(prefix string, count int64, unique bool) ([]string, error) {
+	if count <= 0 {
+		return []string{}, nil
+	}
+
+	if s.trackKeys {
+		return s.randomKeysTracked(prefix, count, unique), nil
+	}
+
+	page, err := s.ScanKeys(prefix, "", 0)
+	if err != nil {
+		return nil, err
+	}
+
+	return sampleKeys(page.Keys, count, unique), nil
+}
+
+func (s *MemoryStore) randomKeysTracked(prefix string, count int64, unique bool) []string {
+	s.lockAllShardReaders()
+	defer s.unlockAllShardReaders()
+
+	ranges, total := buildShardRandomRanges(s.shards, prefix)
+	if total == 0 {
+		return []string{}
+	}
+
+	if unique {
+		return randomUniqueKeysFromShardRanges(ranges, total, count)
+	}
+
+	return randomKeysWithReplacementFromShardRanges(ranges, total, count)
+}
+
+// buildShardRandomRanges builds immutable per-call shard snapshots for indexed
+// random sampling and cumulative lookup.
+// Precondition: caller holds read locks for all shards.
+func buildShardRandomRanges(shards []*memoryShard, prefix string) ([]shardRandomRange, int) {
+	var (
+		ranges = make([]shardRandomRange, 0, len(shards))
+		total  int
+	)
+
+	for _, shard := range shards {
+		if shard.ost == nil || shard.ost.Len() == 0 {
+			continue
+		}
+
+		left, right := 0, shard.ost.Len()
+		if prefix != "" {
+			left, right = shard.rangeBounds(prefix)
+		}
+
+		count := right - left
+		if count <= 0 {
+			continue
+		}
+
+		total += count
+
+		ranges = append(ranges, shardRandomRange{
+			shard:      shard,
+			left:       left,
+			right:      right,
+			cumulative: total,
+		})
+	}
+
+	return ranges, total
+}
+
+func randomUniqueKeysFromShardRanges(ranges []shardRandomRange, total int, count int64) []string {
+	if count >= int64(total) {
+		keys := make([]string, 0, total)
+
+		for _, item := range ranges {
+			for i := item.left; i < item.right; i++ {
+				key, ok := item.shard.ost.Kth(i)
+				if ok {
+					keys = append(keys, key)
+				}
+			}
+		}
+
+		return shuffleKeys(keys)
+	}
+
+	offsets := sampleUniqueOffsets(total, int(count))
+	keys := make([]string, 0, len(offsets))
+
+	for _, offset := range offsets {
+		key, ok := keyFromShardRanges(ranges, offset)
+		if ok {
+			keys = append(keys, key)
+		}
+	}
+
+	return keys
+}
+
+func randomKeysWithReplacementFromShardRanges(ranges []shardRandomRange, total int, count int64) []string {
+	keys := make([]string, 0, count)
+
+	for range count {
+		//nolint:gosec // math/rand/v2 is enough for non-crypto sampling.
+		offset := rand.IntN(total)
+
+		key, ok := keyFromShardRanges(ranges, offset)
+		if ok {
+			keys = append(keys, key)
+		}
+	}
+
+	return keys
+}
+
+// keyFromShardRanges maps a global offset in [0,total) into a shard-local key.
+// For small range sets it uses linear scan; for larger sets it uses cumulative
+// counts with binary search.
+func keyFromShardRanges(ranges []shardRandomRange, globalOffset int) (string, bool) {
+	if globalOffset < 0 || len(ranges) == 0 {
+		return "", false
+	}
+
+	if len(ranges) <= keyFromShardRangesLinearCutoff {
+		remaining := globalOffset
+
+		for rangeIndex := range ranges {
+			selectedRange := &ranges[rangeIndex]
+
+			rangeWidth := selectedRange.right - selectedRange.left
+			if remaining >= rangeWidth {
+				remaining -= rangeWidth
+				continue
+			}
+
+			return selectedRange.shard.ost.Kth(selectedRange.left + remaining)
+		}
+
+		return "", false
+	}
+
+	// Use cumulative counts to map a global offset to a shard in O(log S),
+	// where S is the number of matching shards.
+	rangeIndex := sort.Search(len(ranges), func(index int) bool {
+		return globalOffset < ranges[index].cumulative
+	})
+	if rangeIndex >= len(ranges) {
+		return "", false
+	}
+
+	var previousCumulative int
+	if rangeIndex > 0 {
+		previousCumulative = ranges[rangeIndex-1].cumulative
+	}
+
+	localOffset := globalOffset - previousCumulative
+	selectedRange := &ranges[rangeIndex]
+
+	return selectedRange.shard.ost.Kth(selectedRange.left + localOffset)
 }
 
 // randomKeyTracked returns a random key from the tracked shard.

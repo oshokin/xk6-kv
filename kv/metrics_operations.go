@@ -50,6 +50,7 @@ const (
 	opListKeys                 = "list_keys"
 	opCount                    = "count"
 	opRandomKey                = "random_key"
+	opRandomKeys               = "random_keys"
 	opPopRandom                = "pop_random"
 	opClaimRandom              = "claim_random"
 	opReleaseClaim             = "release_claim"
@@ -222,7 +223,7 @@ func (s kvOperationSample) shouldEmitEmptyResult() bool {
 	}
 
 	switch s.operation {
-	case opRandomKey, opPopRandom, opClaimRandom:
+	case opRandomKey, opRandomKeys, opPopRandom, opClaimRandom:
 		return true
 	default:
 		return false
@@ -234,6 +235,9 @@ func isEmptyAllocationResult(op string, result any) bool {
 	case opRandomKey:
 		key, ok := result.(string)
 		return ok && key == ""
+	case opRandomKeys:
+		keys, ok := result.([]string)
+		return ok && len(keys) == 0
 	case opPopRandom, opClaimRandom:
 		return result == nil
 	default:

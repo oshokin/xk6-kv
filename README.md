@@ -7,7 +7,7 @@
 > This project is a fork of [oleiade/xk6-kv](https://github.com/oleiade/xk6-kv), extended with **additional atomic primitives** and **random-key utilities**:
 >
 > - Atomic operations: `incrementBy`, `getOrSet`, `swap`, `compareAndSwap`, `deleteIfExists`, `compareAndDelete`.
-> - Random keys: `randomKey()` with **prefix-aware selection** and optional O(1) performance.
+> - Random keys: `randomKey()` plus batch `randomKeys()` for key-only sampling workflows.
 > - Optional key tracking for **O(1) random sampling** (disk & memory backends).
 > - Disk backend path overrides for custom artifact persistence.
 >
@@ -434,6 +434,30 @@ Backend note:
 
   `randomKey()` only returns a key string and does not create/observe leases.
 
+- **`randomKeys(options: RandomKeysOptions): Promise<string[]>`** - Returns random key names matching an optional prefix.
+
+  ```typescript
+  interface RandomKeysOptions {
+    prefix?: string  // Optional prefix filter
+    count: number    // Required positive integer
+    unique?: boolean // Defaults to true
+  }
+  ```
+
+  ```javascript
+  const keys = await kv.randomKeys({
+    prefix: "user:",
+    count: 100,
+    unique: true,
+  });
+
+  const users = await kv.getMany(keys);
+  ```
+
+  `randomKeys()` returns keys only. It does not clone, deserialize, or return values.
+  When `unique` is `true` and fewer matching keys exist than requested, all available matching keys are returned in random order.
+  Use `claimRandom()` or `popRandom()` when you need exclusive allocation.
+
 - **`popRandom(options?: { prefix?: string }): Promise<{ key: string, value: any } | null>`** - Atomically picks and removes one random matching entry. Resolves to `null` when no match exists.
 
 - **`claimRandom(options?: { prefix?: string, owner?: string, ttl?: number }): Promise<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } } | null>`** - Atomically leases one random matching entry. Live claims are excluded from later `claimRandom()` and `popRandom()` calls until released/completed or expired. If `ttl` is omitted, the default lease is **30000ms (30 seconds)**.
@@ -514,7 +538,7 @@ Backend note:
   - `xk6_kv_operation_duration` (Trend in milliseconds, tags: `op`, `backend`, `status`, `track_keys`, `serialization`)
   - `xk6_kv_operation_failed` (Rate, tags: `op`, `backend`, `track_keys`, `serialization`)
   - `xk6_kv_errors_total` (Counter, tags: `op`, `backend`, `error_type`, `track_keys`, `serialization`)
-  - `xk6_kv_empty_result` (Rate for `random_key`/`pop_random`/`claim_random`, tags: `op`, `backend`, `track_keys`, `serialization`)
+  - `xk6_kv_empty_result` (Rate for `random_key`/`random_keys`/`pop_random`/`claim_random`, tags: `op`, `backend`, `track_keys`, `serialization`)
 
   ```javascript
   const kv = openKv({
@@ -639,6 +663,7 @@ The import is not a global transaction: if a later line is invalid, already comm
 - **`trackKeys: true`**: `randomKey()` without prefix -> O(1); with prefix -> O(log n). Achieving those speeds means every key is mirrored in memory across multiple helper structures, so large datasets consume noticeably more RAM and the slices/maps never shrink automatically. Budget for that footprint or rebuild the index periodically.
 - **`trackKeys: false`** (default): `randomKey()` falls back to a two-pass cursor walk in a **single** bbolt read snapshot, so heavy use remains O(n). Enable tracking or redesign workloads that call `randomKey()` frequently to avoid linear-time pauses.
 - **Random key workloads:** Calling `randomKey()` repeatedly with `trackKeys: false` (especially on the disk backend) keeps a read transaction open while it counts and selects keys, which can stall the lone bbolt writer until the call finishes. Turn on `trackKeys` (for O(1)/O(log n) sampling) or throttle/redesign these workloads to avoid head-of-line blocking.
+- **`randomKeys()` behavior:** Uses in-memory key indexes when `trackKeys: true`. For small samples (`count` much smaller than matching keys), it samples by rank without scanning the full prefix range. For near-full unique samples, disk with `trackKeys: true` may fall back to cursor scanning because returning most of the prefix range is inherently linear. With `trackKeys: false`, it collects candidate keys via `scanKeys()` and samples in memory.
 - **`count()` / `count({ prefix })` complexity:**
   - `count()` (same as `size()`):
     - memory backend: O(shards)
@@ -660,6 +685,7 @@ Observability-focused scripts:
 
 - Example operation metrics in a worker queue: [`examples/metrics-operations-worker-queue.js`](./examples/metrics-operations-worker-queue.js)
 - Example `stats()` / `reportStats()` health snapshots: [`examples/metrics-report-stats-health.js`](./examples/metrics-report-stats-health.js)
+- Example batch random key sampling + hydration: [`examples/random-keys.js`](./examples/random-keys.js)
 - E2E lease-worker observability scenario: [`e2e/subscription-renewal-lease-observability.js`](./e2e/subscription-renewal-lease-observability.js)
 - E2E credential pool drain scenario: [`e2e/credential-pool-drain-observability.js`](./e2e/credential-pool-drain-observability.js)
 

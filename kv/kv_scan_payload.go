@@ -97,6 +97,16 @@ type (
 		Prefix string `js:"prefix"`
 	}
 
+	// randomKeysOptions holds filters for randomKeys().
+	randomKeysOptions struct {
+		// Prefix restricts random selection to keys beginning with this string.
+		Prefix string `js:"prefix"`
+		// Count controls how many keys should be returned.
+		Count int64 `js:"count"`
+		// Unique controls whether returned keys must be distinct.
+		Unique bool `js:"unique"`
+	}
+
 	// countOptions holds the optional prefix filter for count().
 	countOptions struct {
 		// Prefix restricts counting to keys beginning with this string.
@@ -300,6 +310,68 @@ func importRandomKeyOptions(rt *sobek.Runtime, options sobek.Value) (randomKeyOp
 	}
 
 	return randomKeyOptions, nil
+}
+
+// importRandomKeysOptions converts a Sobek value into randomKeysOptions.
+// randomKeys requires a non-null options object because count is required.
+func importRandomKeysOptions(rt *sobek.Runtime, options sobek.Value) (randomKeysOptions, error) {
+	parsed := randomKeysOptions{
+		Unique: true,
+	}
+
+	if err := ensureOptionalObjectOptions("randomKeys", options); err != nil {
+		return parsed, err
+	}
+
+	if common.IsNullish(options) {
+		return parsed, NewError(
+			InvalidOptionsError,
+			"randomKeys count is required",
+		)
+	}
+
+	optionsObj := options.ToObject(rt)
+
+	prefix, prefixSet, err := parseOptionalStringOption("randomKeys", "prefix", optionsObj.Get("prefix"))
+	if err != nil {
+		return parsed, err
+	}
+
+	if prefixSet {
+		parsed.Prefix = prefix
+	}
+
+	count, countSet, err := parseOptionalInt64Option("randomKeys", "count", optionsObj.Get("count"))
+	if err != nil {
+		return parsed, err
+	}
+
+	if !countSet {
+		return parsed, NewError(
+			InvalidOptionsError,
+			"randomKeys count is required",
+		)
+	}
+
+	if count <= 0 {
+		return parsed, NewError(
+			InvalidOptionsError,
+			"randomKeys count must be a positive integer",
+		)
+	}
+
+	parsed.Count = count
+
+	unique, uniqueSet, err := parseOptionalBoolOption("randomKeys", "unique", optionsObj.Get("unique"))
+	if err != nil {
+		return parsed, err
+	}
+
+	if uniqueSet {
+		parsed.Unique = unique
+	}
+
+	return parsed, nil
 }
 
 // importCountOptions converts a Sobek value into CountOptions.

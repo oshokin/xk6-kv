@@ -24,7 +24,7 @@ import { getSnapshotPath, createKv, createSetup, createTeardown } from './common
 // - Basic operations (get, getMany, set, setMany, delete, exists, clear, size).
 // - Atomic operations (incrementBy, getOrSet, swap, compareAndSwap variants,
 //   setIfAbsent, deleteIfExists, compareAndDelete variants).
-// - Query/coordination operations (list, scan, count, randomKey, popRandom,
+// - Query/coordination operations (list, scan, count, randomKey, randomKeys, popRandom,
 //   claimRandom, releaseClaim, completeClaim).
 // - Observability/lifecycle (rebuildKeyList, stats, reportStats, close).
 // - Snapshot operations (backup, restore).
@@ -126,6 +126,9 @@ export const options = {
     'checks{api:scanKeys-key-types}': ['rate>0.999'],
     'checks{api:scanKeys-pagination}': ['rate>0.999'],
     'checks{api:randomKey-empty}': ['rate>0.999'],
+    'checks{api:randomKeys-is-array}': ['rate>0.999'],
+    'checks{api:randomKeys-key-types}': ['rate>0.999'],
+    'checks{api:randomKeys-empty-is-array}': ['rate>0.999'],
     'checks{api:backup-structure}': ['rate>0.999'],
     'checks{api:backup-fields}': ['rate>0.999'],
     'checks{api:restore-structure}': ['rate>0.999'],
@@ -1075,6 +1078,25 @@ export default async function apiOutputValidationTest() {
   check(randomKey, {
     'api:randomKey-empty': () =>
       typeof randomKey === 'string' && (randomKey === '' || randomKey.startsWith('user:'))
+  });
+
+  // randomKeys(): Validate key-array shape and empty result behavior.
+  const randomKeysResult = await kv.randomKeys({
+    prefix: 'api:listKeys:user:',
+    count: 2
+  });
+  check(randomKeysResult, {
+    'api:randomKeys-is-array': (result) => Array.isArray(result),
+    'api:randomKeys-key-types': (result) => result.every((key) => typeof key === 'string')
+  });
+
+  const emptyRandomKeysResult = await kv.randomKeys({
+    prefix: 'missing:randomKeys:',
+    count: 2
+  });
+  check(emptyRandomKeysResult, {
+    'api:randomKeys-empty-is-array': (result) =>
+      Array.isArray(result) && result.length === 0
   });
 
   // scan(): Validate pagination structure and type preservation.
