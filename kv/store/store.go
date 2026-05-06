@@ -166,6 +166,17 @@ type (
 		// Returns a ScanPage with Entries and NextKey (empty when scan is complete).
 		Scan(prefix, afterKey string, limit int64) (*ScanPage, error)
 
+		// ScanKeys is a cursor-based iterator over keys only, ordered lexicographically.
+		//
+		// If prefix is non-empty, only keys starting with prefix are considered.
+		// If afterKey is non-empty, scanning starts from the first key strictly greater than afterKey;
+		// otherwise from the first key matching prefix.
+		// If limit > 0, at most limit keys are returned.
+		// If limit <= 0, all matching keys are returned until the end of the prefix range.
+		//
+		// ScanKeys MUST NOT clone, serialize, deserialize, or return values.
+		ScanKeys(prefix, afterKey string, limit int64) (*KeyScanPage, error)
+
 		// List returns key-value pairs whose keys start with prefix.
 		// If limit > 0, at most limit entries are returned.
 		// If limit <= 0, all matching entries are returned.
@@ -177,8 +188,9 @@ type (
 		// If limit > 0, at most limit keys are returned.
 		// If limit <= 0, all matching keys are returned.
 		// Implementations SHOULD return keys ordered by ascending lexicographic order.
+		// Implementations SHOULD delegate to ScanKeys(prefix, "", limit).
 		//
-		// ListKeys is key-only and MUST NOT load, clone, serialize, or deserialize values.
+		// ListKeys is key-only and MUST NOT clone, serialize, deserialize, or return values.
 		ListKeys(prefix string, limit int64) ([]string, error)
 
 		// RandomKey returns a random key from the store. If prefix is non-empty,
@@ -301,6 +313,18 @@ type (
 		Entries []Entry `js:"entries"`
 
 		// NextKey is the last key of this page when more entries are available
+		// for the given prefix and limit. It is an empty string when the scan
+		// has reached the end of the keyspace (for that prefix).
+		NextKey string `js:"nextKey"`
+	}
+
+	// KeyScanPage represents a single page of results from ScanKeys().
+	// Fields are tagged for JavaScript camelCase convention when exposed via Sobek.
+	KeyScanPage struct {
+		// Keys holds the page of keys in ascending lexicographic order.
+		Keys []string `js:"keys"`
+
+		// NextKey is the last key of this page when more keys are available
 		// for the given prefix and limit. It is an empty string when the scan
 		// has reached the end of the keyspace (for that prefix).
 		NextKey string `js:"nextKey"`

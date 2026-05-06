@@ -118,8 +118,13 @@ export const options = {
     'checks{api:list-entry-structure}': ['rate>0.999'],
     'checks{api:list-null-values}': ['rate>0.999'],
     'checks{api:scan-structure}': ['rate>0.999'],
+    'checks{api:scan-types}': ['rate>0.999'],
     'checks{api:scan-entry-structure}': ['rate>0.999'],
     'checks{api:scan-pagination}': ['rate>0.999'],
+    'checks{api:scanKeys-structure}': ['rate>0.999'],
+    'checks{api:scanKeys-types}': ['rate>0.999'],
+    'checks{api:scanKeys-key-types}': ['rate>0.999'],
+    'checks{api:scanKeys-pagination}': ['rate>0.999'],
     'checks{api:randomKey-empty}': ['rate>0.999'],
     'checks{api:backup-structure}': ['rate>0.999'],
     'checks{api:backup-fields}': ['rate>0.999'],
@@ -1174,6 +1179,39 @@ export default async function apiOutputValidationTest() {
     check(nextPageResult, {
       'api:scan-pagination': () =>
         nextPageResult.entries.length > 0 && (nextPageResult.done === true || nextPageResult.cursor !== '')
+    });
+  }
+
+  // scanKeys(): Validate key-only pagination shape and field types.
+  const scanKeysResult = await kv.scanKeys({ prefix: 'api:listKeys:user:', limit: 1 });
+  const scanKeysResultFields = Object.keys(scanKeysResult);
+
+  check(scanKeysResult, {
+    'api:scanKeys-structure': () =>
+      scanKeysResultFields.includes('keys') &&
+      scanKeysResultFields.includes('cursor') &&
+      scanKeysResultFields.includes('done') &&
+      scanKeysResultFields.length === 3,
+    'api:scanKeys-types': () =>
+      Array.isArray(scanKeysResult.keys) &&
+      typeof scanKeysResult.cursor === 'string' &&
+      typeof scanKeysResult.done === 'boolean',
+    'api:scanKeys-key-types': () =>
+      scanKeysResult.keys.every((key) => typeof key === 'string')
+  });
+
+  if (!scanKeysResult.done && scanKeysResult.cursor) {
+    const nextScanKeysPage = await kv.scanKeys({
+      prefix: 'api:listKeys:user:',
+      cursor: scanKeysResult.cursor,
+      limit: 1
+    });
+
+    check(nextScanKeysPage, {
+      'api:scanKeys-pagination': () =>
+        Array.isArray(nextScanKeysPage.keys) &&
+        typeof nextScanKeysPage.cursor === 'string' &&
+        typeof nextScanKeysPage.done === 'boolean'
     });
   }
 

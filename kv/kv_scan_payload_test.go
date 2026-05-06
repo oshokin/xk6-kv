@@ -94,3 +94,107 @@ func TestImportListKeysOptions_ZeroAndNegativeLimitAllowed(t *testing.T) {
 		assert.Equal(t, limit, opts.Limit)
 	}
 }
+
+func TestImportScanKeysOptions_Nullish(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	for _, value := range []sobek.Value{sobek.Undefined(), sobek.Null()} {
+		opts, err := importScanKeysOptions(rt, value)
+		require.NoError(t, err)
+		assert.Empty(t, opts.Prefix)
+		assert.Empty(t, opts.Cursor)
+		assert.EqualValues(t, 0, opts.Limit)
+	}
+}
+
+func TestImportScanKeysOptions_NonObjectRejects(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	_, err := importScanKeysOptions(rt, rt.ToValue([]any{}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+}
+
+func TestImportScanKeysOptions_ValidOptions(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	value := rt.ToValue(map[string]any{
+		"prefix": "user:",
+		"limit":  int64(10),
+		"cursor": "YQ==",
+	})
+
+	opts, err := importScanKeysOptions(rt, value)
+	require.NoError(t, err)
+	assert.Equal(t, "user:", opts.Prefix)
+	assert.EqualValues(t, 10, opts.Limit)
+	assert.Equal(t, "YQ==", opts.Cursor)
+}
+
+func TestImportScanKeysOptions_InvalidPrefixRejects(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	_, err := importScanKeysOptions(rt, rt.ToValue(map[string]any{
+		"prefix": 123,
+	}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+}
+
+func TestImportScanKeysOptions_InvalidCursorRejects(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	_, err := importScanKeysOptions(rt, rt.ToValue(map[string]any{
+		"cursor": 123,
+	}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+}
+
+func TestImportScanKeysOptions_FractionalLimitRejects(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	_, err := importScanKeysOptions(rt, rt.ToValue(map[string]any{
+		"limit": 1.5,
+	}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+}
+
+func TestImportScanKeysOptions_ZeroAndNegativeLimitAllowed(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	for _, limit := range []int64{0, -1} {
+		opts, err := importScanKeysOptions(rt, rt.ToValue(map[string]any{
+			"limit": limit,
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, limit, opts.Limit)
+	}
+}

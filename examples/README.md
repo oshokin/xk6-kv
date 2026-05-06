@@ -56,10 +56,16 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/delete-by-prefix.js
    ```
 
-   For key-only listing without loading values, try:
+   For key-only listing without cloning, deserializing, or returning values, try:
 
    ```bash
    k6 run examples/list-keys.js
+   ```
+
+   For cursor-based key pagination without cloning, deserializing, or returning values, try:
+
+   ```bash
+   k6 run examples/scan-keys-pagination.js
    ```
 
    For portable key/value JSONL exports, try:
@@ -169,6 +175,9 @@ required `limit` (positive integer). Input errors are reported as `InvalidOption
 `listKeys()` accepts an optional object (`{ prefix?, limit? }`) and returns sorted key names.
 Input errors are reported as `InvalidOptionsError`.
 
+`scanKeys()` accepts an optional object (`{ prefix?, limit?, cursor? }`) and returns `{ keys, cursor, done }`.
+Malformed cursors are reported as `InvalidCursorError`.
+
 Examples:
 
 - `kv.getMany(null)` -> `InvalidOptionsError`
@@ -186,6 +195,10 @@ Examples:
 - `kv.listKeys([])` -> `InvalidOptionsError`
 - `kv.listKeys({ prefix: 123 })` -> `InvalidOptionsError`
 - `kv.listKeys({ limit: 1.5 })` -> `InvalidOptionsError`
+- `kv.scanKeys([])` -> `InvalidOptionsError`
+- `kv.scanKeys({ prefix: 123 })` -> `InvalidOptionsError`
+- `kv.scanKeys({ limit: 1.5 })` -> `InvalidOptionsError`
+- `kv.scanKeys({ cursor: "bad" })` -> `InvalidCursorError`
 
 ### Understanding error classification
 
@@ -291,7 +304,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | err.name | Trigger | Go sentinels |
 | --- | --- | --- |
 | `KeyNotFoundError` | `get()` called for a key that doesn't exist in the store. | `ErrKeyNotFound` |
-| `InvalidCursorError` | `scan()` called with a malformed cursor string (not base64-encoded or corrupted). | `ErrInvalidCursor` |
+| `InvalidCursorError` | `scan()` or `scanKeys()` called with a malformed or corrupted opaque cursor string. | `ErrInvalidCursor` |
 
 #### General options & validation
 
@@ -342,7 +355,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | `DiskStoreWriteError` | Write operations failed (set, increment, swap, CAS). All share same recovery: check disk permissions/space. | `ErrDiskStoreWriteFailed`, `ErrDiskStoreIncrementFailed`, `ErrDiskStoreGetOrSetFailed`, `ErrDiskStoreSwapFailed`, `ErrDiskStoreCompareSwapFailed` |
 | `DiskStoreDeleteError` | Delete operations failed (delete, deleteIfExists, compareAndDelete, clear). | `ErrDiskStoreDeleteFailed`, `ErrDiskStoreDeleteIfExistsFailed`, `ErrDiskStoreCompareDeleteFailed`, `ErrDiskStoreClearFailed` |
 | `DiskStoreExistsError` | `exists()` check failed to execute. | `ErrDiskStoreExistsFailed` |
-| `DiskStoreScanError` | `scan()`/`list()` failed due to bbolt cursor issues. | `ErrDiskStoreScanFailed` |
+| `DiskStoreScanError` | `scan()`/`scanKeys()`/`list()`/`listKeys()` failed due to bbolt cursor issues. | `ErrDiskStoreScanFailed` |
 | `DiskStoreSizeError` | Size or count queries failed (grouped because recovery is identical: check DB health). | `ErrDiskStoreSizeFailed`, `ErrDiskStoreCountFailed`, `ErrDiskStoreStatFailed` |
 | `DiskStoreIndexError` | Random-key lookups by index failed. | `ErrDiskStoreRandomAccessFailed` |
 | `KeyListRebuildError` | Rebuilding the in-memory index failed (explicitly via `rebuildKeyList()` or implicitly after restore). | `ErrDiskStoreRebuildKeysFailed`, `ErrKeyListRebuildFailed` |

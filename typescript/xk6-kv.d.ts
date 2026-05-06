@@ -188,7 +188,7 @@ declare module 'k6/x/kv' {
   }
 
   /**
-   * Options for listing key names without loading values.
+   * Options for listing key names without cloning, deserializing, or returning values.
    */
   export interface ListKeysOptions {
     /**
@@ -239,6 +239,31 @@ declare module 'k6/x/kv' {
      * Opaque continuation token from the previous page.
      * - Pass empty string or omit to start a new scan.
      * - Pass the cursor from the previous ScanResult to continue.
+     * - Reuse only with the same logical scan options (especially prefix).
+     */
+    cursor?: string;
+  }
+
+  /**
+   * Options for scanning key names with cursor-based pagination.
+   */
+  export interface ScanKeysOptions {
+    /**
+     * Filter by key prefix. Only keys starting with this string are returned.
+     */
+    prefix?: string;
+
+    /**
+     * Maximum number of keys per page.
+     * If <= 0, returns all matching keys.
+     */
+    limit?: number;
+
+    /**
+     * Opaque continuation token from the previous page.
+     * - Pass empty string or omit to start a new scan.
+     * - Pass the cursor from the previous ScanKeysResult to continue.
+     * - Reuse only with the same logical scan options (especially prefix).
      */
     cursor?: string;
   }
@@ -512,6 +537,28 @@ declare module 'k6/x/kv' {
     /**
      * Opaque continuation token for the next page.
      * - Non-empty: more results available, pass this to next scan() call
+     * - Empty: scan is complete
+     */
+    cursor: string;
+
+    /**
+     * True when the scan has reached the end (cursor is empty).
+     */
+    done: boolean;
+  }
+
+  /**
+   * Result of scanKeys() operation with cursor-based pagination.
+   */
+  export interface ScanKeysResult {
+    /**
+     * Page of key names, sorted lexicographically.
+     */
+    keys: string[];
+
+    /**
+     * Opaque continuation token for the next page.
+     * - Non-empty: more results available, pass this to next scanKeys() call
      * - Empty: scan is complete
      */
     cursor: string;
@@ -1122,6 +1169,7 @@ declare module 'k6/x/kv' {
      *
      * Use this when the keyspace is too large to materialize with list()
      * or when you need restart-safe pagination.
+     * Treat cursor as an opaque continuation token; do not parse or construct it manually.
      *
      * @param options - Optional filters (prefix, limit, cursor)
      * @returns Promise that resolves to { entries, cursor, done }
@@ -1148,6 +1196,15 @@ declare module 'k6/x/kv' {
     scan(options?: ScanOptions): Promise<ScanResult>;
 
     /**
+     * Streams key names using cursor-based pagination.
+     * Keys are returned in lexicographic order.
+     *
+     * This is the key-only equivalent of scan().
+     * It does not clone, deserialize, or return values.
+     */
+    scanKeys(options?: ScanKeysOptions): Promise<ScanKeysResult>;
+
+    /**
      * Returns key-value entries sorted lexicographically by key.
      * If limit <= 0 or omitted, returns all matching entries.
      *
@@ -1169,10 +1226,12 @@ declare module 'k6/x/kv' {
     list(options?: ListOptions): Promise<Entry[]>;
 
     /**
-     * Lists key names without reading values.
+     * Lists key names without returning values.
      *
      * Keys are returned in ascending lexicographic order.
-     * This method is read-only and does not deserialize values.
+     * This method is read-only and does not clone, deserialize, or return values.
+     * This materializes matching keys in memory.
+     * Use scanKeys() for cursor-based pagination over large keyspaces.
      */
     listKeys(options?: ListKeysOptions): Promise<string[]>;
 

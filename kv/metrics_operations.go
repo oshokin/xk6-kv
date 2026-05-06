@@ -45,6 +45,7 @@ const (
 	opCompareAndDeleteDetailed = "compare_and_delete_detailed"
 	opDeleteIfExists           = "delete_if_exists"
 	opScan                     = "scan"
+	opScanKeys                 = "scan_keys"
 	opList                     = "list"
 	opListKeys                 = "list_keys"
 	opCount                    = "count"

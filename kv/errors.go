@@ -58,7 +58,7 @@ const (
 	// InvalidBackendError is emitted when openKv receives an unsupported backend option.
 	InvalidBackendError ErrorName = "InvalidBackendError"
 
-	// InvalidCursorError is emitted when scan() receives a malformed cursor.
+	// InvalidCursorError is emitted when scan()/scanKeys() receives a malformed cursor.
 	InvalidCursorError ErrorName = "InvalidCursorError"
 
 	// InvalidOptionsError is emitted when openKv options cannot be parsed.

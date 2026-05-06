@@ -127,3 +127,20 @@ func TestSerializedStore_ListKeys_DelegatesWithoutDeserializingValues(t *testing
 	require.NoError(t, err)
 	assert.Equal(t, []string{"user:bad-json"}, keys)
 }
+
+func TestSerializedStore_ScanKeys_DelegatesWithoutDeserializingValues(t *testing.T) {
+	t.Parallel()
+
+	mem := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	serialized := NewSerializedStore(mem, NewJSONSerializer())
+
+	require.NoError(t, mem.Set("user:bad-json", []byte("{")))
+
+	page, err := serialized.ScanKeys("user:", "", 10)
+	require.NoError(t, err)
+	require.NotNil(t, page)
+	assert.Equal(t, []string{"user:bad-json"}, page.Keys)
+
+	_, err = serialized.Scan("user:", "", 10)
+	require.Error(t, err, "scan must deserialize values and fail on malformed payload")
+}

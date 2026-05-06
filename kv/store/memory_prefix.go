@@ -2,7 +2,6 @@ package store
 
 import (
 	"fmt"
-	"sort"
 )
 
 // DeleteByPrefix deletes up to limit keys with the given non-empty prefix.
@@ -21,7 +20,11 @@ func (s *MemoryStore) DeleteByPrefix(prefix string, limit int64) (*DeleteByPrefi
 		return nil, fmt.Errorf("%w: limit must be positive: %d", ErrKVOptionsInvalid, limit)
 	}
 
-	keys := s.selectKeysByPrefix(prefix, limit)
+	keys, err := s.selectKeysByPrefix(prefix, limit)
+	if err != nil {
+		return nil, err
+	}
+
 	result := &DeleteByPrefixResult{}
 
 	for _, key := range keys {
@@ -49,24 +52,11 @@ func (s *MemoryStore) DeleteByPrefix(prefix string, limit int64) (*DeleteByPrefi
 	return result, nil
 }
 
-func (s *MemoryStore) selectKeysByPrefix(prefix string, limit int64) []string {
-	var keys []string
-
-	if s.trackKeys {
-		keys = s.listKeysWithTracking(prefix)
-	} else {
-		keys = s.listKeysWithoutTracking(prefix)
+func (s *MemoryStore) selectKeysByPrefix(prefix string, limit int64) ([]string, error) {
+	page, err := s.ScanKeys(prefix, "", limit)
+	if err != nil {
+		return nil, err
 	}
 
-	sort.Strings(keys)
-
-	if limit > 0 && int64(len(keys)) > limit {
-		keys = keys[:limit]
-	}
-
-	if keys == nil {
-		return []string{}
-	}
-
-	return keys
+	return page.Keys, nil
 }

@@ -639,3 +639,108 @@ func TestDiskStore_ListKeys_AfterRebuildKeyList(t *testing.T) {
 		})
 	}
 }
+
+func TestDiskStore_ScanKeys_EmptyStore(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+
+			page := mustScanKeysStore(t, store, "", "", 10)
+			assert.Empty(t, page.Keys)
+			assert.Empty(t, page.NextKey)
+		})
+	}
+}
+
+func TestDiskStore_ScanKeys_PrefixPagination(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			_, err := store.SetMany([]Entry{
+				{Key: "user:3", Value: []byte("three")},
+				{Key: "user:1", Value: []byte("one")},
+				{Key: "order:1", Value: []byte("order")},
+				{Key: "user:2", Value: []byte("two")},
+			})
+			require.NoError(t, err)
+
+			page1 := mustScanKeysStore(t, store, "user:", "", 2)
+			assert.Equal(t, []string{"user:1", "user:2"}, page1.Keys)
+			assert.Equal(t, "user:2", page1.NextKey)
+
+			page2 := mustScanKeysStore(t, store, "user:", page1.NextKey, 2)
+			assert.Equal(t, []string{"user:3"}, page2.Keys)
+			assert.Empty(t, page2.NextKey)
+		})
+	}
+}
+
+func TestDiskStore_ScanKeys_ListKeysParity(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			_, err := store.SetMany([]Entry{
+				{Key: "user:4", Value: []byte("four")},
+				{Key: "user:2", Value: []byte("two")},
+				{Key: "user:1", Value: []byte("one")},
+				{Key: "user:3", Value: []byte("three")},
+			})
+			require.NoError(t, err)
+
+			listKeys, err := store.ListKeys("user:", 0)
+			require.NoError(t, err)
+
+			scanned := make([]string, 0)
+			cursor := ""
+
+			for {
+				page := mustScanKeysStore(t, store, "user:", cursor, 2)
+				scanned = append(scanned, page.Keys...)
+
+				if page.NextKey == "" {
+					break
+				}
+
+				cursor = page.NextKey
+			}
+
+			assert.Equal(t, listKeys, scanned)
+		})
+	}
+}
+
+func TestDiskStore_ListKeys_EqualsScanKeysFirstPage(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			_, err := store.SetMany([]Entry{
+				{Key: "user:3", Value: []byte("three")},
+				{Key: "user:1", Value: []byte("one")},
+				{Key: "user:2", Value: []byte("two")},
+			})
+			require.NoError(t, err)
+
+			keys, err := store.ListKeys("user:", 2)
+			require.NoError(t, err)
+
+			page := mustScanKeysStore(t, store, "user:", "", 2)
+			assert.Equal(t, page.Keys, keys)
+		})
+	}
+}

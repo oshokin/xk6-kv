@@ -9,6 +9,27 @@ import (
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
+func decodeOpaqueCursor(cursor string) (string, error) {
+	if cursor == "" {
+		return "", nil
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(cursor)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", store.ErrInvalidCursor, err)
+	}
+
+	return string(raw), nil
+}
+
+func encodeOpaqueCursor(nextKey string) string {
+	if nextKey == "" {
+		return ""
+	}
+
+	return base64.StdEncoding.EncodeToString([]byte(nextKey))
+}
+
 // Scan returns a Promise that resolves to { entries: [], cursor: string, done: bool }.
 // It supports cursor-based pagination over keys, ordered lexicographically.
 // Pass the cursor from a previous result to continue; omit it (or pass "") to start fresh.
@@ -21,15 +42,9 @@ func (k *KV) Scan(options sobek.Value) *sobek.Promise {
 	return k.runAsyncWithStoreObserved(
 		opScan,
 		func(s store.Store) (any, error) {
-			var afterKey string
-
-			if scanOptions.Cursor != "" {
-				raw, err := base64.StdEncoding.DecodeString(scanOptions.Cursor)
-				if err != nil {
-					return nil, fmt.Errorf("%w: %w", store.ErrInvalidCursor, err)
-				}
-
-				afterKey = string(raw)
+			afterKey, err := decodeOpaqueCursor(scanOptions.Cursor)
+			if err != nil {
+				return nil, err
 			}
 
 			page, err := s.Scan(scanOptions.Prefix, afterKey, scanOptions.Limit)
@@ -47,7 +62,7 @@ func (k *KV) Scan(options sobek.Value) *sobek.Promise {
 			)
 
 			if page.NextKey != "" {
-				cursor = base64.StdEncoding.EncodeToString([]byte(page.NextKey))
+				cursor = encodeOpaqueCursor(page.NextKey)
 				done = false
 			} else {
 				cursor = ""
@@ -58,6 +73,46 @@ func (k *KV) Scan(options sobek.Value) *sobek.Promise {
 				Entries: page.Entries,
 				Cursor:  cursor,
 				Done:    done,
+			}, nil
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			return rt.ToValue(result)
+		},
+	)
+}
+
+// ScanKeys returns a Promise that resolves to { keys: [], cursor: string, done: bool }.
+// It supports cursor-based pagination over keys, ordered lexicographically.
+// Pass the cursor from a previous result to continue; omit it (or pass "") to start fresh.
+func (k *KV) ScanKeys(options sobek.Value) *sobek.Promise {
+	scanOptions, err := importScanKeysOptions(k.vu.Runtime(), options)
+	if err != nil {
+		return k.rejectedPromiseObserved(opScanKeys, err)
+	}
+
+	return k.runAsyncWithStoreObserved(
+		opScanKeys,
+		func(s store.Store) (any, error) {
+			afterKey, err := decodeOpaqueCursor(scanOptions.Cursor)
+			if err != nil {
+				return nil, err
+			}
+
+			page, err := s.ScanKeys(scanOptions.Prefix, afterKey, scanOptions.Limit)
+			if err != nil {
+				return nil, err
+			}
+
+			if page == nil {
+				return nil, unexpectedStoreOutput("store.ScanKeys")
+			}
+
+			cursor := encodeOpaqueCursor(page.NextKey)
+
+			return &scanKeysResult{
+				Keys:   page.Keys,
+				Cursor: cursor,
+				Done:   cursor == "",
 			}, nil
 		},
 		func(rt *sobek.Runtime, result any) sobek.Value {

@@ -24,7 +24,7 @@ A k6 extension providing a persistent key-value store to share state across Virt
 - 🔍 **Key Tracking**: Optional O(1) random key access via in-memory indexing
 - 🏷️ **Prefix Support**: Filter operations by key prefixes
 - 📦 **Stable bbolt Bucket**: Disk backend always uses the `k6` bucket (**original upstream bug tied it to the DB path and could orphan data - now fixed**)
-- 🧭 **Cursor Scanning**: Stream large datasets via `scan()` with continuation tokens
+- 🧭 **Cursor Scanning**: Stream large datasets via `scan()` / `scanKeys()` with continuation tokens
 - 📝 **Serialization**: JSON or string serialization
 - 💾 **Snapshots**: Export/import bbolt files for backups and data seeding
 - 📘 **TypeScript Support**: Full type declarations for IntelliSense and type safety
@@ -332,17 +332,56 @@ Backend note:
   interface ScanOptions {
     prefix?: string; // Filter by key prefix
     limit?: number;  // Max results per page (<= 0 means "read to the end")
-    cursor?: string; // Base64 cursor produced by the previous page ("" starts a new scan)
+    cursor?: string; // Opaque cursor produced by the previous page ("" starts a new scan)
   }
 
   interface ScanResult {
     entries: Array<{ key: string; value: any }>;
-    cursor: string; // Base64 cursor for the next page
+    cursor: string; // Opaque cursor for the next page
     done: boolean;  // True when the scan reached the end of the prefix window
   }
   ```
 
   Use `scan()` when the keyspace is too large to materialize with `list()` or when you need restart-safe pagination.
+  Treat `cursor` as an opaque continuation token. Do not parse, modify, or construct it manually.
+  Use a cursor only with the same logical scan options that produced it, especially the same `prefix`.
+
+- **`scanKeys(options?: ScanKeysOptions): Promise<ScanKeysResult>`** - Streams key names in lexicographic order using cursor-based pagination.
+
+  ```typescript
+  interface ScanKeysOptions {
+    prefix?: string; // Filter by key prefix
+    limit?: number;  // Max keys per page (<= 0 means "read to the end")
+    cursor?: string; // Opaque cursor produced by the previous page ("" starts a new scan)
+  }
+
+  interface ScanKeysResult {
+    keys: string[];
+    cursor: string; // Opaque cursor for the next page
+    done: boolean;  // True when the scan reached the end of the prefix window
+  }
+  ```
+
+  `scanKeys()` is the key-only equivalent of `scan()`.
+  It does not clone, deserialize, or return values.
+  Use `scanKeys()` when the keyspace is too large to materialize with `listKeys()`.
+  Treat `cursor` as an opaque continuation token. Do not parse, modify, or construct it manually.
+  Use a cursor only with the same logical scan options that produced it, especially the same `prefix`.
+
+  ```javascript
+  let cursor = "";
+
+  do {
+    const page = await kv.scanKeys({
+      prefix: "user:",
+      cursor,
+      limit: 1000,
+    });
+
+    const users = await kv.getMany(page.keys);
+    cursor = page.cursor;
+  } while (!page.done);
+  ```
 
 - **`list(options?: ListOptions): Promise<Array<{ key: string; value: any }>>`** - Returns entries sorted lexicographically by key.
 
@@ -353,7 +392,7 @@ Backend note:
   }
   ```
 
-- **`listKeys(options?: ListKeysOptions): Promise<string[]>`** - Lists key names without reading values.
+- **`listKeys(options?: ListKeysOptions): Promise<string[]>`** - Lists key names without returning values.
 
   ```typescript
   interface ListKeysOptions {
@@ -362,7 +401,7 @@ Backend note:
   }
   ```
 
-  `listKeys()` is read-only, returns keys in ascending lexicographic order, and does not deserialize values.
+  `listKeys()` is read-only, returns keys in ascending lexicographic order, and does not clone, deserialize, or return values.
   Useful flow before destructive calls:
 
   ```javascript
@@ -372,8 +411,9 @@ Backend note:
 
   Backend note:
   - disk backend uses in-memory key index when `trackKeys: true`, otherwise bbolt cursor scan;
-  - memory backend collects matching keys from shards, sorts globally, then applies `limit`;
-  - `listKeys()` is not cursor-paginated; use `scan()` for cursor-based pagination over entries.
+  - memory backend uses key-only shard iterators and merges them lexicographically;
+  - `listKeys()` is not cursor-paginated; use `scanKeys()` for key-only cursor pagination;
+  - use `scan()` when you need key/value entries.
 
 - **`count(options?: CountOptions): Promise<number>`** - Returns number of keys matching prefix.  
   `count()` (or omitted options) is equivalent to `size()`.

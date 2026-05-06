@@ -75,7 +75,7 @@ var (
 	ErrDiskStoreWriteFailed = errors.New("disk store write failed")
 	// ErrInvalidBackend is returned when an unsupported backend is specified.
 	ErrInvalidBackend = errors.New("invalid backend")
-	// ErrInvalidCursor is returned when scan receives a malformed cursor.
+	// ErrInvalidCursor is returned when scan/scanKeys receives a malformed cursor.
 	ErrInvalidCursor = errors.New("invalid cursor")
 	// ErrInvalidSerialization is returned when an unsupported serialization format is specified.
 	ErrInvalidSerialization = errors.New("invalid serialization")

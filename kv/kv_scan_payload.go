@@ -18,7 +18,7 @@ type (
 		Limit int64 `js:"limit"`
 
 		// Cursor is an opaque continuation token previously returned from Scan().
-		// It is a base64-encoded representation of the last key in the previous page.
+		// Treat it as opaque; callers must not parse or construct it manually.
 		Cursor string `js:"cursor"`
 
 		// isLimitSet indicates whether Limit was explicitly provided from JS.
@@ -29,6 +29,37 @@ type (
 	scanResult struct {
 		// Entries holds the page of key/value pairs (using store.Entry directly).
 		Entries []store.Entry `js:"entries"`
+
+		// Cursor is an opaque continuation token. The first call should pass an
+		// empty cursor (or omit it); subsequent calls should pass the cursor from
+		// the previous result. When Cursor is empty, the scan is complete.
+		Cursor string `js:"cursor"`
+
+		// Done is true when the scan is complete (i.e., Cursor == "").
+		Done bool `js:"done"`
+	}
+
+	// scanKeysOptions holds optional filters for scanKeys().
+	scanKeysOptions struct {
+		// Prefix selects only keys that start with the given string.
+		Prefix string `js:"prefix"`
+
+		// Limit is the maximum number of keys to return in a single page;
+		// <= 0 means "no limit".
+		Limit int64 `js:"limit"`
+
+		// Cursor is an opaque continuation token previously returned from ScanKeys().
+		// Treat it as opaque; callers must not parse or construct it manually.
+		Cursor string `js:"cursor"`
+
+		// isLimitSet indicates whether Limit was explicitly provided from JS.
+		isLimitSet bool
+	}
+
+	// scanKeysResult is the JS-facing result of scanKeys().
+	scanKeysResult struct {
+		// Keys holds the page of key names.
+		Keys []string `js:"keys"`
 
 		// Cursor is an opaque continuation token. The first call should pass an
 		// empty cursor (or omit it); subsequent calls should pass the cursor from
@@ -76,54 +107,90 @@ type (
 // importScanOptions converts a Sobek value into ScanOptions.
 // Accepts null/undefined and partial objects.
 func importScanOptions(rt *sobek.Runtime, options sobek.Value) (scanOptions, error) {
-	scanOptions := scanOptions{}
+	parsed := scanOptions{}
 
-	err := ensureOptionalObjectOptions("scan", options)
+	prefix, cursor, limit, limitSet, err := importScanLikeOptions("scan", rt, options)
 	if err != nil {
-		return scanOptions, err
+		return parsed, err
+	}
+
+	parsed.Prefix = prefix
+	parsed.Cursor = cursor
+
+	if limitSet {
+		parsed.Limit = limit
+		parsed.isLimitSet = true
+	}
+
+	return parsed, nil
+}
+
+// importScanKeysOptions converts a Sobek value into scanKeysOptions.
+// Accepts null/undefined and partial objects.
+func importScanKeysOptions(rt *sobek.Runtime, options sobek.Value) (scanKeysOptions, error) {
+	parsed := scanKeysOptions{}
+
+	prefix, cursor, limit, limitSet, err := importScanLikeOptions("scanKeys", rt, options)
+	if err != nil {
+		return parsed, err
+	}
+
+	parsed.Prefix = prefix
+	parsed.Cursor = cursor
+
+	if limitSet {
+		parsed.Limit = limit
+		parsed.isLimitSet = true
+	}
+
+	return parsed, nil
+}
+
+// importScanLikeOptions parses shared option shape for scan-style methods.
+func importScanLikeOptions(
+	method string,
+	rt *sobek.Runtime,
+	options sobek.Value,
+) (prefix string, cursor string, limit int64, limitSet bool, err error) {
+	if err = ensureOptionalObjectOptions(method, options); err != nil {
+		return "", "", 0, false, err
 	}
 
 	if common.IsNullish(options) {
-		return scanOptions, nil
+		return "", "", 0, false, nil
 	}
 
 	optionsObj := options.ToObject(rt)
 
-	prefixValue := optionsObj.Get("prefix")
-
-	prefix, isSet, err := parseOptionalStringOption("scan", "prefix", prefixValue)
-	if err != nil {
-		return scanOptions, err
+	parsedPrefix, prefixSet, parseErr := parseOptionalStringOption(method, "prefix", optionsObj.Get("prefix"))
+	if parseErr != nil {
+		return "", "", 0, false, parseErr
 	}
 
-	if isSet {
-		scanOptions.Prefix = prefix
+	if prefixSet {
+		prefix = parsedPrefix
 	}
 
-	cursorValue := optionsObj.Get("cursor")
-
-	cursor, isSet, err := parseOptionalStringOption("scan", "cursor", cursorValue)
-	if err != nil {
-		return scanOptions, err
+	parsedCursor, cursorSet, parseErr := parseOptionalStringOption(method, "cursor", optionsObj.Get("cursor"))
+	if parseErr != nil {
+		return "", "", 0, false, parseErr
 	}
 
-	if isSet {
-		scanOptions.Cursor = cursor
+	if cursorSet {
+		cursor = parsedCursor
 	}
 
-	limitValue := optionsObj.Get("limit")
-
-	parsedLimit, isSet, err := parseOptionalInt64Option("scan", "limit", limitValue)
-	if err != nil {
-		return scanOptions, err
+	parsedLimit, parsedLimitSet, parseErr := parseOptionalInt64Option(method, "limit", optionsObj.Get("limit"))
+	if parseErr != nil {
+		return "", "", 0, false, parseErr
 	}
 
-	if isSet {
-		scanOptions.Limit = parsedLimit
-		scanOptions.isLimitSet = true
+	if parsedLimitSet {
+		limit = parsedLimit
+		limitSet = true
 	}
 
-	return scanOptions, nil
+	return prefix, cursor, limit, limitSet, nil
 }
 
 // importListOptions converts a Sobek value into ListOptions, accepting null/undefined
