@@ -68,6 +68,12 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/export-jsonl.js
    ```
 
+   For portable JSONL imports, try:
+
+   ```bash
+   k6 run examples/import-jsonl.js
+   ```
+
    For operation metrics in a realistic worker queue flow, try:
 
    ```bash
@@ -110,6 +116,26 @@ Examples:
 - `kv.exportJSONL({})` -> `InvalidOptionsError`
 - `kv.exportJSONL({ fileName: "" })` -> `InvalidOptionsError`
 - `kv.exportJSONL({ fileName: "./x.jsonl", limit: 1.5 })` -> `InvalidOptionsError`
+
+### `importJSONL()`
+
+Use `importJSONL()` to load portable key/value seed data produced by `exportJSONL()`.
+
+```javascript
+await kv.importJSONL({
+  fileName: "./examples/fixtures/users.jsonl",
+  batchSize: 1000,
+});
+```
+
+Each line must be:
+
+```json
+{"key":"some:key","value":...}
+```
+
+Invalid input rejects with `InvalidOptionsError`.
+Malformed JSONL records reject with a parse/read error.
 
 ## Error Manual
 

@@ -527,6 +527,10 @@ Backend note:
   Exports key/value entries to a JSON Lines file for portable seed data and diff-friendly snapshots. Each line is:
   `{"key":"...","value":...}`. Values are exported after normal KV deserialization, not as raw backend bytes.
 
+- **`importJSONL(options: { fileName: string, limit?: number, batchSize?: number }): Promise<{ imported: number, fileName: string, bytesRead: number }>`**  
+  Imports key/value entries from a JSON Lines file. Each line must be:
+  `{"key":"...","value":...}`.
+
 ```typescript
 await kv.backup({
   fileName: "./backups/kv-latest.kv",
@@ -557,6 +561,35 @@ console.log(result.bytesWritten);
 - `limit` is optional; if omitted or `<= 0`, all matching entries are exported.
 
 `exportJSONL()` writes a temporary file in the destination directory and renames it into place only after a successful write. This avoids replacing the final file with a partial export if the operation fails.
+
+`importJSONL()` example:
+
+```javascript
+const result = await kv.importJSONL({
+  fileName: "./exports/users.jsonl",
+  batchSize: 1000,
+});
+
+console.log(result.imported);
+console.log(result.bytesRead);
+```
+
+`importJSONL()` options:
+
+- `fileName` is required and must be a non-empty string.
+- `limit` is optional; if omitted or `<= 0`, all records are imported.
+- `batchSize` is optional; if omitted or `<= 0`, the default batch size is used.
+
+`importJSONL()` streams records and writes them in `setMany()` batches. Existing keys are overwritten.
+`bytesRead` reports how many input bytes were consumed by the importer.
+
+Each line must be a JSON object with:
+
+- `key` - required non-empty string.
+- `value` - required JSON value, including `null`.
+
+`importJSONL()` rejects blank lines and malformed JSON records. Errors include the source line number.
+The import is not a global transaction: if a later line is invalid, already committed batches remain imported, while the currently failed batch is not partially written.
 
 - **`close(): void`** - Synchronously closes the store. Call once in `teardown()`.
   Do **not** call `close()` from `default()` iterations.

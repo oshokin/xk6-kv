@@ -38,6 +38,9 @@ const SNAPSHOT_PATH = getSnapshotPath(TEST_NAME);
 // JSONL file path for exportJSONL validation.
 const EXPORT_JSONL_PATH = './tmp/api-output-validation-export.jsonl';
 
+// JSONL file path for importJSONL validation.
+const IMPORT_JSONL_PATH = './tmp/api-output-validation-import.jsonl';
+
 // kv is the shared store client used throughout the scenario.
 const kv = createKv(TEST_NAME);
 
@@ -107,6 +110,11 @@ export const options = {
     'checks{api:exportJSONL:returns object}': ['rate==1'],
     'checks{api:exportJSONL:exported count}': ['rate==1'],
     'checks{api:exportJSONL:wrote bytes}': ['rate==1'],
+    'checks{api:importJSONL:returns object}': ['rate==1'],
+    'checks{api:importJSONL:imported count}': ['rate==1'],
+    'checks{api:importJSONL:read bytes}': ['rate==1'],
+    'checks{api:importJSONL:first item exists}': ['rate==1'],
+    'checks{api:importJSONL:second item exists}': ['rate==1'],
     'checks{api:list-entry-structure}': ['rate>0.999'],
     'checks{api:list-null-values}': ['rate>0.999'],
     'checks{api:scan-structure}': ['rate>0.999'],
@@ -181,6 +189,12 @@ export async function teardown() {
 
   try {
     file.deleteFile(EXPORT_JSONL_PATH);
+  } catch (err) {
+    // Ignore cleanup errors if the file doesn't exist or is already deleted.
+  }
+
+  try {
+    file.deleteFile(IMPORT_JSONL_PATH);
   } catch (err) {
     // Ignore cleanup errors if the file doesn't exist or is already deleted.
   }
@@ -898,6 +912,47 @@ export default async function apiOutputValidationTest() {
       result.exported === 2,
     'api:exportJSONL:wrote bytes': (result) =>
       result.bytesWritten > 0
+  });
+
+  await kv.setMany({
+    'api:importJSONL:user:1': { value: 1 },
+    'api:importJSONL:user:2': { value: 2 }
+  });
+
+  await kv.exportJSONL({
+    fileName: IMPORT_JSONL_PATH,
+    prefix: 'api:importJSONL:'
+  });
+
+  await kv.deleteMany([
+    'api:importJSONL:user:1',
+    'api:importJSONL:user:2'
+  ]);
+
+  const importJSONLResult = await kv.importJSONL({
+    fileName: IMPORT_JSONL_PATH,
+    batchSize: 1
+  });
+
+  check(importJSONLResult, {
+    'api:importJSONL:returns object': (result) =>
+      result !== null && typeof result === 'object',
+    'api:importJSONL:imported count': (result) =>
+      result.imported === 2,
+    'api:importJSONL:read bytes': (result) =>
+      result.bytesRead > 0
+  });
+
+  const importedItems = await kv.getMany([
+    'api:importJSONL:user:1',
+    'api:importJSONL:user:2'
+  ]);
+
+  check(importedItems, {
+    'api:importJSONL:first item exists': (items) =>
+      items[0].exists === true && items[0].value.value === 1,
+    'api:importJSONL:second item exists': (items) =>
+      items[1].exists === true && items[1].value.value === 2
   });
 
   // list(): Validate that results are returned as an array of entry objects.

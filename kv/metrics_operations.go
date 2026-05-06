@@ -57,6 +57,7 @@ const (
 	opBackup                   = "backup"
 	opRestore                  = "restore"
 	opExportJSONL              = "export_jsonl"
+	opImportJSONL              = "import_jsonl"
 	opStats                    = "stats"
 	opReportStats              = "report_stats"
 )

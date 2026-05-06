@@ -360,6 +360,40 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Options for importing key/value entries from JSON Lines.
+   */
+  export interface ImportJSONLOptions {
+    /**
+     * Required input JSONL file path.
+     */
+    fileName: string;
+
+    /**
+     * Optional maximum number of records to import.
+     * If omitted or <= 0, all records are imported.
+     */
+    limit?: number;
+
+    /**
+     * Optional number of records to write per SetMany batch.
+     * If omitted or <= 0, the default batch size is used.
+     */
+    batchSize?: number;
+  }
+
+  /**
+   * Summary returned by importJSONL().
+   */
+  export interface ImportJSONLResult {
+    /** Number of records imported into KV. */
+    imported: number;
+    /** Input JSONL file path. */
+    fileName: string;
+    /** Number of input bytes consumed by importer. */
+    bytesRead: number;
+  }
+
+  /**
    * Diagnostic snapshot returned by stats().
    */
   export interface KVStats {
@@ -1278,6 +1312,18 @@ declare module 'k6/x/kv' {
      * @returns Promise that resolves to export summary metadata.
      */
     exportJSONL(options: ExportJSONLOptions): Promise<ExportJSONLResult>;
+
+    /**
+     * Imports key/value entries from a JSON Lines file.
+     *
+     * Each line must be a JSON object: { "key": string, "value": any }.
+     * The import is streaming and batched. Previously committed batches are not
+     * rolled back if a later line is invalid.
+     *
+     * @param options - Required import options.
+     * @returns Promise that resolves to import summary metadata.
+     */
+    importJSONL(options: ImportJSONLOptions): Promise<ImportJSONLResult>;
 
     // ==================== Lifecycle ====================
 
