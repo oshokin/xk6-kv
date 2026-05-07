@@ -6,7 +6,8 @@ import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common
 // REAL-WORLD SCENARIO: CLAIM BOOTSTRAP + MALFORMED PAYLOAD TRIAGE
 // =============================================================================
 //
-// A reservation service creates claim locks with compareAndSwap(key, null, value).
+// A reservation service creates claim coordination markers with compareAndSwap(key, null, value).
+// This is local coordination inside one xk6-kv process/store, not a distributed lock.
 // During incidents, engineers observe:
 // - compareAndSwap(..., null, ...) returned false
 // - exists() later returned false
@@ -21,7 +22,7 @@ import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common
 // - compareAndSwap(): legacy boolean CAS semantics (including null absent-sentinel).
 // - compareAndDelete(): legacy boolean CAD null-value comparison semantics.
 // - compareAndSwapDetailed(): mismatch introspection for incident debugging.
-// - setIfAbsent(): first-writer-wins under contention.
+// - setIfAbsent(): local first-writer-wins under contention.
 //
 // CONCURRENCY PATTERN:
 // - Promise.all setIfAbsent() attempts target one bootstrap key to guarantee a

@@ -12,18 +12,18 @@ import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common
 //
 // REAL-WORLD PROBLEMS UNCOVERED:
 // - Opaque CAS mismatches that are hard to debug during rollout incidents.
-// - First-writer lock bootstrap races during noisy admin bursts.
+// - First-writer bootstrap coordination races during noisy admin bursts.
 // - Regressions where detailed APIs leak "current" on successful writes.
 //
 // ATOMIC OPERATIONS TESTED:
 // - compareAndSwapDetailed(): mismatch metadata + success payload shape.
 // - compareAndSwap(): legacy behavior remains boolean-only.
-// - setIfAbsent(): first-writer-wins bootstrap lock.
+// - setIfAbsent(): first-writer-wins bootstrap coordination.
 //
 // CONCURRENCY PATTERN:
 // - Promise.all compareAndSwapDetailed() attempts share the same stale snapshot
 //   to force exactly one winner, mirroring admin dashboards that fire bursts.
-// - Parallel setIfAbsent() calls compete for the same bootstrap lock key.
+// - Parallel setIfAbsent() calls compete for the same bootstrap coordination key.
 //
 // PERFORMANCE CHARACTERISTICS:
 // - Tight CAS retry surfaces without sleeps; stresses promise resolution under
@@ -35,7 +35,7 @@ const TEST_NAME = 'feature-flag-cas-detailed-rollout';
 // Feature flag key prefix so each VU exercises an isolated rollout document.
 const FLAG_PREFIX = __ENV.FLAG_PREFIX || 'feature:payments:detailed:';
 
-// Number of concurrent detailed CAS attempts (and bootstrap lock attempts) per phase.
+// Number of concurrent detailed CAS attempts (and bootstrap coordination attempts) per phase.
 const CONCURRENT_UPDATES = parseInt(__ENV.CONCURRENT_UPDATES || '6', 10);
 
 // kv is the shared store client used throughout the scenario.
@@ -148,16 +148,16 @@ export default async function featureFlagCasDetailedRollout() {
       )
   }, { op: 'casDetailed', phase: 'contention' });
 
-  // Bootstrap lock: parallel first-writer-wins creation for rollout coordination keys.
-  const bootstrapKey = `${key}:bootstrap-lock`;
-  const lockAttempts = await Promise.all(
+  // Bootstrap coordination: parallel first-writer-wins creation for rollout keys.
+  const bootstrapKey = `${key}:bootstrap-coordination`;
+  const bootstrapAttempts = await Promise.all(
     Array.from({ length: CONCURRENT_UPDATES }, (_, idx) =>
       kv.setIfAbsent(bootstrapKey, `owner-${idx}`)
     )
   );
-  const lockWinners = lockAttempts.filter(Boolean).length;
+  const bootstrapWinners = bootstrapAttempts.filter(Boolean).length;
 
   check(true, {
-    'setIfAbsent:contention': () => lockWinners === 1
+    'setIfAbsent:contention': () => bootstrapWinners === 1
   }, { op: 'setIfAbsent', phase: 'contention' });
 }

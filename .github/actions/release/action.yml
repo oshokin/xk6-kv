@@ -29,12 +29,13 @@ runs:
         echo "MODULE_REPO=github.com/oshokin/xk6-kv" >> $GITHUB_ENV
 
     # Check out repository with full Git history for version analysis.
-    # When triggered by tag push, checkout the tag; otherwise checkout the default branch.
+    # For workflow_run, build from upstream head SHA. For push/workflow_dispatch,
+    # use the current workflow ref (branch or tag).
     - name: Checkout
       uses: actions/checkout@v6
       with:
         fetch-depth: 0 # Fetch all tags and history for semantic versioning.
-        ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && github.ref) || github.ref }}
+        ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
 
     # Set up Go environment for building k6 binaries.
     - name: Set up Go
@@ -44,9 +45,9 @@ runs:
         check-latest: true
 
     # Analyze commit messages since last tag to determine version bump.
-    # Uses the semver_next.sh script to implement semantic versioning logic.
-    # If triggered by a tag push, use that tag instead of calculating a new one.
-    # Fetch latest tags first to ensure accurate version calculation.
+    # Uses the semver_next.sh script for auto-semver.
+    # If running on a tag ref, use that existing tag and skip semver calculation.
+    # Fetch latest tags first to ensure accurate version resolution.
     - name: Compute next version
       id: bump
       shell: bash
@@ -54,36 +55,40 @@ runs:
         # Ensure we have the absolute latest tags for accurate version calculation.
         git fetch --tags origin
         
-        # If this workflow was triggered by a tag push, use that tag.
+        # Tag release path: use the current tag ref as-is.
         GITHUB_REF="${{ github.ref }}"
-        if [[ "${{ github.event_name }}" == "push" && "$GITHUB_REF" =~ ^refs/tags/ ]]; then
-          # Extract tag name from ref (e.g., refs/tags/v1.4.1 -> v1.4.1)
-          pushed_tag="${{ github.ref_name }}"
+        if [[ "$GITHUB_REF" =~ ^refs/tags/ ]]; then
+          # Extract tag name from ref (e.g., refs/tags/v1.4.1 -> v1.4.1).
+          pushed_tag="${GITHUB_REF#refs/tags/}"
           
-          # Verify the tag exists and is valid
+          # Verify the tag exists and is valid.
           if git rev-parse "$pushed_tag" >/dev/null 2>&1; then
-            # Get the previous tag for changelog generation
-            # Try to find the tag before this one
-            prev_tag=$(git describe --tags --abbrev=0 "$pushed_tag^" 2>/dev/null || git tag --sort=-version:refname | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | sed -n "2p" || echo "1.0.0")
+            # Get previous semver tag for changelog generation.
+            prev_tag=$(git tag --sort=-version:refname | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | grep -vx "$pushed_tag" | head -n 1 || true)
+            if [[ -z "$prev_tag" ]]; then
+              prev_tag="1.0.0"
+            fi
             prev_tag_normalized=$(echo "$prev_tag" | sed 's/^v//')
             
-            # Use the pushed tag as the release tag
+            # Use the pushed tag as the release tag.
             {
               echo "last_tag=$prev_tag_normalized"
               echo "next_tag=$pushed_tag"
               echo "bump=none"
               echo "has_release=1"
+              echo "is_tag_release=true"
             } >>"$GITHUB_OUTPUT"
             
-            echo "Using pushed tag: $pushed_tag (previous tag: $prev_tag)"
+            echo "Using existing tag release: $pushed_tag (previous tag: $prev_tag)"
             exit 0
           else
             echo "Warning: Tag $pushed_tag not found, falling back to semver calculation"
           fi
         fi
         
-        # Default behavior: calculate next version from commits
+        # Auto-semver path: calculate next version from commits.
         bash scripts/semver_next.sh --emit-gh-output
+        echo "is_tag_release=false" >>"$GITHUB_OUTPUT"
 
     # Skip release if no commits found (should rarely happen).
     # Note: All commits now trigger at least a patch release.
@@ -102,19 +107,17 @@ runs:
         git config user.name "${{ env.GIT_BOT_NAME }}"
         git config user.email "${{ env.GIT_BOT_EMAIL }}"
 
-    # Create and push the new version tag to trigger release builds.
-    # Tag creation must happen before building binaries.
-    # Use atomic push to prevent race conditions with concurrent releases.
-    # Skip if tag was already pushed (tag push trigger).
+    # Create and push the new version tag for auto-semver releases.
+    # Skip when running in an existing tag-release context.
     - name: Create and push tag
       if: steps.bump.outputs.has_release == '1'
       shell: bash
       env:
-        EVENT_NAME: ${{ github.event_name }}
+        IS_TAG_RELEASE: ${{ steps.bump.outputs.is_tag_release }}
       run: |
-        # Skip tag creation if this was triggered by a tag push (tag already exists)
-        if [[ "$EVENT_NAME" == "push" ]]; then
-          echo "Workflow triggered by tag push - skipping tag creation (tag already exists)"
+        # Skip tag creation for tag-release workflows (tag already exists).
+        if [[ "$IS_TAG_RELEASE" == "true" ]]; then
+          echo "Running in tag-release mode - skipping tag creation"
           exit 0
         fi
         

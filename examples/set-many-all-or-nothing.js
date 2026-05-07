@@ -32,7 +32,7 @@ export default async function () {
     });
     throw new Error("expected setMany() to reject");
   } catch (err) {
-    expect(err?.name).toEqual("SerializerError");
+    expect(err?.name).toEqual("InvalidOptionsError");
     expect(Array.isArray(err?.errors)).toEqual(true);
     expect(err.errors.length).toEqual(1);
     expect(err.errors[0].name).toEqual("SerializerError");

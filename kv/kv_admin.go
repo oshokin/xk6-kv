@@ -126,6 +126,9 @@ func (k *KV) Close() error {
 	}
 
 	k.closeOnce.Do(func() {
+		// Mark this facade handle as closed so all subsequent async operations
+		// fail consistently, even when backend Close() is a no-op.
+		k.closed.Store(true)
 		k.closeErr = k.store.Close()
 	})
 

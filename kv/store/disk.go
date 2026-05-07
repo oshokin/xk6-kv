@@ -733,7 +733,7 @@ func (s *DiskStore) RebuildKeyList() error {
 
 // Close decrements an internal reference count and closes the DB when it
 // reaches zero.
-// Subsequent operations can re-open the DB on demand.
+// Subsequent operations fail until Open() is called explicitly.
 func (s *DiskStore) Close() error {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()

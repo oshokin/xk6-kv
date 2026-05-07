@@ -61,7 +61,7 @@ const (
 	// InvalidCursorError is emitted when scan()/scanKeys() receives a malformed cursor.
 	InvalidCursorError ErrorName = "InvalidCursorError"
 
-	// InvalidOptionsError is emitted when openKv options cannot be parsed.
+	// InvalidOptionsError is emitted when API options/inputs cannot be validated.
 	InvalidOptionsError ErrorName = "InvalidOptionsError"
 
 	// InvalidSerializationError is emitted when openKv receives an unsupported serialization option.
@@ -109,7 +109,8 @@ const (
 	// SnapshotReadError is emitted when snapshot reads/imports fail.
 	SnapshotReadError ErrorName = "SnapshotReadError"
 
-	// StoreClosedError is emitted when a disk store is used before Open().
+	// StoreClosedError is emitted when a closed KV handle is used, or when
+	// disk store operations run before Open().
 	StoreClosedError ErrorName = "StoreClosedError"
 
 	// UnsupportedValueTypeError is emitted when a store rejects a value type.
@@ -234,7 +235,7 @@ func classifyError(err error) *Error {
 
 		switch entryListErr.Kind {
 		case store.EntryListErrorKindSerialization:
-			return NewErrorWithDetails(SerializerError, entryListErr.Message, details)
+			return NewErrorWithDetails(InvalidOptionsError, entryListErr.Message, details)
 		default:
 			return NewErrorWithDetails(UnknownError, entryListErr.Message, details)
 		}

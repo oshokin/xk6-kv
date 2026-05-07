@@ -158,7 +158,7 @@ try {
     "bad": () => {}, // JSON serializer rejects functions
   });
 } catch (err) {
-  if (err?.name === "SerializerError") {
+  if (err?.name === "InvalidOptionsError") {
     for (const item of err.errors ?? []) {
       console.log(item.key, item.name, item.message);
     }
@@ -643,6 +643,7 @@ console.log(result.bytesRead);
 - `fileName` is required and must be a non-empty string.
 - `limit` is optional; if omitted or `<= 0`, all records are imported.
 - `batchSize` is optional; if omitted or `<= 0`, the default batch size is used.
+- `importJSONL()` enforces a per-line safety cap of 64 MiB; oversized records are rejected with a line-numbered parse error.
 
 `importJSONL()` streams records and writes them in `setMany()` batches. Existing keys are overwritten.
 `bytesRead` reports how many input bytes were consumed by the importer.
@@ -655,7 +656,9 @@ Each line must be a JSON object with:
 `importJSONL()` rejects blank lines and malformed JSON records. Errors include the source line number.
 The import is not a global transaction: if a later line is invalid, already committed batches remain imported, while the currently failed batch is not partially written.
 
-- **`close(): void`** - Synchronously closes the store. Call once in `teardown()`.
+- **`close(): void`** - Synchronously closes this KV handle. Call once in `teardown()`.
+  After `close()`, this handle rejects async operations with `StoreClosedError` on both backends.
+  Closing one handle does not affect other open handles until the shared store refcount reaches zero.
   Do **not** call `close()` from `default()` iterations.
 
 ### Performance Notes

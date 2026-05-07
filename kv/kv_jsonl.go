@@ -17,9 +17,12 @@ import (
 )
 
 const (
-	exportJSONLPageSize         int64 = 1000
-	importJSONLDefaultBatchSize int64 = 1000
+	exportJSONLPageSize            int64 = 1000
+	importJSONLDefaultBatchSize    int64 = 1000
+	importJSONLDefaultMaxLineBytes       = 64 << 20 // 64 MiB
 )
+
+var errImportJSONLLineTooLong = errors.New("importJSONL line exceeds maxLineBytes")
 
 type (
 	exportJSONLResult struct {
@@ -158,6 +161,19 @@ func classifyJSONLFileOpenError(fileName string, err error) error {
 }
 
 func readJSONLLines(s store.Store, input io.Reader, opts importJSONLOptions) (int64, int64, error) {
+	return readJSONLLinesWithMaxLineBytes(s, input, opts, importJSONLDefaultMaxLineBytes)
+}
+
+func readJSONLLinesWithMaxLineBytes(
+	s store.Store,
+	input io.Reader,
+	opts importJSONLOptions,
+	maxLineBytes int,
+) (int64, int64, error) {
+	if maxLineBytes <= 0 {
+		maxLineBytes = importJSONLDefaultMaxLineBytes
+	}
+
 	reader := bufio.NewReader(input)
 	batchSize := resolveImportJSONLBatchSize(opts.BatchSize)
 
@@ -169,9 +185,10 @@ func readJSONLLines(s store.Store, input io.Reader, opts importJSONLOptions) (in
 	)
 
 	for opts.Limit <= 0 || imported+int64(len(batch)) < opts.Limit {
-		line, err := reader.ReadBytes('\n')
+		line, consumedBytes, err := readImportJSONLLineBounded(reader, maxLineBytes)
+		bytesRead += consumedBytes
+
 		if len(line) > 0 {
-			bytesRead += int64(len(line))
 			lineNo++
 
 			entry, parseErr := parseImportJSONLLine(line, lineNo)
@@ -190,6 +207,15 @@ func readJSONLLines(s store.Store, input io.Reader, opts importJSONLOptions) (in
 				imported += written
 				batch = batch[:0]
 			}
+		}
+
+		if errors.Is(err, errImportJSONLLineTooLong) {
+			return imported, bytesRead, fmt.Errorf(
+				"%w: importJSONL line %d exceeds maxLineBytes (%d bytes)",
+				store.ErrValueParseFailed,
+				lineNo+1,
+				maxLineBytes,
+			)
 		}
 
 		if errors.Is(err, io.EOF) {
@@ -216,6 +242,34 @@ func readJSONLLines(s store.Store, input io.Reader, opts importJSONLOptions) (in
 	}
 
 	return imported, bytesRead, nil
+}
+
+func readImportJSONLLineBounded(reader *bufio.Reader, maxLineBytes int) ([]byte, int64, error) {
+	var (
+		line     []byte
+		consumed int64
+	)
+
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		consumed += int64(len(chunk))
+
+		if len(line)+len(chunk) > maxLineBytes {
+			return nil, consumed, errImportJSONLLineTooLong
+		}
+
+		line = append(line, chunk...)
+
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+
+		if err != nil && !errors.Is(err, io.EOF) {
+			return line, consumed, err
+		}
+
+		return line, consumed, err
+	}
 }
 
 func resolveImportJSONLBatchSize(batchSize int64) int64 {

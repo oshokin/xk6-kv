@@ -450,6 +450,56 @@ func TestImportJSONL_LastLineWithoutNewline(t *testing.T) {
 	assert.Equal(t, "Alice", item.(map[string]any)["name"])
 }
 
+func TestReadJSONLLinesWithMaxLineBytes_ExceedsLimitRejectsWithLineNumber(t *testing.T) {
+	t.Parallel()
+
+	mem := store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true})
+	serialized := store.NewSerializedStore(mem, store.NewJSONSerializer())
+
+	const maxLineBytes = 64
+
+	line := `{"key":"user:1","value":"` + strings.Repeat("x", 256) + `"}`
+
+	imported, bytesRead, err := readJSONLLinesWithMaxLineBytes(
+		serialized,
+		strings.NewReader(line),
+		importJSONLOptions{},
+		maxLineBytes,
+	)
+	require.Error(t, err)
+	assert.EqualValues(t, 0, imported)
+	assert.Positive(t, bytesRead)
+	require.ErrorIs(t, err, store.ErrValueParseFailed)
+	require.ErrorContains(t, err, "importJSONL line 1 exceeds maxLineBytes (64 bytes)")
+
+	exists, existsErr := serialized.Exists("user:1")
+	require.NoError(t, existsErr)
+	assert.False(t, exists)
+}
+
+func TestReadJSONLLinesWithMaxLineBytes_WithinLimitImportsRecord(t *testing.T) {
+	t.Parallel()
+
+	mem := store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true})
+	serialized := store.NewSerializedStore(mem, store.NewJSONSerializer())
+
+	line := `{"key":"user:1","value":"` + strings.Repeat("x", 128) + `"}`
+
+	imported, bytesRead, err := readJSONLLinesWithMaxLineBytes(
+		serialized,
+		strings.NewReader(line),
+		importJSONLOptions{},
+		512,
+	)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, imported)
+	assert.EqualValues(t, len(line), bytesRead)
+
+	value, getErr := serialized.Get("user:1")
+	require.NoError(t, getErr)
+	assert.Equal(t, strings.Repeat("x", 128), value)
+}
+
 func TestImportJSONL_MalformedJSONRejectsWithLineNumber(t *testing.T) {
 	t.Parallel()
 

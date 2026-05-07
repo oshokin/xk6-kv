@@ -886,6 +886,8 @@ declare module 'k6/x/kv' {
      *
      * The method validates input and serializes every value before mutating the store.
      * On any validation/serialization failure, it rejects and writes nothing.
+     * Top-level rejection is `InvalidOptionsError`; per-entry diagnostics keep
+     * precise names in `errors[]` (for example `SerializerError`).
      * This all-or-nothing guarantee applies to validation/serialization outcomes;
      * it is not a cross-key snapshot-isolation contract for concurrent readers on
      * the memory backend.
@@ -1039,8 +1041,9 @@ declare module 'k6/x/kv' {
 
     /**
      * Atomically sets newValue only if current value equals oldValue.
-     * This is the fundamental building block for implementing locks and
-     * other synchronization primitives.
+     * This is a building block for local first-writer-wins coordination
+     * among VUs sharing one xk6-kv process/store.
+     * It is not a distributed lock service.
      *
      * Pass `null` (or leave undefined) for `oldValue` to express
      * "swap only if the key is currently absent" (set-if-not-exists semantics).
@@ -1052,10 +1055,10 @@ declare module 'k6/x/kv' {
      *
      * @example
      * ```javascript
-     * // Implement a simple lock
-     * const acquired = await kv.compareAndSwap('lock:resource', null, myId);
+     * // Implement local first-writer-wins coordination in one k6 process.
+     * const acquired = await kv.compareAndSwap('coord:resource', null, myId);
      * if (acquired) {
-     *   // I acquired the lock
+     *   // This VU won the local coordination race
      * }
      * ```
      */
@@ -1100,7 +1103,7 @@ declare module 'k6/x/kv' {
      * Atomically sets key only if it is currently absent.
      *
      * Equivalent to `compareAndSwap(key, null, value)` with a clearer name for
-     * bootstrap and lock-creation flows.
+     * bootstrap and local coordination flows.
      *
      * @param key - The key to initialize
      * @param value - The value to store when the key is absent
@@ -1108,9 +1111,9 @@ declare module 'k6/x/kv' {
      *
      * @example
      * ```javascript
-     * const created = await kv.setIfAbsent('lock:job:1', workerId);
+     * const created = await kv.setIfAbsent('coord:job:1', workerId);
      * if (created) {
-     *   // This worker won the bootstrap race
+     *   // This worker won the local bootstrap race
      * }
      * ```
      */
@@ -1426,10 +1429,11 @@ declare module 'k6/x/kv' {
      * Synchronously closes the underlying store and releases resources.
      * Should be called in teardown() when done with the store.
      *
-     * - Disk backend: releases bbolt file handle and in-memory indexes
-     * - Memory backend: no-op (safe to call, does nothing)
+     * - This KV handle becomes closed; further async calls reject with StoreClosedError
+     * - Disk backend: when this is the last open handle, releases bbolt file handle and in-memory indexes
+     * - Memory backend: no backend resources to release, but this handle still becomes closed
      * - Safe to call multiple times
-     * - Reference-counted: store closes only when last close() is called
+     * - Reference-counted: shared store closes only when last close() is called
      *
      * @example
      * ```javascript

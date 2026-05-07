@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/grafana/sobek"
@@ -22,10 +23,9 @@ import (
 //
 // Threading model:
 //
-//   - All blocking store work occurs in a goroutine (off the VU event loop).
-//   - For converting Go results to JavaScript values, we use k.vu.Runtime().ToValue(...)
-//     in the same goroutine, matching the original upstream plugin's pattern that
-//     is known to work with this version of Sobek/k6.
+//   - All blocking store work occurs in worker goroutines (off the VU event loop).
+//   - Promise settle (resolve/reject) and Go->JS conversion (toJS/ToValue) run only
+//     on the VU event loop through RegisterCallback callbacks.
 //
 // This avoids corrupting Sobek's internal VM state and prevents panics like
 // "slice bounds out of range [:-1]" in vm.popTryFrame under high concurrency.
@@ -54,6 +54,10 @@ type KV struct {
 	// This prevents accidental repeated Close() calls from decrementing
 	// shared backend refcounts multiple times.
 	closeOnce sync.Once
+	// closed marks this JavaScript-facing handle as closed.
+	// Once set, all async operations reject with StoreClosedError, regardless
+	// of backend-specific close behavior.
+	closed atomic.Bool
 	// closeErr captures the first close result and is returned on subsequent calls.
 	closeErr error
 }
@@ -72,6 +76,11 @@ func NewKV(vu modules.VU, s store.Store) *KV {
 // databaseNotOpenError produces a consistent error when the backing store is nil.
 func (k *KV) databaseNotOpenError() *Error {
 	return NewError(DatabaseNotOpenError, "database is not open")
+}
+
+// storeHandleClosedError produces a consistent error when this KV handle has been closed.
+func (k *KV) storeHandleClosedError() *Error {
+	return NewError(StoreClosedError, "kv store handle is closed")
 }
 
 // rejectedPromise creates an already-rejected Promise on the VU event loop.
@@ -155,6 +164,14 @@ func (k *KV) runAsyncWithStore(
 		if k.store == nil {
 			runOnEventLoop(func() error {
 				return reject(k.databaseNotOpenError().ToSobekValue(rt))
+			})
+
+			return
+		}
+
+		if k.closed.Load() {
+			runOnEventLoop(func() error {
+				return reject(k.storeHandleClosedError().ToSobekValue(rt))
 			})
 
 			return

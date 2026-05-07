@@ -47,7 +47,7 @@ func NewEntryListError(operation string, kind EntryListErrorKind, errors []Entry
 	return &EntryListError{
 		Operation: operation,
 		Kind:      kind,
-		Message:   fmt.Sprintf("%s failed: %d invalid %s", operation, invalidCount, entryWord),
+		Message:   fmt.Sprintf("%s validation failed: %d invalid %s", operation, invalidCount, entryWord),
 		Errors:    errors,
 	}
 }

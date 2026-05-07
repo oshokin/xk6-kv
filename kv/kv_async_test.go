@@ -179,8 +179,11 @@ func TestKVAsync_SetMany_SerializationFailureRejectsAndWritesNothing(t *testing.
 				throw new Error("expected rejection");
 			})
 			.catch((err) => {
-				if (!err || err.name !== "SerializerError") {
+				if (!err || err.name !== "InvalidOptionsError") {
 					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (err.message !== "setMany validation failed: 1 invalid entry") {
+					throw new Error("unexpected error message: " + String(err && err.message));
 				}
 				if (!Array.isArray(err.errors) || err.errors.length !== 1) {
 					throw new Error("expected single entry serialization error");
@@ -633,6 +636,142 @@ func TestKV_Close_IdempotentPerHandle(t *testing.T) {
 	require.NoError(t, kv.Close())
 
 	assert.EqualValues(t, 1, countingStore.closeCalls.Load(), "underlying Store.Close must run once per KV handle")
+}
+
+func TestKV_Close_MemoryHandleRejectsAfterClose(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("close:memory:key", "value")
+			.then((value) => {
+				if (value !== "value") {
+					throw new Error("unexpected set result");
+				}
+			});
+	`)
+
+	require.NoError(t, kv.Close())
+
+	runKVScript(t, runtime, kv, `
+		__kv.get("close:memory:key")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "StoreClosedError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (err.message !== "kv store handle is closed") {
+					throw new Error("unexpected error message: " + String(err && err.message));
+				}
+			});
+	`)
+}
+
+func TestKV_Close_DiskHandleRejectsAfterClose(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	diskStore, err := store.NewDiskStore(
+		true,
+		filepath.Join(t.TempDir(), "close-handle-disk.db"),
+		nil,
+	)
+	require.NoError(t, err)
+	require.NoError(t, diskStore.Open())
+
+	kv := NewKV(runtime.VU, diskStore)
+
+	t.Cleanup(func() {
+		_ = kv.Close()
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("close:disk:key", "value")
+			.then(() => {
+			});
+	`)
+
+	require.NoError(t, kv.Close())
+
+	runKVScript(t, runtime, kv, `
+		__kv.get("close:disk:key")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "StoreClosedError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (err.message !== "kv store handle is closed") {
+					throw new Error("unexpected error message: " + String(err && err.message));
+				}
+			});
+	`)
+}
+
+func TestKV_Close_DoesNotCloseOtherHandleUntilLastClose(t *testing.T) {
+	t.Parallel()
+
+	firstRuntime := modulestest.NewRuntime(t)
+	secondRuntime := modulestest.NewRuntime(t)
+
+	diskStore, err := store.NewDiskStore(
+		true,
+		filepath.Join(t.TempDir(), "close-handle-shared.db"),
+		nil,
+	)
+	require.NoError(t, err)
+	require.NoError(t, diskStore.Open())
+	require.NoError(t, diskStore.Open())
+
+	firstKV := NewKV(firstRuntime.VU, diskStore)
+	secondKV := NewKV(secondRuntime.VU, diskStore)
+
+	t.Cleanup(func() {
+		_ = firstKV.Close()
+		_ = secondKV.Close()
+	})
+
+	runKVScript(t, firstRuntime, firstKV, `
+		__kv.set("close:shared:key", "shared-value")
+			.then(() => {
+			});
+	`)
+
+	require.NoError(t, firstKV.Close())
+
+	runKVScript(t, firstRuntime, firstKV, `
+		__kv.get("close:shared:key")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "StoreClosedError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (err.message !== "kv store handle is closed") {
+					throw new Error("unexpected error message: " + String(err && err.message));
+				}
+			});
+	`)
+
+	runKVScript(t, secondRuntime, secondKV, `
+		__kv.exists("close:shared:key")
+			.then((exists) => {
+				if (!exists) {
+					throw new Error("key must remain accessible from still-open handle");
+				}
+			});
+	`)
+
+	require.NoError(t, secondKV.Close())
+
+	err = diskStore.Set("close:shared:post-close", "value")
+	require.Error(t, err, "store must reject operations after the last handle close")
 }
 
 func TestKVAsync_IncrementBy_InvalidDelta_RejectsPromise(t *testing.T) {
@@ -3240,7 +3379,7 @@ func TestKVAsync_SetMany_SerializationFailureMetrics(t *testing.T) {
 				throw new Error("expected rejection");
 			})
 			.catch((err) => {
-				if (!err || err.name !== "SerializerError") {
+				if (!err || err.name !== "InvalidOptionsError") {
 					throw new Error("unexpected error class: " + String(err && err.name));
 				}
 			});
@@ -3282,7 +3421,7 @@ func TestKVAsync_SetMany_SerializationFailureMetrics(t *testing.T) {
 			case metricKVErrorsTotal:
 				errorType, hasErrorType := sample.Tags.Get(tagErrorType)
 				require.True(t, hasErrorType)
-				assert.Equal(t, string(SerializerError), errorType)
+				assert.Equal(t, string(InvalidOptionsError), errorType)
 				assert.InDelta(t, 1.0, sample.Value, 1e-9)
 
 				seenErrors = true
