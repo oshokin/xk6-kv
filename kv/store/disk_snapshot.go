@@ -8,6 +8,8 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 	boltErrors "go.etcd.io/bbolt/errors"
+
+	"github.com/oshokin/xk6-kv/internal/fileutil"
 )
 
 // Backup writes the on-disk bbolt database to a standalone snapshot file.
@@ -65,6 +67,8 @@ func (s *DiskStore) diskSelfSnapshotSummary() (*BackupSummary, error) {
 }
 
 // writeDiskSnapshot writes a snapshot to a file.
+//
+//nolint:funlen // this is a complex function.
 func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error) {
 	targetDir := filepath.Dir(destination)
 	targetBase := filepath.Base(destination)
@@ -155,6 +159,12 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 
 	//nolint:forbidigo // file I/O is required for renaming the temporary file to the destination file.
 	if err := os.Rename(tempFile, destination); err != nil {
+		exportErr = fmt.Errorf("%w: %w", ErrBackupFinalizeFailed, err)
+
+		return nil, exportErr
+	}
+
+	if err := fileutil.SyncParentDir(destination); err != nil {
 		exportErr = fmt.Errorf("%w: %w", ErrBackupFinalizeFailed, err)
 
 		return nil, exportErr

@@ -289,7 +289,7 @@ declare module 'k6/x/kv' {
 
     /**
      * Number of keys to return.
-     * Must be a positive integer.
+     * Must be a positive integer less than or equal to 1,000,000.
      */
     count: number;
 
@@ -1311,7 +1311,7 @@ declare module 'k6/x/kv' {
      *
      * This method returns keys only. It does not clone, deserialize, or return values.
      *
-     * `count` is required and must be a positive integer.
+     * `count` is required and must be in range [1, 1,000,000].
      *
      * `unique` defaults to true. When unique is true and fewer matching keys exist
      * than requested, all available matching keys are returned in random order.

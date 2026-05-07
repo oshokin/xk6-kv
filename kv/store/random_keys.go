@@ -1,9 +1,25 @@
 package store
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"slices"
 )
+
+// MaxRandomKeysCount bounds randomKeys() output size to avoid unbounded allocations.
+const MaxRandomKeysCount int64 = 1_000_000
+
+func validateRandomKeysCount(count int64) error {
+	if count > MaxRandomKeysCount {
+		return fmt.Errorf(
+			"%w: randomKeys count must be less than or equal to %d",
+			ErrKVOptionsInvalid,
+			MaxRandomKeysCount,
+		)
+	}
+
+	return nil
+}
 
 func sampleKeys(keys []string, count int64, unique bool) []string {
 	if count <= 0 || len(keys) == 0 {

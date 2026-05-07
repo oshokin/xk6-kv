@@ -458,7 +458,7 @@ Backend note:
   ```typescript
   interface RandomKeysOptions {
     prefix?: string  // Optional prefix filter
-    count: number    // Required positive integer
+    count: number    // Required integer in range [1, 1000000]
     unique?: boolean // Defaults to true
   }
   ```
@@ -474,6 +474,7 @@ Backend note:
   ```
 
   `randomKeys()` returns keys only. It does not clone, deserialize, or return values.
+  `count` is capped at `1000000` to protect the k6 process from unbounded allocations.
   When `unique` is `true` and fewer matching keys exist than requested, all available matching keys are returned in random order.
   Use `claimRandom()` or `popRandom()` when you need exclusive allocation.
 
@@ -643,7 +644,7 @@ console.log(result.bytesWritten);
 - `prefix` is optional; empty or omitted means all keys.
 - `limit` is optional; if omitted or `<= 0`, all matching entries are exported.
 
-`exportJSONL()` writes to a temporary file, flushes and fsyncs it, then renames it into place only after a successful write. This avoids replacing the final file with a partial export and improves crash resilience for the exported artifact.
+`exportJSONL()` writes to a temporary file, flushes and fsyncs it, renames it into place, then syncs the parent directory. This avoids replacing the final file with a partial export and hardens crash durability of the rename step.
 
 `importJSONL()` example:
 

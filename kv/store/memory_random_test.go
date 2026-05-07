@@ -185,6 +185,27 @@ func TestMemoryStore_RandomKeys_EmptyStore_ReturnsEmptySlice(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_RandomKeys_CountAboveMaxReturnsError(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		name := "trackKeys=false"
+		if trackKeys {
+			name = "trackKeys=true"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+
+			_, err := store.RandomKeys("user:", MaxRandomKeysCount+1, false)
+			require.Error(t, err)
+			require.ErrorIs(t, err, ErrKVOptionsInvalid)
+		})
+	}
+}
+
 func TestMemoryStore_RandomKeys_PrefixFilter(t *testing.T) {
 	t.Parallel()
 

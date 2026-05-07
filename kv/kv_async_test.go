@@ -1292,6 +1292,28 @@ func TestKVAsync_RandomKeys_FractionalCountRejectsPromise(t *testing.T) {
 	`)
 }
 
+func TestKVAsync_RandomKeys_TooLargeCountRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.randomKeys({ count: Number.MAX_SAFE_INTEGER, unique: false })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (!String(err.message).includes("less than or equal")) {
+					throw new Error("unexpected error message: " + String(err.message));
+				}
+			});
+	`)
+}
+
 func TestKVAsync_RandomKeys_InvalidUniqueRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -2531,6 +2553,109 @@ func TestKVAsync_RandomKeys_EmptyResultMetrics(t *testing.T) {
 	assert.True(t, seenDuration)
 	assert.True(t, seenFailed)
 	assert.True(t, seenEmpty, "empty randomKeys result should emit empty-result metrics")
+}
+
+func TestKVAsync_RandomKeys_InvalidOptionsMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewJSONSerializer(),
+		),
+	)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.randomKeys({ count: Number.MAX_SAFE_INTEGER, unique: false })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "InvalidOptionsError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+
+	var (
+		seenTotal      bool
+		seenDuration   bool
+		seenFailed     bool
+		seenErrors     bool
+		seenEmpty      bool
+		seenFailedZero bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, ok := sample.Tags.Get(tagOp)
+			if !ok || op != opRandomKeys {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				if sample.Value == 0 {
+					seenFailedZero = true
+				}
+
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			case metricKVErrorsTotal:
+				errorType, hasErrorType := sample.Tags.Get(tagErrorType)
+				require.True(t, hasErrorType)
+				assert.Equal(t, string(InvalidOptionsError), errorType)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenErrors = true
+			case metricKVEmptyResult:
+				seenEmpty = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+	assert.True(t, seenErrors)
+	assert.False(t, seenEmpty, "failed randomKeys should not emit empty-result metrics")
+	assert.False(t, seenFailedZero, "failed randomKeys should not emit failed=0 samples")
 }
 
 func TestKVAsync_DeleteByPrefix_InvalidOptionsMetrics(t *testing.T) {

@@ -1,6 +1,8 @@
 package kv
 
 import (
+	"fmt"
+
 	"github.com/grafana/sobek"
 	"go.k6.io/k6/js/common"
 
@@ -357,6 +359,13 @@ func importRandomKeysOptions(rt *sobek.Runtime, options sobek.Value) (randomKeys
 		return parsed, NewError(
 			InvalidOptionsError,
 			"randomKeys count must be a positive integer",
+		)
+	}
+
+	if count > store.MaxRandomKeysCount {
+		return parsed, NewError(
+			InvalidOptionsError,
+			fmt.Sprintf("randomKeys count must be less than or equal to %d", store.MaxRandomKeysCount),
 		)
 	}
 

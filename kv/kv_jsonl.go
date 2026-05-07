@@ -13,6 +13,7 @@ import (
 
 	"github.com/grafana/sobek"
 
+	"github.com/oshokin/xk6-kv/internal/fileutil"
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
@@ -110,6 +111,10 @@ func exportJSONL(s store.Store, opts exportJSONLOptions) (*exportJSONLResult, er
 
 	//nolint:forbidigo // file I/O is required to finalize JSONL export.
 	if err := os.Rename(tempName, opts.FileName); err != nil {
+		return nil, fmt.Errorf("%w: %w", store.ErrBackupFinalizeFailed, err)
+	}
+
+	if err := fileutil.SyncParentDir(opts.FileName); err != nil {
 		return nil, fmt.Errorf("%w: %w", store.ErrBackupFinalizeFailed, err)
 	}
 

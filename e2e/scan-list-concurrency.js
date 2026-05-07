@@ -1,6 +1,5 @@
 import { check } from 'k6';
 import exec from 'k6/execution';
-import encoding from 'k6/encoding';
 import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
@@ -82,23 +81,52 @@ export async function setup() {
 // teardown closes disk stores so repeated runs do not collide.
 export const teardown = createTeardown(kv, TEST_NAME);
 
-// encodeCursor mimics the cursor encoding performed by Scan().
-// encodeCursor wraps encoding.b64encode for readability inside scan tasks.
-function encodeCursor(key) {
-  return encoding.b64encode(key, 'utf-8');
+// collectPageStartCursors retrieves page-start cursors through the public scan()
+// API so tests never rely on internal cursor encoding details.
+async function collectPageStartCursors(maxPageIndex) {
+  const pageStartCursors = [''];
+  let cursor = '';
+
+  for (let pageIndex = 0; pageIndex < maxPageIndex; pageIndex += 1) {
+    const page = await kv.scan({
+      prefix: INVOICE_PREFIX,
+      limit: SCAN_PAGE_SIZE,
+      cursor
+    });
+
+    if (page.done || page.cursor === '') {
+      break;
+    }
+
+    pageStartCursors.push(page.cursor);
+    cursor = page.cursor;
+  }
+
+  return pageStartCursors;
 }
 
 // scanListConcurrency fires overlapping scan() and list() requests (via
 // Promise.all) to ensure Sobek handles concurrent pagination results.
 export default async function scanListConcurrency() {
   const iteration = exec.scenario.iterationInTest;
+  const scanStartPositions = Array.from(
+    { length: SCAN_CONCURRENCY },
+    (_, idx) => (iteration * SCAN_CONCURRENCY + idx) % TOTAL_INVOICES
+  );
+  const scanStartPageIndexes = scanStartPositions.map(
+    (position) => Math.floor(position / SCAN_PAGE_SIZE)
+  );
+  const maxScanStartPageIndex = scanStartPageIndexes.reduce(
+    (currentMax, pageIndex) => Math.max(currentMax, pageIndex),
+    0
+  );
+  const pageStartCursors = await collectPageStartCursors(maxScanStartPageIndex);
 
   // Create concurrent scan tasks with different cursor positions.
   const scanTasks = Array.from({ length: SCAN_CONCURRENCY }, (_, idx) => {
-    // Distribute scan starting points across the keyspace.
-    const startPosition = (iteration * SCAN_CONCURRENCY + idx) % TOTAL_INVOICES;
-    const startKey = `${INVOICE_PREFIX}${String(startPosition).padStart(KEY_PADDING, '0')}`;
-    const cursor = idx === 0 ? '' : encodeCursor(startKey);
+    // Distribute scan starting pages across the keyspace.
+    const startPageIndex = scanStartPageIndexes[idx];
+    const cursor = pageStartCursors[startPageIndex] || '';
 
     return kv.scan({
       prefix: INVOICE_PREFIX,

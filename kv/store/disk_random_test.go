@@ -194,6 +194,27 @@ func TestDiskStore_RandomKeys_EmptyStore_ReturnsEmptySlice(t *testing.T) {
 	}
 }
 
+func TestDiskStore_RandomKeys_CountAboveMaxReturnsError(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		name := "trackKeys=false"
+		if trackKeys {
+			name = "trackKeys=true"
+		}
+
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+
+			_, err := store.RandomKeys("user:", MaxRandomKeysCount+1, false)
+			require.Error(t, err)
+			require.ErrorIs(t, err, ErrKVOptionsInvalid)
+		})
+	}
+}
+
 func TestDiskStore_RandomKeys_PrefixFilter(t *testing.T) {
 	t.Parallel()
 

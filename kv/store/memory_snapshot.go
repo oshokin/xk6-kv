@@ -7,6 +7,8 @@ import (
 	"slices"
 
 	bolt "go.etcd.io/bbolt"
+
+	"github.com/oshokin/xk6-kv/internal/fileutil"
 )
 
 type (
@@ -112,6 +114,10 @@ func (s *MemoryStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 		// Same logic: if the rename failed, removing the temporary file is a courtesy.
 		_ = os.Remove(tempFile)
 
+		return nil, fmt.Errorf("%w: %w", ErrBackupFinalizeFailed, err)
+	}
+
+	if err := fileutil.SyncParentDir(opts.FileName); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrBackupFinalizeFailed, err)
 	}
 

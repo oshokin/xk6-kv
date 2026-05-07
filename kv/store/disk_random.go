@@ -31,6 +31,10 @@ func (s *DiskStore) RandomKey(prefix string) (string, error) {
 
 // RandomKeys returns random key names matching prefix.
 func (s *DiskStore) RandomKeys(prefix string, count int64, unique bool) ([]string, error) {
+	if err := validateRandomKeysCount(count); err != nil {
+		return nil, err
+	}
+
 	if count <= 0 {
 		return []string{}, nil
 	}

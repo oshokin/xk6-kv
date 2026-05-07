@@ -121,10 +121,12 @@ export const options = {
     'checks{api:scan-types}': ['rate>0.999'],
     'checks{api:scan-entry-structure}': ['rate>0.999'],
     'checks{api:scan-pagination}': ['rate>0.999'],
+    'checks{api:scan-invalid-cursor-rejects}': ['rate>0.999'],
     'checks{api:scanKeys-structure}': ['rate>0.999'],
     'checks{api:scanKeys-types}': ['rate>0.999'],
     'checks{api:scanKeys-key-types}': ['rate>0.999'],
     'checks{api:scanKeys-pagination}': ['rate>0.999'],
+    'checks{api:scanKeys-invalid-cursor-rejects}': ['rate>0.999'],
     'checks{api:randomKey-empty}': ['rate>0.999'],
     'checks{api:randomKeys-is-array}': ['rate>0.999'],
     'checks{api:randomKeys-key-types}': ['rate>0.999'],
@@ -1236,6 +1238,37 @@ export default async function apiOutputValidationTest() {
         typeof nextScanKeysPage.done === 'boolean'
     });
   }
+
+  // scan()/scanKeys(): Invalid cursor payloads must reject with InvalidCursorError.
+  const garbageCursor = '%%%not-base64-cursor%%%';
+  let scanInvalidCursorError = null;
+  try {
+    await kv.scan({
+      prefix: 'api:listKeys:user:',
+      cursor: garbageCursor,
+      limit: 1
+    });
+  } catch (err) {
+    scanInvalidCursorError = err;
+  }
+
+  let scanKeysInvalidCursorError = null;
+  try {
+    await kv.scanKeys({
+      prefix: 'api:listKeys:user:',
+      cursor: garbageCursor,
+      limit: 1
+    });
+  } catch (err) {
+    scanKeysInvalidCursorError = err;
+  }
+
+  check(true, {
+    'api:scan-invalid-cursor-rejects': () =>
+      scanInvalidCursorError !== null && scanInvalidCursorError.name === 'InvalidCursorError',
+    'api:scanKeys-invalid-cursor-rejects': () =>
+      scanKeysInvalidCursorError !== null && scanKeysInvalidCursorError.name === 'InvalidCursorError'
+  });
 
   // backup(): Validate snapshot operation structure and int64 marshalling.
   // Verifies that backup results have correct camelCase field names and that int64
