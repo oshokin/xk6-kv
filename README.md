@@ -118,6 +118,23 @@ export async function teardown() {
 ```
 
 > **Async note:** every `kv.*` helper returns a Promise. In k6 scripts you should mark your `setup`, `default`, or helper functions as `async` (or use `.then`) and `await` each call—otherwise errors are swallowed and the operation may never finish.
+>
+> **Concurrency note:** avoid unbounded `Promise.all()` with very large KV batches (for example, tens of thousands of `kv.set()` calls at once). Prefer `setMany()` for object-map writes, sequential `await`, or bounded concurrency.
+
+Bounded concurrency helper:
+
+```javascript
+async function mapLimit(items, limit, fn) {
+  const width = Math.max(1, Math.min(limit, items.length || 1));
+  const workers = Array.from({ length: width }, async (_, worker) => {
+    for (let i = worker; i < items.length; i += width) {
+      await fn(items[i], i);
+    }
+  });
+
+  await Promise.all(workers);
+}
+```
 
 ## Error Handling
 
@@ -180,6 +197,7 @@ High-level categories:
 
 Full TypeScript support with IntelliSense and type safety! Copy the [`typescript/`](./typescript/) folder to your project for a ready-to-use starter kit.\
 See [`typescript/README.md`](./typescript/README.md) for complete setup instructions.
+`typescript/` is a local starter example project (template), not a published npm package.
 
 ## API Reference
 
@@ -253,8 +271,9 @@ All methods return Promises except `close()`.
 #### Basic Operations
 
 - **`get(key: string): Promise<any>`** - Retrieves a value by key. Throws if key doesn't exist.
-- **`getMany(keys: string[]): Promise<Array<{ key: string, exists: boolean, value: any | null }>>`** - Reads many keys in one logical batch and preserves input order. Missing keys return `{ exists: false, value: null }`; stored JSON `null` returns `{ exists: true, value: null }`; duplicate keys are allowed.
+- **`getMany(keys: string[]): Promise<Array<{ key: string, exists: boolean, value: any | null }>>`** - Reads many keys in one logical batch and preserves input order. Missing keys return `{ exists: false, value: null }`; stored JSON `null` returns `{ exists: true, value: null }`; duplicate keys are allowed. Empty-string keys are accepted for reads and resolve like missing keys in normal public API usage.
   > `getMany()` backend note: disk reads run inside one bbolt read transaction; memory reads use per-shard locks and do not provide cross-key snapshot isolation under concurrent writes.
+  > Mutating APIs (`set`, `setMany`, `delete`, `deleteMany`) reject empty-string keys.
 - **`set(key: string, value: any): Promise<any>`** - Sets a key-value pair. Empty-string keys are rejected.
 - **`setMany(entries: Record<string, any>): Promise<{ written: number }>`** - Writes an object map in one logical batch. Keys must be non-empty strings. Validates the input shape and serializes all values before writing; rejects with `err.errors` and writes nothing if any entry fails. `setMany()` provides all-or-nothing validation/serialization semantics, but is not intended to provide cross-key snapshot isolation for concurrent readers on the memory backend.
 - **`deleteMany(keys: string[]): Promise<{ deleted: number, missing: number }>`** - Deletes an explicit list of non-empty keys. Missing keys are not errors and are counted in `missing`; duplicate keys are processed in input order. Rejects invalid input before deleting anything.
@@ -262,7 +281,7 @@ All methods return Promises except `close()`.
 - **`delete(key: string): Promise<boolean>`** - Removes a key-value pair (always resolves to `true`).
 - **`exists(key: string): Promise<boolean>`** - Checks if a key exists.
 - **`clear(): Promise<boolean>`** - Removes all entries (always resolves to `true`).  
-  > `clear()` drops and recreates the underlying bbolt bucket, so treat it like a destructive maintenance operation. Run it while writers are idle (or immediately call `rebuildKeyList()` afterward when `trackKeys: true`) to avoid brief indexing drift for keys inserted concurrently with the wipe.
+  > `clear()` is destructive and best used in setup/teardown or maintenance windows. Under concurrent writers, new keys can appear immediately after the wipe completes. With `trackKeys: true`, in-memory indexes are reset together with store state.
 - **`size(): Promise<number>`** - Returns current store size (number of keys).
 
 `getMany()` example:
@@ -624,7 +643,7 @@ console.log(result.bytesWritten);
 - `prefix` is optional; empty or omitted means all keys.
 - `limit` is optional; if omitted or `<= 0`, all matching entries are exported.
 
-`exportJSONL()` writes a temporary file in the destination directory and renames it into place only after a successful write. This avoids replacing the final file with a partial export if the operation fails.
+`exportJSONL()` writes to a temporary file, flushes and fsyncs it, then renames it into place only after a successful write. This avoids replacing the final file with a partial export and improves crash resilience for the exported artifact.
 
 `importJSONL()` example:
 
@@ -667,6 +686,7 @@ The import is not a global transaction: if a later line is invalid, already comm
 - **`trackKeys: false`** (default): `randomKey()` falls back to a two-pass cursor walk in a **single** bbolt read snapshot, so heavy use remains O(n). Enable tracking or redesign workloads that call `randomKey()` frequently to avoid linear-time pauses.
 - **Random key workloads:** Calling `randomKey()` repeatedly with `trackKeys: false` (especially on the disk backend) keeps a read transaction open while it counts and selects keys, which can stall the lone bbolt writer until the call finishes. Turn on `trackKeys` (for O(1)/O(log n) sampling) or throttle/redesign these workloads to avoid head-of-line blocking.
 - **`randomKeys()` behavior:** Uses in-memory key indexes when `trackKeys: true`. For small samples (`count` much smaller than matching keys), it samples by rank without scanning the full prefix range. For near-full unique samples, disk with `trackKeys: true` may fall back to cursor scanning because returning most of the prefix range is inherently linear. With `trackKeys: false`, it collects candidate keys via `scanKeys()` and samples in memory.
+- **Memory `trackKeys: false` scan/list costs:** `scan()`, `scanKeys()`, `list()`, and `listKeys()` use untracked shard-map iteration. On large keyspaces, repeated pagination can become expensive; if these operations are hot, prefer `trackKeys: true`.
 - **`count()` / `count({ prefix })` complexity:**
   - `count()` (same as `size()`):
     - memory backend: O(shards)

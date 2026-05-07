@@ -1,5 +1,6 @@
 {
   "name": "my-k6-project",
+  "description": "Local starter example for xk6-kv TypeScript usage (not published package).",
   "version": "0.0.1",
   "private": true,
   "devDependencies": {

@@ -863,6 +863,8 @@ declare module 'k6/x/kv' {
      * Stored JSON null values return { exists: true, value: null }.
      *
      * Duplicate keys are allowed and produce duplicate values.
+     * Empty-string keys are accepted for reads and typically resolve as missing.
+     * Mutating APIs (`set`, `setMany`, `delete`, `deleteMany`) reject empty keys.
      */
     getMany<T = any>(keys: string[]): Promise<Array<GetManyItem<T>>>;
 

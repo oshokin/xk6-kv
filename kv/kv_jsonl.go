@@ -454,6 +454,12 @@ func writeJSONLFile(file *os.File, s store.Store, opts exportJSONLOptions) (int6
 		return 0, fmt.Errorf("%w: %w", store.ErrSnapshotExportFailed, err)
 	}
 
+	// Ensure buffered data is committed to stable storage before closing/renaming.
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return 0, fmt.Errorf("%w: %w", store.ErrSnapshotExportFailed, err)
+	}
+
 	if err := file.Close(); err != nil {
 		return 0, fmt.Errorf("%w: %w", store.ErrSnapshotExportFailed, err)
 	}

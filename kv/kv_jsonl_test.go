@@ -162,6 +162,30 @@ func TestExportJSONL_ReplacesExistingFile(t *testing.T) {
 	assert.Equal(t, "user:1", records[0]["key"])
 }
 
+func TestExportJSONL_DoesNotReplaceExistingFileOnWriteError(t *testing.T) {
+	t.Parallel()
+
+	target := filepath.Join(t.TempDir(), "users.jsonl")
+	//nolint:forbidigo // file I/O is required for export verification tests.
+	require.NoError(t, os.WriteFile(target, []byte("old-content"), 0o644))
+
+	failingStore := exportEncodeFailureStore{
+		Store: store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+	}
+
+	_, err := exportJSONL(failingStore, exportJSONLOptions{
+		FileName: target,
+		Prefix:   "user:",
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, store.ErrSnapshotExportFailed)
+
+	//nolint:forbidigo // file I/O is required for export verification tests.
+	data, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	assert.Equal(t, "old-content", string(data))
+}
+
 func TestImportJSONL_ImportsRecords(t *testing.T) {
 	t.Parallel()
 
@@ -818,6 +842,23 @@ type setManyMismatchStore struct {
 
 func (s setManyMismatchStore) SetMany(entries []store.Entry) (int64, error) {
 	return int64(len(entries) - 1), nil
+}
+
+type exportEncodeFailureStore struct {
+	store.Store
+}
+
+//nolint:revive // this is a test store.
+func (s exportEncodeFailureStore) Scan(prefix, afterKey string, limit int64) (*store.ScanPage, error) {
+	return &store.ScanPage{
+		Entries: []store.Entry{
+			{
+				Key:   "user:1",
+				Value: func() {},
+			},
+		},
+		NextKey: "",
+	}, nil
 }
 
 func writeJSONLFileForTest(t *testing.T, path string, lines ...string) {

@@ -44,6 +44,12 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/set-many-all-or-nothing.js
    ```
 
+   For large async write batches with bounded concurrency (instead of unbounded `Promise.all()`), try:
+
+   ```bash
+   k6 run examples/bounded-concurrency.js
+   ```
+
    For ordered bulk reads with missing/null behavior, try:
 
    ```bash

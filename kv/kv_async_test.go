@@ -252,6 +252,25 @@ func TestKVAsync_GetMany_EmptyArrayResolvesEmptyArray(t *testing.T) {
 	`)
 }
 
+func TestKVAsync_GetMany_EmptyStringKeyResolvesMissingItem(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.getMany([""])
+			.then((items) => {
+				if (!Array.isArray(items) || items.length !== 1) {
+					throw new Error("expected one result item");
+				}
+				if (items[0].key !== "" || items[0].exists !== false || items[0].value !== null) {
+					throw new Error("empty string key must resolve as missing");
+				}
+			});
+	`)
+}
+
 func TestKVAsync_GetMany_InvalidShapeRejectsPromise(t *testing.T) {
 	t.Parallel()
 

@@ -1,6 +1,7 @@
 # TypeScript Support for xk6-kv
 
 Complete TypeScript starter kit for xk6-kv. Just copy and use!
+This folder is a local starter example project, not a published npm package.
 
 ## Quick Start
 
