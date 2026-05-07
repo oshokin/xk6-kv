@@ -399,6 +399,7 @@ func TestDiskStore_Open_ReadOnlyExistingBucket(t *testing.T) {
 
 	err = store.Set("write", "should fail")
 	require.ErrorIs(t, err, ErrDiskStoreWriteFailed, "writes must fail in read-only mode")
+	require.ErrorIs(t, err, ErrDiskStoreReadOnly, "read-only writes must expose stable sentinel")
 }
 
 // TestDiskStore_Open_ReadOnlyMissingBucketFails ensures read-only open errors when the

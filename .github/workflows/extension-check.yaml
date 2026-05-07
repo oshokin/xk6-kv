@@ -16,9 +16,9 @@ on:
 # Environment variables (constants for configuration).
 env:
   # Tool versions.
-  GOLANGCI_LINT_VERSION: "v2.12.1"
-  GO_VERSION: "1.25.x"
-  XK6_VERSION: "latest"
+  GOLANGCI_LINT_VERSION: "v2.12.2"
+  GO_VERSION: "1.25.9"
+  XK6_VERSION: "v1.4.1"
 
   # Test configuration.
   TEST_TIMEOUT: "600s"
@@ -47,6 +47,27 @@ jobs:
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
 
+  # Job to ensure TypeScript declarations typecheck.
+  test-typescript:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout the repository code.
+      - name: Checkout code
+        uses: actions/checkout@v6
+      # Install Node.js for the TypeScript check.
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: "typescript/package-lock.json"
+      # Install dependencies and run the typecheck script.
+      - name: Typecheck declarations
+        run: |
+          npm ci
+          npm run typecheck
+        working-directory: typescript
+
   # Job to test the extension on multiple Go versions and platforms.
   test-go-versions:
     runs-on: ${{ matrix.platform }}
@@ -55,7 +76,7 @@ jobs:
       fail-fast: false
       # Create a matrix of 2 jobs: 1 Go version × 2 platforms.
       matrix:
-        go-version: ["1.25.x"]
+        go-version: ["1.25.9"]
         platform: [ubuntu-latest, windows-latest]
     steps:
       # Checkout the repository code.

@@ -254,6 +254,10 @@ func (s *DiskStore) Set(key string, value any) error {
 	}
 	defer release()
 
+	if err := s.ensureWritable(); err != nil {
+		return fmt.Errorf("%w: %w", ErrDiskStoreWriteFailed, err)
+	}
+
 	// Convert value to bytes if it's not already.
 	valueBytes, err := normalizeToBytes(value)
 	if err != nil {
@@ -300,6 +304,10 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 		return 0, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 	defer release()
+
+	if err := s.ensureWritable(); err != nil {
+		return 0, fmt.Errorf("%w: %w", ErrDiskStoreIncrementFailed, err)
+	}
 
 	if s.trackKeys {
 		// Keep bbolt mutation and index update as one logical operation.
@@ -370,6 +378,10 @@ func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, er
 	}
 	defer release()
 
+	if err := s.ensureWritable(); err != nil {
+		return nil, false, fmt.Errorf("%w: %w", ErrDiskStoreGetOrSetFailed, err)
+	}
+
 	// Convert value to bytes if it's not already.
 	valueBytes, err := normalizeToBytes(value)
 	if err != nil {
@@ -430,6 +442,10 @@ func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err 
 	}
 	defer release()
 
+	if err := s.ensureWritable(); err != nil {
+		return nil, false, fmt.Errorf("%w: %w", ErrDiskStoreSwapFailed, err)
+	}
+
 	// Convert value to bytes if it's not already.
 	valueBytes, err := normalizeToBytes(value)
 	if err != nil {
@@ -488,6 +504,10 @@ func (s *DiskStore) Delete(key string) error {
 		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 	defer release()
+
+	if err := s.ensureWritable(); err != nil {
+		return fmt.Errorf("%w: %w", ErrDiskStoreDeleteFailed, err)
+	}
 
 	if s.trackKeys {
 		// Keep bbolt mutation and index update as one logical operation.
@@ -562,6 +582,10 @@ func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 	}
 	defer release()
 
+	if err := s.ensureWritable(); err != nil {
+		return false, fmt.Errorf("%w: %w", ErrDiskStoreDeleteIfExistsFailed, err)
+	}
+
 	if s.trackKeys {
 		// Keep bbolt mutation and index update as one logical operation.
 		s.keysLock.Lock()
@@ -624,6 +648,10 @@ func (s *DiskStore) Clear() error {
 		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 	defer release()
+
+	if err := s.ensureWritable(); err != nil {
+		return fmt.Errorf("%w: %w", ErrDiskStoreClearFailed, err)
+	}
 
 	if s.trackKeys {
 		// Keep bbolt mutation and index reset as one logical operation.
@@ -775,6 +803,15 @@ func (s *DiskStore) ensureOpen() error {
 	}
 
 	return ErrDiskStoreClosed
+}
+
+// ensureWritable rejects mutations when disk backend was opened in read-only mode.
+func (s *DiskStore) ensureWritable() error {
+	if s.diskReadOnly() {
+		return ErrDiskStoreReadOnly
+	}
+
+	return nil
 }
 
 // beginOperation acquires the lifecycle read-lock and verifies the store is open.

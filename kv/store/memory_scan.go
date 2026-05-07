@@ -759,8 +759,9 @@ func (it *untrackedShardIterator) fillBuffer() bool {
 			continue
 		}
 
-		// Buffer full: only replace if new key is smaller than current maximum.
-		// This implements a "reservoir sampling" style approach for bounded iteration.
+		// Buffer full: only replace if the new key is smaller than current maximum.
+		// This maintains a bounded lexicographic candidate set (smallest keys first),
+		// not random reservoir sampling.
 		if hasMaxIndex && buffer[maxIndex].Key <= k {
 			continue
 		}

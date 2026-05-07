@@ -164,6 +164,9 @@ type (
 		// If limit > 0, at most limit entries are returned.
 		// If limit <= 0, all matching entries are returned until the end of the prefix range.
 		// Returns a ScanPage with Entries and NextKey (empty when scan is complete).
+		//
+		// Pagination is not a long-lived snapshot: concurrent writes between calls
+		// may affect later pages.
 		Scan(prefix, afterKey string, limit int64) (*ScanPage, error)
 
 		// ScanKeys is a cursor-based iterator over keys only, ordered lexicographically.
@@ -175,6 +178,8 @@ type (
 		// If limit <= 0, all matching keys are returned until the end of the prefix range.
 		//
 		// ScanKeys MUST NOT clone, serialize, deserialize, or return values.
+		// Pagination is not a long-lived snapshot: concurrent writes between calls
+		// may affect later pages.
 		ScanKeys(prefix, afterKey string, limit int64) (*KeyScanPage, error)
 
 		// List returns key-value pairs whose keys start with prefix.

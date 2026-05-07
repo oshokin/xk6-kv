@@ -216,7 +216,7 @@ Examples:
 
 **Key principle:** Errors are grouped by **recovery strategy**, not by internal implementation.
 
-For example, `DiskStoreWriteError` groups five internal errors (`Set`, `IncrementBy`, `GetOrSet`, `Swap`, `CompareAndSwap` failures) because they all share the same recovery path: check disk permissions, available space, and database state. You don't need to handle each write operation differently—they fail for the same reasons.
+For example, `DiskStoreWriteError` groups five internal errors (`Set`, `IncrementBy`, `GetOrSet`, `Swap`, `CompareAndSwap` failures) because they all share the same recovery path: check disk permissions, available space, and database state. You don't need to handle each write operation differently—they fail for the same reasons. A read-only-opened disk store is split out as `StoreReadOnlyError` because the recovery path is different (reopen writable or call read-only APIs only).
 
 This means:
 
@@ -343,6 +343,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | --- | --- | --- |
 | `BackupInProgressError` | Another goroutine is actively snapshotting with `allowConcurrentWrites=false` (mutation lock blocks writers). | `ErrBackupInProgress` |
 | `RestoreInProgressError` | A restore is blocking writers when a mutation is attempted. | `ErrRestoreInProgress` |
+| `StoreReadOnlyError` | A mutating API was called on a disk store opened with `disk.readOnly=true`. | `ErrDiskStoreReadOnly` |
 | `StoreClosedError` | You called a KV method after `kv.close()` or before the store opened. | `ErrDiskStoreClosed` |
 | `DatabaseNotOpenError` | `openKv()` failed and you invoked methods on the nil handle. | (JS-layer guard) |
 
@@ -364,7 +365,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | --- | --- | --- |
 | `DiskStoreOpenError` | Could not open bbolt (usually due to file locks or permissions). | `ErrDiskStoreOpenFailed` |
 | `DiskStoreReadError` | bbolt read transaction failed. | `ErrDiskStoreReadFailed` |
-| `DiskStoreWriteError` | Write operations failed (set, increment, swap, CAS). All share same recovery: check disk permissions/space. | `ErrDiskStoreWriteFailed`, `ErrDiskStoreIncrementFailed`, `ErrDiskStoreGetOrSetFailed`, `ErrDiskStoreSwapFailed`, `ErrDiskStoreCompareSwapFailed` |
+| `DiskStoreWriteError` | Write operations failed (set, increment, swap, CAS), excluding explicit read-only rejections. | `ErrDiskStoreWriteFailed`, `ErrDiskStoreIncrementFailed`, `ErrDiskStoreGetOrSetFailed`, `ErrDiskStoreSwapFailed`, `ErrDiskStoreCompareSwapFailed` |
 | `DiskStoreDeleteError` | Delete operations failed (delete, deleteIfExists, compareAndDelete, clear). | `ErrDiskStoreDeleteFailed`, `ErrDiskStoreDeleteIfExistsFailed`, `ErrDiskStoreCompareDeleteFailed`, `ErrDiskStoreClearFailed` |
 | `DiskStoreExistsError` | `exists()` check failed to execute. | `ErrDiskStoreExistsFailed` |
 | `DiskStoreScanError` | `scan()`/`scanKeys()`/`list()`/`listKeys()` failed due to bbolt cursor issues. | `ErrDiskStoreScanFailed` |
@@ -381,7 +382,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | --- | --- |
 | **Transient** | Retry with backoff: `BackupInProgressError`, `RestoreInProgressError` |
 | **User error** | Fix input and retry: `KeyNotFoundError`, `ValueNumberRequiredError`, `SnapshotNotFoundError` (on first run) |
-| **Configuration** | Check paths/permissions: `DiskPathError`, `SnapshotPermissionError`, `DiskStoreOpenError` |
+| **Configuration** | Check paths/permissions/mode: `DiskPathError`, `SnapshotPermissionError`, `DiskStoreOpenError`, `StoreReadOnlyError` |
 | **System failure** | Fail-fast and investigate: `DiskStoreWriteError`, `SnapshotIOError`, `BucketNotFoundError`, `UnknownError` |
 
 **Best practices:**

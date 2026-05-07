@@ -56,6 +56,32 @@ func TestDiskStore_Backup_ProducesSnapshot(t *testing.T) {
 	assert.Equal(t, []byte("2"), collected["beta"])
 }
 
+func TestDiskStore_Backup_DoesNotReplaceExistingFileOnExportError(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("alpha", "1"))
+
+	target := filepath.Join(t.TempDir(), "disk-export.kv")
+
+	const originalContent = "existing-snapshot-content"
+	//nolint:forbidigo // file I/O is required for backup replacement verification tests.
+	require.NoError(t, os.WriteFile(target, []byte(originalContent), 0o644))
+
+	// Force backup failure before rename by looking for a non-existent bucket.
+	store.bucket = []byte("missing-bucket")
+
+	_, err := store.Backup(&BackupOptions{FileName: target})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrSnapshotExportFailed)
+	require.ErrorIs(t, err, ErrBucketNotFound)
+
+	//nolint:forbidigo // file I/O is required for backup replacement verification tests.
+	content, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	assert.Equal(t, originalContent, string(content))
+}
+
 // TestDiskStore_Restore_ReplacesDataset verifies that Restore replaces
 // the dataset with the contents of the snapshot file.
 func TestDiskStore_Restore_ReplacesDataset(t *testing.T) {

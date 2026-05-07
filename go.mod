@@ -1,11 +1,11 @@
 module github.com/oshokin/xk6-kv
 
-go 1.25.8
+go 1.25.9
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/dustin/go-humanize v1.0.1
-	github.com/grafana/sobek v0.0.0-20260406180825-6d789dcdd177
+	github.com/grafana/sobek v0.0.0-20260429085637-a66d4790012b
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/bbolt v1.4.3
 	go.k6.io/k6 v1.7.1

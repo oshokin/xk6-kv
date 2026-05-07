@@ -641,6 +641,48 @@ func TestKVAsync_ClosedDiskStore_RejectsWithoutHang(t *testing.T) {
 	`)
 }
 
+func TestKVAsync_DiskReadOnlyMutationRejectsStableError(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	dbPath := filepath.Join(t.TempDir(), "async-readonly.db")
+
+	writableStore, err := store.NewDiskStore(true, dbPath, nil)
+	require.NoError(t, err)
+	require.NoError(t, writableStore.Open())
+	require.NoError(t, writableStore.Set("seed", "value"))
+	require.NoError(t, writableStore.Close())
+
+	readOnlyStore, err := store.NewDiskStore(
+		true,
+		dbPath,
+		&store.DiskConfig{ReadOnly: store.GetComparablePointer(true)},
+	)
+	require.NoError(t, err)
+	require.NoError(t, readOnlyStore.Open())
+
+	kv := NewKV(runtime.VU, readOnlyStore)
+
+	t.Cleanup(func() {
+		_ = kv.Close()
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("blocked:key", "value")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "StoreReadOnlyError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (err.message !== "disk store was opened in read-only mode") {
+					throw new Error("unexpected error message: " + String(err && err.message));
+				}
+			});
+	`)
+}
+
 func TestKV_Close_IdempotentPerHandle(t *testing.T) {
 	t.Parallel()
 

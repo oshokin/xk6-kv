@@ -52,6 +52,10 @@ func (s *DiskStore) SetMany(entries []Entry) (int64, error) {
 		return 0, nil
 	}
 
+	if err := s.ensureWritable(); err != nil {
+		return 0, fmt.Errorf("%w: %w", ErrDiskStoreWriteFailed, err)
+	}
+
 	normalizedKeys := make([]string, len(entries))
 
 	normalizedValues := make([][]byte, len(entries))
@@ -129,6 +133,10 @@ func (s *DiskStore) DeleteMany(keys []string) (*DeleteManyResult, error) {
 
 	if len(keys) == 0 {
 		return &DeleteManyResult{}, nil
+	}
+
+	if err := s.ensureWritable(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreDeleteFailed, err)
 	}
 
 	if s.trackKeys {

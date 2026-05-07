@@ -109,6 +109,9 @@ func exportJSONL(s store.Store, opts exportJSONLOptions) (*exportJSONLResult, er
 		return nil, err
 	}
 
+	// Same-directory rename gives atomic replacement on Unix-like filesystems.
+	// On platforms where os.Rename is not guaranteed atomic, this is still
+	// best-effort crash-safety and avoids direct partial writes to the target.
 	//nolint:forbidigo // file I/O is required to finalize JSONL export.
 	if err := os.Rename(tempName, opts.FileName); err != nil {
 		return nil, fmt.Errorf("%w: %w", store.ErrBackupFinalizeFailed, err)

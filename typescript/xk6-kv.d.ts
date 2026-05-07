@@ -154,6 +154,7 @@ declare module 'k6/x/kv' {
     freelistType?: '' | 'array' | 'map';
     /**
      * Open database read-only.
+     * Mutating APIs reject with `StoreReadOnlyError`.
      */
     readOnly?: boolean;
     /**
@@ -240,6 +241,7 @@ declare module 'k6/x/kv' {
      * - Pass empty string or omit to start a new scan.
      * - Pass the cursor from the previous ScanResult to continue.
      * - Reuse only with the same logical scan options (especially prefix).
+     * - Pagination is not a long-lived snapshot; concurrent writes may affect later pages.
      */
     cursor?: string;
   }
@@ -264,6 +266,7 @@ declare module 'k6/x/kv' {
      * - Pass empty string or omit to start a new scan.
      * - Pass the cursor from the previous ScanKeysResult to continue.
      * - Reuse only with the same logical scan options (especially prefix).
+     * - Pagination is not a long-lived snapshot; concurrent writes may affect later pages.
      */
     cursor?: string;
   }
@@ -720,6 +723,7 @@ declare module 'k6/x/kv' {
     | 'UnknownError'
     | 'BackupInProgressError'
     | 'RestoreInProgressError'
+    | 'StoreReadOnlyError'
     | 'StoreClosedError'
     | 'DatabaseNotOpenError'
     | 'SnapshotNotFoundError'
@@ -1197,6 +1201,8 @@ declare module 'k6/x/kv' {
      * Use this when the keyspace is too large to materialize with list()
      * or when you need restart-safe pagination.
      * Treat cursor as an opaque continuation token; do not parse or construct it manually.
+     * Pagination is not a long-lived snapshot: if keys are inserted or deleted
+     * between page calls, later pages may reflect those changes.
      *
      * @param options - Optional filters (prefix, limit, cursor)
      * @returns Promise that resolves to { entries, cursor, done }
@@ -1228,6 +1234,8 @@ declare module 'k6/x/kv' {
      *
      * This is the key-only equivalent of scan().
      * It does not clone, deserialize, or return values.
+     * Pagination is not a long-lived snapshot: if keys are inserted or deleted
+     * between page calls, later pages may reflect those changes.
      */
     scanKeys(options?: ScanKeysOptions): Promise<ScanKeysResult>;
 
@@ -1285,9 +1293,11 @@ declare module 'k6/x/kv' {
      * Never throws - always safe to call.
      *
      * Performance:
-     * - trackKeys=true, no prefix -> O(1)
-     * - trackKeys=true, with prefix -> O(log n)
-     * - trackKeys=false -> two-pass scan
+     * - trackKeys=true:
+     *   - disk backend: no prefix -> O(1), prefix -> O(log n)
+     *   - memory backend: includes a small per-shard selection step; with prefix,
+     *     per-shard range checks precede final rank/select.
+     * - trackKeys=false -> scan-based path with linear cost in matching keys
      *
      * @param options - Optional prefix filter
      * @returns Promise that resolves to a random key or ""
@@ -1315,6 +1325,12 @@ declare module 'k6/x/kv' {
      *
      * `unique` defaults to true. When unique is true and fewer matching keys exist
      * than requested, all available matching keys are returned in random order.
+     *
+     * Performance:
+     * - trackKeys=true: indexed sampling for small samples; memory first builds
+     *   shard ranges, and disk may fall back to cursor scan for near-full unique samples.
+     * - trackKeys=false: collects candidates via scanKeys() and samples in memory
+     *   (linear in matching keys).
      *
      * Use claimRandom() or popRandom() when you need exclusive allocation.
      */

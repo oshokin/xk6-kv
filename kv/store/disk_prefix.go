@@ -23,6 +23,10 @@ func (s *DiskStore) DeleteByPrefix(prefix string, limit int64) (*DeleteByPrefixR
 		return nil, fmt.Errorf("%w: limit must be positive: %d", ErrKVOptionsInvalid, limit)
 	}
 
+	if err := s.ensureWritable(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreDeleteFailed, err)
+	}
+
 	if s.trackKeys {
 		// Keep bbolt mutation and index update as one logical operation.
 		s.keysLock.Lock()

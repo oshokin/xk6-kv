@@ -109,6 +109,9 @@ const (
 	// SnapshotReadError is emitted when snapshot reads/imports fail.
 	SnapshotReadError ErrorName = "SnapshotReadError"
 
+	// StoreReadOnlyError is emitted when a mutation is attempted on a read-only disk store.
+	StoreReadOnlyError ErrorName = "StoreReadOnlyError"
+
 	// StoreClosedError is emitted when a closed KV handle is used, or when
 	// disk store operations run before Open().
 	StoreClosedError ErrorName = "StoreClosedError"
@@ -263,6 +266,9 @@ func classifyError(err error) *Error {
 		return NewError(DiskPathError, err.Error())
 	case errors.Is(err, store.ErrDiskStoreOpenFailed):
 		return NewError(DiskStoreOpenError, err.Error())
+	case errors.Is(err, store.ErrDiskStoreReadOnly):
+		// Keep message stable regardless of which operation wrapped the sentinel.
+		return NewError(StoreReadOnlyError, store.ErrDiskStoreReadOnly.Error())
 	case errors.Is(err, store.ErrDiskStoreReadFailed):
 		return NewError(DiskStoreReadError, err.Error())
 	case errors.Is(err, store.ErrValueParseFailed):

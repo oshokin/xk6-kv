@@ -32,6 +32,10 @@ func (s *DiskStore) CompareAndSwapDetailed(
 	}
 	defer release()
 
+	if err := s.ensureWritable(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreCompareSwapFailed, err)
+	}
+
 	if s.trackKeys {
 		// Keep bbolt mutation and index update as one logical operation.
 		s.keysLock.Lock()
@@ -111,6 +115,10 @@ func (s *DiskStore) CompareAndDeleteDetailed(
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 	defer release()
+
+	if err := s.ensureWritable(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreCompareDeleteFailed, err)
+	}
 
 	if s.trackKeys {
 		// Keep bbolt mutation and index update as one logical operation.

@@ -85,8 +85,10 @@ func (s *MemoryStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 		}
 	}
 
-	// Create a unique temporary file alongside the final destination
-	// so we can atomically swap on success.
+	// Create a unique temporary file alongside the final destination.
+	// Same-directory rename is atomic on Unix-like filesystems; on platforms
+	// where os.Rename is not guaranteed atomic this still avoids writing partial
+	// data directly into the target path.
 	//nolint:forbidigo // file I/O is required for snapshot backup.
 	tempHandle, err := os.CreateTemp(targetDir, targetBase+".*.tmp")
 	if err != nil {

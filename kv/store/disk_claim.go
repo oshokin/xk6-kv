@@ -53,6 +53,10 @@ func (s *DiskStore) PopRandom(prefix string) (*Entry, error) {
 	}
 	defer release()
 
+	if err := s.ensureWritable(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreDeleteFailed, err)
+	}
+
 	if s.trackKeys {
 		s.keysLock.Lock()
 		defer s.keysLock.Unlock()
@@ -184,6 +188,10 @@ func (s *DiskStore) ClaimRandom(opts *ClaimOptions) (*EntryClaim, error) {
 	}
 	defer release()
 
+	if err := s.ensureWritable(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiskStoreWriteFailed, err)
+	}
+
 	normalized := normalizeClaimOptions(opts)
 	now := time.Now().UnixMilli()
 
@@ -287,6 +295,10 @@ func (s *DiskStore) ReleaseClaim(ref *ClaimRef) (bool, error) {
 		return false, nil
 	}
 
+	if err := s.ensureWritable(); err != nil {
+		return false, fmt.Errorf("%w: %w", ErrDiskStoreWriteFailed, err)
+	}
+
 	now := time.Now().UnixMilli()
 
 	var released bool
@@ -348,6 +360,10 @@ func (s *DiskStore) CompleteClaim(ref *ClaimRef, opts *CompleteClaimOptions) (bo
 
 	if !isValidClaimRef(ref) {
 		return false, nil
+	}
+
+	if err := s.ensureWritable(); err != nil {
+		return false, fmt.Errorf("%w: %w", ErrDiskStoreWriteFailed, err)
 	}
 
 	normalized := normalizeCompleteClaimOptions(opts)

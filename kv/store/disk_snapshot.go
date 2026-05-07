@@ -94,7 +94,9 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 	defer func() {
 		// Only clean up temporary file if an error occurred. On success, Rename() moves
 		// the temporary file to the final destination, so removing it would delete the backup.
-		// This pattern ensures atomic backup: either complete file exists or nothing.
+		// On Unix-like filesystems this gives atomic replacement semantics. On
+		// platforms where os.Rename is not guaranteed atomic, this still avoids
+		// writing partial data directly into the destination path.
 		if exportErr != nil {
 			// Best-effort close for the temp handle; failure here just adds context
 			// to the original export error.
@@ -193,6 +195,10 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 	defer release()
+
+	if err := s.ensureWritable(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrSnapshotReadFailed, err)
+	}
 
 	if s.trackKeys {
 		// Keep restore mutation and index rebuild as one logical operation.

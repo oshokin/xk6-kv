@@ -20,17 +20,18 @@ vars:
   # Project Directories
   # -------------------------------
 
-  # Local bin & temp dirs (kept in repo root).
+  # Local bin & scripts dirs (kept in repo root).
   BIN_DIR: "{{.TASKFILE_DIR}}{{.PS}}bin"
+  SCRIPTS_DIR: "{{.TASKFILE_DIR}}{{.PS}}scripts"
 
   # -------------------------------
   # Tool Versions
   # -------------------------------
 
   # Linting tool version.
-  GOLANGCI_TAG: "latest"
+  GOLANGCI_TAG: "v2.12.2"
   # k6 extension builder version.
-  XK6_TAG: "latest"
+  XK6_TAG: "v1.4.1"
 
   # -------------------------------
   # Tool Binaries
@@ -45,13 +46,12 @@ vars:
   # -------------------------------
 
   # Commands to check current versions of installed tools.
-  GOLANGCI_VERSION_OUTPUT:
-    sh: '{{if eq OS "windows"}}powershell -Command "try { if (Test-Path ''{{.GOLANGCI_BIN}}'') { & ''{{.GOLANGCI_BIN}}'' version } } catch { }; exit 0"{{else}}"{{.GOLANGCI_BIN}}" version 2> /dev/null || true{{end}}'
+  GOLANGCI_CURRENT_TAG:
+    sh: '{{if eq OS "windows"}}powershell -Command "try { if (Test-Path ''{{.GOLANGCI_BIN}}'') { $output = & ''{{.GOLANGCI_BIN}}'' version; if ($output -match ''version v?([0-9]+\.[0-9]+\.[0-9A-Za-z.-]+)'') { ''v'' + $Matches[1] } } } catch { }; exit 0"{{else}}"{{.GOLANGCI_BIN}}" version 2> /dev/null | sed -nE ''s/.*version v?([0-9]+\.[0-9]+\.[0-9A-Za-z.-]+).*/v\1/p'' | head -n1 || true{{end}}'
   XK6_VERSION_OUTPUT:
     sh: '{{if eq OS "windows"}}powershell -Command "try { if (Test-Path ''{{.XK6_BIN}}'') { & ''{{.XK6_BIN}}'' version } } catch { }; exit 0"{{else}}"{{.XK6_BIN}}" version 2> /dev/null || true{{end}}'
 
   # Regex patterns to extract version numbers from tool outputs.
-  GOLANGCI_CURRENT_TAG: '{{regexFind "v([0-9]+.){2}([0-9a-z])+" (regexFind "version v([0-9]+.){2}([0-9a-z])+ " .GOLANGCI_VERSION_OUTPUT)}}'
   XK6_CURRENT_TAG: '{{regexFind "v([0-9]+.){2}([0-9a-z])+" .XK6_VERSION_OUTPUT}}'
 
   # -------------------------------
@@ -123,10 +123,15 @@ tasks:
       - |
         echo "Analyzing commits for version bump..."
         {{if eq OS "windows"}}
-          powershell -ExecutionPolicy Bypass -File scripts/semver_next.ps1
+          powershell -ExecutionPolicy Bypass -File "{{.SCRIPTS_DIR}}{{.PS}}semver_next.ps1"
         {{else}}
-          bash scripts/semver_next.sh
+          bash "{{.SCRIPTS_DIR}}{{.PS}}semver_next.sh"
         {{end}}
+
+  pin-tool-versions:
+    desc: "Pin CI xk6/Go versions to current xk6@latest"
+    cmds:
+      - go run "{{.SCRIPTS_DIR}}{{.PS}}pin_tool_versions.go"
 
   # -------------------------------
   # Tool Installation

@@ -188,7 +188,7 @@ try {
 High-level categories:
 
 - **Options & inputs** - typed guards such as `BackupOptionsRequiredError`, `ValueNumberRequiredError`, `UnsupportedValueTypeError`.
-- **Concurrency & lifecycle** - e.g. `BackupInProgressError`, `RestoreInProgressError`, `StoreClosedError`.
+- **Concurrency & lifecycle** - e.g. `BackupInProgressError`, `RestoreInProgressError`, `StoreReadOnlyError`, `StoreClosedError`.
 - **Disk & snapshot IO** - precise signals for path issues, permission problems, bbolt failures, or restore budget overruns.
 
 📚 A complete catalogue with root causes and remediation tips lives in [`examples/README.md`](./examples/README.md#error-manual).
@@ -227,7 +227,7 @@ interface OpenKvOptions {
     noFreelistSync?: boolean          // rebuild freelist on open; default false
     preLoadFreelist?: boolean         // load freelist into memory; default false
     freelistType?: "" | "array" | "map" // freelist representation; default "array"
-    readOnly?: boolean                // open DB read-only; requires pre-existing DB/bucket; default false
+    readOnly?: boolean                // open DB read-only; mutating APIs reject with StoreReadOnlyError (requires pre-existing DB/bucket); default false
     initialMmapSize?: number | string // initial mmap size; number=bytes, string supports SI ("MB") and IEC ("MiB"); 0 keeps default/no preallocation (default)
     mlock?: boolean                   // mlock pages (UNIX); default false
     // when omitted: bbolt defaults are applied
@@ -364,6 +364,8 @@ Backend note:
   Use `scan()` when the keyspace is too large to materialize with `list()` or when you need restart-safe pagination.
   Treat `cursor` as an opaque continuation token. Do not parse, modify, or construct it manually.
   Use a cursor only with the same logical scan options that produced it, especially the same `prefix`.
+  Pagination is cursor-based, but it is not a long-lived snapshot. If keys are inserted or deleted between page calls, later pages may reflect those changes.
+  On disk backend, each `scan()` call is a separate bbolt read transaction. On memory backend, concurrent writes can also affect what you observe during scan/list iteration.
 
 - **`scanKeys(options?: ScanKeysOptions): Promise<ScanKeysResult>`** - Streams key names in lexicographic order using cursor-based pagination.
 
@@ -386,6 +388,8 @@ Backend note:
   Use `scanKeys()` when the keyspace is too large to materialize with `listKeys()`.
   Treat `cursor` as an opaque continuation token. Do not parse, modify, or construct it manually.
   Use a cursor only with the same logical scan options that produced it, especially the same `prefix`.
+  Pagination is cursor-based, but it is not a long-lived snapshot. If keys are inserted or deleted between page calls, later pages may reflect those changes.
+  For exclusive allocation workflows, use `claimRandom()` or `popRandom()` instead of scan/list pagination.
 
   ```javascript
   let cursor = "";
@@ -603,6 +607,8 @@ Backend note:
   > **Memory backend caution:** when `allowConcurrentWrites` is left at the default `false`, the memory backend holds its global mutation gate for the entire duration of the backup (from key snapshot through streaming). On large datasets that can pause every writer/VU for minutes. Enable `allowConcurrentWrites: true` if you need the cluster to keep serving traffic during the export (accepting the best-effort snapshot) or schedule strict backups during quiet windows.
   >
   > **Shared-file workflow:** Leaving `fileName` blank while running the memory backend is intentional—it writes into `.k6.kv`, the same file the disk backend mounts by default. That makes a common DX pattern possible: run the hot path with `backend: "memory"`, call `backup()` without arguments in `teardown()`, and later rerun the same test with `backend: "disk"` to replay the captured dataset. If you want snapshots to live somewhere else (or you run disk workloads in parallel), provide an explicit `fileName` so you don’t clobber the shared DB.
+  >
+  > **File replacement semantics:** backup/export writes to a temp file in the destination directory, fsyncs, then renames into place and syncs the parent directory. On Unix-like filesystems, same-directory rename is atomic. On platforms where `os.Rename` is not guaranteed atomic, treat this as a best-effort crash-safety strategy; it still avoids intentionally writing partial data directly into the destination file.
 
 - **`restore(options?: RestoreOptions): Promise<RestoreSummary>`**  
   Replaces the dataset with a snapshot produced by `backup()`. Optional `maxEntries` / `maxBytes` guards protect against oversized or corrupted inputs.
@@ -644,7 +650,7 @@ console.log(result.bytesWritten);
 - `prefix` is optional; empty or omitted means all keys.
 - `limit` is optional; if omitted or `<= 0`, all matching entries are exported.
 
-`exportJSONL()` writes to a temporary file, flushes and fsyncs it, renames it into place, then syncs the parent directory. This avoids replacing the final file with a partial export and hardens crash durability of the rename step.
+`exportJSONL()` writes to a temporary file, flushes and fsyncs it, renames it into place, then syncs the parent directory. On Unix-like filesystems this gives atomic replacement in the common same-directory case. On platforms where `os.Rename` is not guaranteed atomic, this remains a best-effort crash-safety strategy and still avoids intentionally writing partial data directly into the target file.
 
 `importJSONL()` example:
 
@@ -683,10 +689,14 @@ The import is not a global transaction: if a later line is invalid, already comm
 
 ### Performance Notes
 
-- **`trackKeys: true`**: `randomKey()` without prefix -> O(1); with prefix -> O(log n). Achieving those speeds means every key is mirrored in memory across multiple helper structures, so large datasets consume noticeably more RAM and the slices/maps never shrink automatically. Budget for that footprint or rebuild the index periodically.
-- **`trackKeys: false`** (default): `randomKey()` falls back to a two-pass cursor walk in a **single** bbolt read snapshot, so heavy use remains O(n). Enable tracking or redesign workloads that call `randomKey()` frequently to avoid linear-time pauses.
+- **`randomKey()` complexity by backend:**
+  - `trackKeys: true`:
+    - disk backend: no prefix -> O(1); prefix -> O(log n) via key index.
+    - memory backend: no prefix includes a small O(shards) selection step; prefix performs per-shard range selection (O(shards * log n)) before final rank/select.
+  - `trackKeys: false` (default): scan-based path with linear cost in the matching keyspace.
+  Achieving tracked-path speeds means keys are mirrored in memory helper structures, so large datasets consume more RAM and index slices/maps do not shrink automatically. Budget for that footprint or rebuild indexes periodically.
 - **Random key workloads:** Calling `randomKey()` repeatedly with `trackKeys: false` (especially on the disk backend) keeps a read transaction open while it counts and selects keys, which can stall the lone bbolt writer until the call finishes. Turn on `trackKeys` (for O(1)/O(log n) sampling) or throttle/redesign these workloads to avoid head-of-line blocking.
-- **`randomKeys()` behavior:** Uses in-memory key indexes when `trackKeys: true`. For small samples (`count` much smaller than matching keys), it samples by rank without scanning the full prefix range. For near-full unique samples, disk with `trackKeys: true` may fall back to cursor scanning because returning most of the prefix range is inherently linear. With `trackKeys: false`, it collects candidate keys via `scanKeys()` and samples in memory.
+- **`randomKeys()` complexity by backend:** With `trackKeys: true`, both backends use key indexes for small samples; memory first builds shard ranges (O(shards * log n)) and then selects sampled keys by rank, while disk may fall back to cursor scan for near-full unique samples. With `trackKeys: false`, it collects candidates via `scanKeys()` and samples in memory (linear in matching keys).
 - **Memory `trackKeys: false` scan/list costs:** `scan()`, `scanKeys()`, `list()`, and `listKeys()` use untracked shard-map iteration. On large keyspaces, repeated pagination can become expensive; if these operations are hot, prefer `trackKeys: true`.
 - **`count()` / `count({ prefix })` complexity:**
   - `count()` (same as `size()`):

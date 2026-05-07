@@ -85,6 +85,29 @@ func TestMemoryStore_Backup_CreatesBBoltSnapshot(t *testing.T) {
 	assert.Equal(t, []byte("3"), collected["gamma"])
 }
 
+func TestMemoryStore_Backup_DoesNotReplaceExistingFileOnWriteError(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	oversizedKey := strings.Repeat("k", 40_000)
+	require.NoError(t, store.Set(oversizedKey, "value"))
+
+	target := filepath.Join(t.TempDir(), "snapshot.kv")
+
+	const originalContent = "existing-snapshot-content"
+	//nolint:forbidigo // file I/O is required for backup replacement verification tests.
+	require.NoError(t, os.WriteFile(target, []byte(originalContent), 0o644))
+
+	_, err := store.Backup(&BackupOptions{FileName: target})
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrBBoltWriteFailed)
+
+	//nolint:forbidigo // file I/O is required for backup replacement verification tests.
+	content, readErr := os.ReadFile(target)
+	require.NoError(t, readErr)
+	assert.Equal(t, originalContent, string(content))
+}
+
 // TestMemoryStore_Backup_BlocksMutations verifies that Backup (in blocking mode)
 // prevents concurrent writes for the entire duration of the export operation.
 func TestMemoryStore_Backup_BlocksMutations(t *testing.T) {

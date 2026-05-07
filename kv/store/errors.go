@@ -61,6 +61,8 @@ var (
 	ErrDiskStoreRandomAccessFailed = errors.New("disk store random access failed")
 	// ErrDiskStoreReadFailed indicates reading from the disk store failed.
 	ErrDiskStoreReadFailed = errors.New("disk store read failed")
+	// ErrDiskStoreReadOnly indicates a mutation was attempted on a read-only disk store.
+	ErrDiskStoreReadOnly = errors.New("disk store was opened in read-only mode")
 	// ErrDiskStoreRebuildKeysFailed indicates rebuilding disk store keys failed.
 	ErrDiskStoreRebuildKeysFailed = errors.New("disk store rebuild keys failed")
 	// ErrDiskStoreScanFailed indicates scanning the disk store failed.

@@ -17,8 +17,8 @@ runs:
       shell: bash
       run: |
         # Tool versions.
-        echo "GO_VERSION=1.25.x" >> $GITHUB_ENV
-        echo "XK6_VERSION=latest" >> $GITHUB_ENV
+        echo "GO_VERSION=1.25.9" >> $GITHUB_ENV
+        echo "XK6_VERSION=v1.4.1" >> $GITHUB_ENV
         
         # Git configuration for automated commits.
         echo "GIT_BOT_NAME=github-actions[bot]" >> $GITHUB_ENV
@@ -227,6 +227,11 @@ runs:
           echo "## What's Changed"
           echo ""
           echo "$COMMITS"
+          echo ""
+          echo "## Build toolchain"
+          echo ""
+          echo "- Go: ${{ env.GO_VERSION }}"
+          echo "- xk6: ${{ env.XK6_VERSION }}"
           echo ""
           echo "## Installation"
           echo ""
