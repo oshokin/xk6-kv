@@ -38,10 +38,15 @@ A k6 extension providing a persistent key-value store to share state across Virt
 
 Download k6 binaries with xk6-kv from the [Releases page](https://github.com/oshokin/xk6-kv/releases).
 
+Release artifacts are named `xk6-kv_<version>_<os>_<arch>.tar.gz` for Linux/macOS and
+`xk6-kv_<version>_<os>_<arch>.zip` for Windows. Set `VERSION` to the release you want
+to install, for example `v1.3.6`.
+
 **Linux:**
 
 ```bash
-curl -L https://github.com/oshokin/xk6-kv/releases/latest/download/k6-linux-amd64.tar.gz -o k6.tar.gz
+VERSION=v1.3.6
+curl -L "https://github.com/oshokin/xk6-kv/releases/download/${VERSION}/xk6-kv_${VERSION}_linux_amd64.tar.gz" -o k6.tar.gz
 tar -xzf k6.tar.gz && chmod +x k6
 ./k6 version
 ```
@@ -49,7 +54,8 @@ tar -xzf k6.tar.gz && chmod +x k6
 **macOS:**
 
 ```bash
-curl -L https://github.com/oshokin/xk6-kv/releases/latest/download/k6-darwin-arm64.tar.gz -o k6.tar.gz
+VERSION=v1.3.6
+curl -L "https://github.com/oshokin/xk6-kv/releases/download/${VERSION}/xk6-kv_${VERSION}_darwin_arm64.tar.gz" -o k6.tar.gz
 tar -xzf k6.tar.gz && chmod +x k6
 ./k6 version
 ```
@@ -57,7 +63,8 @@ tar -xzf k6.tar.gz && chmod +x k6
 **Windows (PowerShell):**
 
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/oshokin/xk6-kv/releases/latest/download/k6-windows-amd64.zip" -OutFile k6.zip
+$VERSION = "v1.3.6"
+Invoke-WebRequest -Uri "https://github.com/oshokin/xk6-kv/releases/download/$VERSION/xk6-kv_${VERSION}_windows_amd64.zip" -OutFile k6.zip
 Expand-Archive -Path k6.zip -DestinationPath .
 .\k6.exe version
 ```

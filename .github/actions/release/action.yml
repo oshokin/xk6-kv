@@ -180,18 +180,14 @@ runs:
             # Windows: create zip with k6.exe.
             mv "dist/tmp_${binary_name}" "dist/${binary_name}"
             (cd dist && zip "${archive_name}.zip" "${binary_name}")
-            cp "dist/${archive_name}.zip" "dist/k6-${os}-${arch}.zip"
             rm "dist/${binary_name}"
             echo "Created ${archive_name}.zip"
-            echo "Created k6-${os}-${arch}.zip"
           else
             # Unix: create tar.gz with k6.
             mv "dist/tmp_${binary_name}" "dist/${binary_name}"
             tar -czf "dist/${archive_name}.tar.gz" -C dist "${binary_name}"
-            cp "dist/${archive_name}.tar.gz" "dist/k6-${os}-${arch}.tar.gz"
             rm "dist/${binary_name}"
             echo "Created ${archive_name}.tar.gz"
-            echo "Created k6-${os}-${arch}.tar.gz"
           fi
         }
 
@@ -203,13 +199,10 @@ runs:
         build_and_package "windows" "amd64" "k6.exe"
         build_and_package "windows" "arm64" "k6.exe"
 
-        # Smoke-check both versioned artifacts and stable aliases used by README.
+        # Smoke-check representative versioned artifacts published to the release.
         test -f "dist/xk6-kv_${VERSION}_linux_amd64.tar.gz"
-        test -f "dist/k6-linux-amd64.tar.gz"
         test -f "dist/xk6-kv_${VERSION}_darwin_arm64.tar.gz"
-        test -f "dist/k6-darwin-arm64.tar.gz"
         test -f "dist/xk6-kv_${VERSION}_windows_amd64.zip"
-        test -f "dist/k6-windows-amd64.zip"
 
         echo ""
         echo "All binaries built and packaged successfully!"
@@ -225,19 +218,22 @@ runs:
       run: |
         LAST_TAG="${{ steps.bump.outputs.last_tag }}"
         NEXT_TAG="${{ steps.bump.outputs.next_tag }}"
+        PREVIOUS_TAG="v${LAST_TAG}"
 
         if [[ "$LAST_TAG" == "1.0.0" ]]; then
           # First release - include all commits.
           COMMITS=$(git log --pretty=format:"- %s (%h)" --reverse)
         else
-          # Subsequent releases - commits since last tag.
-          # Use the tag reference directly for accurate range
-          if git rev-parse "v${LAST_TAG}" >/dev/null 2>&1; then
-            COMMITS=$(git log "v${LAST_TAG}..${NEXT_TAG}" --pretty=format:"- %s (%h)" --reverse)
-          else
-            # Fallback if tag format doesn't match
-            COMMITS=$(git log "${LAST_TAG}..${NEXT_TAG}" --pretty=format:"- %s (%h)" --reverse 2>/dev/null || git log "${NEXT_TAG}" --pretty=format:"- %s (%h)" -1)
+          # Subsequent releases - include every commit reachable from the
+          # release checkout after the previous tag. Use HEAD instead of the
+          # newly-created tag so auto-tag and tag-triggered releases behave the
+          # same way, and fail loudly if the previous tag is missing.
+          if ! git rev-parse "$PREVIOUS_TAG" >/dev/null 2>&1; then
+            echo "Previous tag $PREVIOUS_TAG was not found; cannot build release changelog." >&2
+            exit 1
           fi
+
+          COMMITS=$(git log "${PREVIOUS_TAG}..HEAD" --pretty=format:"- %s (%h)" --reverse)
         fi
 
         # Create changelog content.
