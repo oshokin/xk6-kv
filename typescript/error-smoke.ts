@@ -1,5 +1,5 @@
 // Compile-time smoke checks for xk6-kv error typing.
-import { type KVError, type KVErrorName } from 'k6/x/kv';
+import { openKv, type KVError, type KVErrorName } from 'k6/x/kv';
 
 const entryError = {
   key: 'bad',
@@ -31,3 +31,21 @@ function consumeKVError(err: KVError): void {
 }
 
 consumeKVError(batchError);
+
+async function consumeRejectedKVError(): Promise<void> {
+  const kv = openKv();
+
+  try {
+    await kv.setMany({ bad: () => undefined });
+  } catch (err) {
+    const kvErr = err as KVError;
+    const name: KVErrorName = kvErr.name;
+    const message: string = kvErr.message;
+    void name;
+    void message;
+  } finally {
+    kv.close();
+  }
+}
+
+void consumeRejectedKVError;

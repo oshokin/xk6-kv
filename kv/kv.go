@@ -233,22 +233,30 @@ func (k *KV) runAsyncWithStoreObserved(
 	state := k.vu.State()
 
 	return k.runAsyncWithStore(
-		func(s store.Store) (any, error) {
+		func(s store.Store) (result any, err error) {
 			startedAt := time.Now()
-			result, err := operation(s)
 
-			errorType := ""
-			if err != nil {
-				errorType = string(classifyError(err).Name)
-			}
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					result = nil
+					err = fmt.Errorf("panic recovered during store operation: %v", recovered)
+				}
 
-			k.operationMetrics.emit(ctx, state, kvOperationSample{
-				operation:   op,
-				duration:    time.Since(startedAt),
-				failed:      err != nil,
-				errorType:   errorType,
-				emptyResult: isEmptyAllocationResult(op, result),
-			})
+				errorType := ""
+				if err != nil {
+					errorType = string(classifyError(err).Name)
+				}
+
+				k.operationMetrics.emit(ctx, state, kvOperationSample{
+					operation:   op,
+					duration:    time.Since(startedAt),
+					failed:      err != nil,
+					errorType:   errorType,
+					emptyResult: isEmptyAllocationResult(op, result),
+				})
+			}()
+
+			result, err = operation(s)
 
 			return result, err
 		},

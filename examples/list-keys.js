@@ -1,4 +1,5 @@
-// listKeys key-only listing example.
+// listKeys key-only listing example for small, bounded previews.
+// For large keyspaces, prefer scanKeys({ limit }) pagination.
 //
 // Covered methods: setMany, listKeys, getMany.
 

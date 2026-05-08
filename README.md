@@ -138,7 +138,7 @@ async function mapLimit(items, limit, fn) {
 
 ## Error Handling
 
-Every rejected `kv.*` promise carries a **typed error object** with `name` and `message` fields. Check `err.name` (or `err.Name` when k6 serialises it as Go struct) instead of matching raw strings.
+Every rejected `kv.*` promise carries a **typed error object** with `name` and `message` fields. It is a structured plain object, not a JavaScript `Error` instance, so do not rely on `err instanceof Error`. Check `err.name` (or `err.Name` when k6 serialises it as Go struct) instead of matching raw strings.
 
 Batch APIs such as `setMany()` may also include a stable `err.errors` array. Each item in `err.errors` has this shape:
 
@@ -394,7 +394,8 @@ Backend note:
 
   `scanKeys()` is the key-only equivalent of `scan()`.
   It does not clone, deserialize, or return values.
-  Use `scanKeys()` when the keyspace is too large to materialize with `listKeys()`.
+  Prefer `scanKeys()` with a bounded positive `limit` for large stores or load-test paths.
+  Avoid `limit <= 0` on large keyspaces unless you intentionally want to materialize every matching key in one VU.
   Treat `cursor` as an opaque continuation token. Do not parse, modify, or construct it manually.
   Use a cursor only with the same logical scan options that produced it, especially the same `prefix`.
   Pagination is cursor-based, but it is not a long-lived snapshot. If keys are inserted or deleted between page calls, later pages may reflect those changes.
@@ -434,6 +435,8 @@ Backend note:
   ```
 
   `listKeys()` is read-only, returns keys in ascending lexicographic order, and does not clone, deserialize, or return values.
+  Use it for small datasets, debugging, setup validation, and bounded previews.
+  For large stores, prefer `scanKeys({ limit })` so each VU only materializes one page at a time.
   Useful flow before destructive calls:
 
   ```javascript
@@ -465,6 +468,7 @@ Backend note:
   ```
 
   `randomKey()` only returns a key string and does not create/observe leases.
+  No-match is not an error, but the promise may reject for invalid options, closed stores, backend I/O errors, or other technical failures.
 
 - **`randomKeys(options: RandomKeysOptions): Promise<string[]>`** - Returns random key names matching an optional prefix.
 

@@ -1,5 +1,5 @@
 // Demonstrates cursor-based key pagination via kv.scanKeys().
-// Useful when you need key-only paging over large keyspaces.
+// Prefer bounded scanKeys({ limit }) pages over listKeys() for large keyspaces.
 //
 // Covered methods: setMany, scanKeys, getMany.
 

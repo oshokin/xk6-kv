@@ -186,9 +186,11 @@ Missing keys are not errors and are counted in `{ deleted, missing }`.
 required `limit` (positive integer). Input errors are reported as `InvalidOptionsError`.
 
 `listKeys()` accepts an optional object (`{ prefix?, limit? }`) and returns sorted key names.
+Use it for small datasets, debugging, setup validation, and bounded previews.
 Input errors are reported as `InvalidOptionsError`.
 
 `scanKeys()` accepts an optional object (`{ prefix?, limit?, cursor? }`) and returns `{ keys, cursor, done }`.
+Prefer `scanKeys({ limit })` for large keyspaces so each VU materializes one page at a time.
 Malformed cursors are reported as `InvalidCursorError`.
 
 Examples:

@@ -1918,6 +1918,95 @@ func TestKVAsync_OperationMetrics_EmitsAsyncInFlight(t *testing.T) {
 	assert.ElementsMatch(t, []float64{1, 0}, values)
 }
 
+func TestKVAsync_OperationMetrics_EmitsPanicAsUnknownError(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	panicStore := panicGetStore{
+		Store: store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+	}
+	kv := NewKV(runtime.VU, panicStore)
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 16)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.get("panic-key")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "UnknownError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (!String(err.message).includes("panic recovered during store operation")) {
+					throw new Error("panic context missing");
+				}
+			});
+	`)
+
+	metricHits := make(map[string]int)
+
+	var seenUnknownError bool
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			metricHits[sample.Metric.Name]++
+
+			op, hasOp := sample.Tags.Get(tagOp)
+			if sample.Metric.Name != metricKVAsyncInFlight {
+				require.True(t, hasOp)
+				assert.Equal(t, opGet, op)
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusError, status)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+			case metricKVOperationDuration:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusError, status)
+			case metricKVOperationFailed:
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+			case metricKVErrorsTotal:
+				errorType, ok := sample.Tags.Get(tagErrorType)
+				require.True(t, ok)
+				assert.Equal(t, string(UnknownError), errorType)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+
+				seenUnknownError = true
+			}
+		}
+	}
+
+	assert.Equal(t, 1, metricHits[metricKVOperationsTotal])
+	assert.Equal(t, 1, metricHits[metricKVOperationDuration])
+	assert.Equal(t, 1, metricHits[metricKVOperationFailed])
+	assert.Equal(t, 1, metricHits[metricKVErrorsTotal])
+	assert.Zero(t, metricHits[metricKVEmptyResult])
+	assert.True(t, seenUnknownError)
+}
+
 func TestKVAsync_OperationMetrics_EmitsValidationError(t *testing.T) {
 	t.Parallel()
 

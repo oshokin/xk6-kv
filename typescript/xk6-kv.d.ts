@@ -764,14 +764,18 @@ declare module 'k6/x/kv' {
     | 'BucketNotFoundError';
 
   /**
-   * Structured error payload thrown by kv.* methods.
+   * Structured error payload rejected by kv.* promises.
+   *
+   * xk6-kv returns a plain object, not a JavaScript Error instance. Do not rely
+   * on `err instanceof Error`; use `err.name` for machine-readable handling and
+   * `err.message` for human-readable diagnostics.
    *
    * Batch APIs such as setMany() may include per-entry diagnostics in errors[].
    */
-  export interface KVError extends Error {
-    name: KVErrorName;
-    message: string;
-    errors?: ManyEntryError[];
+  export interface KVError {
+    readonly name: KVErrorName;
+    readonly message: string;
+    readonly errors?: readonly ManyEntryError[];
   }
 
   /**
@@ -1309,7 +1313,9 @@ declare module 'k6/x/kv' {
     /**
      * Returns a random key, optionally filtered by prefix.
      * Resolves to empty string ("") when no key matches (including empty store).
-     * Never throws - always safe to call.
+     *
+     * No-match is not an error. The promise may still reject for invalid options,
+     * closed stores, backend I/O errors, or other technical failures.
      *
      * Performance:
      * - trackKeys=true:

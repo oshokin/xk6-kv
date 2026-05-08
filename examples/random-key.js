@@ -1,7 +1,7 @@
 // Random selection of keys with and without prefix filtering.
 // When trackKeys is enabled, no-prefix selection is O(1) and prefix selection is O(log n). 
 // When disabled, selection is a two-pass scan.
-// The function never throws and returns "" when there are no matches.
+// No match returns ""; invalid options, closed stores, or backend failures reject the promise.
 //
 // Covered methods: clear, set, randomKey.
 
