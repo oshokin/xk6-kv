@@ -23,6 +23,10 @@ on:
 permissions:
   contents: write # Required to create releases and push Git tags.
 
+concurrency:
+  group: release-${{ github.ref_name || github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
 jobs:
   # Single release job for both automatic (default-branch workflow_run),
   # direct tag push, and manual triggers.

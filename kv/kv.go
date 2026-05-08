@@ -62,6 +62,10 @@ type KV struct {
 	closeErr error
 }
 
+// asyncStoreObserver is a function that observes the result of an asynchronous store operation.
+// It is used to emit metrics for the operation.
+type asyncStoreObserver func(result any, err error, duration time.Duration)
+
 // NewKV constructs a new KV bound to the given VU and backing Store.
 //
 // The caller is responsible for providing any desired decorators around the store
@@ -81,6 +85,18 @@ func (k *KV) databaseNotOpenError() *Error {
 // storeHandleClosedError produces a consistent error when this KV handle has been closed.
 func (k *KV) storeHandleClosedError() *Error {
 	return NewError(StoreClosedError, "kv store handle is closed")
+}
+
+func (k *KV) preflightStoreError() *Error {
+	if k.store == nil {
+		return k.databaseNotOpenError()
+	}
+
+	if k.closed.Load() {
+		return k.storeHandleClosedError()
+	}
+
+	return nil
 }
 
 // rejectedPromise creates an already-rejected Promise on the VU event loop.
@@ -132,6 +148,14 @@ func (k *KV) runAsyncWithStore(
 	operation func(store store.Store) (any, error),
 	toJS func(rt *sobek.Runtime, result any) sobek.Value,
 ) *sobek.Promise {
+	return k.runAsyncWithStoreAndObserver(operation, toJS, nil)
+}
+
+func (k *KV) runAsyncWithStoreAndObserver(
+	operation func(store store.Store) (any, error),
+	toJS func(rt *sobek.Runtime, result any) sobek.Value,
+	observer asyncStoreObserver,
+) *sobek.Promise {
 	// Capture the VU runtime and create a promise whose resolve/reject
 	// must run on the event loop thread (Sobek promises are not goroutine-safe).
 	rt := k.vu.Runtime()
@@ -155,9 +179,17 @@ func (k *KV) runAsyncWithStore(
 	go func() {
 		defer finishAsync()
 
+		startedAt := time.Now()
+		observe := func(result any, err error) {
+			if observer != nil {
+				observer(result, err, time.Since(startedAt))
+			}
+		}
+
 		defer func() {
 			if r := recover(); r != nil {
 				panicErr := fmt.Errorf("panic recovered during store operation: %v", r)
+				observe(nil, panicErr)
 
 				runOnEventLoop(func() error {
 					return reject(classifyError(panicErr).ToSobekValue(rt))
@@ -165,17 +197,11 @@ func (k *KV) runAsyncWithStore(
 			}
 		}()
 
-		if k.store == nil {
-			runOnEventLoop(func() error {
-				return reject(k.databaseNotOpenError().ToSobekValue(rt))
-			})
+		if err := k.preflightStoreError(); err != nil {
+			observe(nil, err)
 
-			return
-		}
-
-		if k.closed.Load() {
 			runOnEventLoop(func() error {
-				return reject(k.storeHandleClosedError().ToSobekValue(rt))
+				return reject(err.ToSobekValue(rt))
 			})
 
 			return
@@ -185,12 +211,16 @@ func (k *KV) runAsyncWithStore(
 		// loop remains responsive under contention.
 		goResult, err := operation(k.store)
 		if err != nil {
+			observe(nil, err)
+
 			runOnEventLoop(func() error {
 				return reject(classifyError(err).ToSobekValue(rt))
 			})
 
 			return
 		}
+
+		observe(goResult, nil)
 
 		// Marshal the result back to JS by enqueueing a callback that converts
 		// the Go value and resolves the promise on the event loop thread.
@@ -232,35 +262,23 @@ func (k *KV) runAsyncWithStoreObserved(
 	ctx := k.vu.Context()
 	state := k.vu.State()
 
-	return k.runAsyncWithStore(
-		func(s store.Store) (result any, err error) {
-			startedAt := time.Now()
-
-			defer func() {
-				if recovered := recover(); recovered != nil {
-					result = nil
-					err = fmt.Errorf("panic recovered during store operation: %v", recovered)
-				}
-
-				errorType := ""
-				if err != nil {
-					errorType = string(classifyError(err).Name)
-				}
-
-				k.operationMetrics.emit(ctx, state, kvOperationSample{
-					operation:   op,
-					duration:    time.Since(startedAt),
-					failed:      err != nil,
-					errorType:   errorType,
-					emptyResult: isEmptyAllocationResult(op, result),
-				})
-			}()
-
-			result, err = operation(s)
-
-			return result, err
-		},
+	return k.runAsyncWithStoreAndObserver(
+		operation,
 		toJS,
+		func(result any, err error, duration time.Duration) {
+			errorType := ""
+			if err != nil {
+				errorType = string(classifyError(err).Name)
+			}
+
+			k.operationMetrics.emit(ctx, state, kvOperationSample{
+				operation:   op,
+				duration:    duration,
+				failed:      err != nil,
+				errorType:   errorType,
+				emptyResult: isEmptyAllocationResult(op, result),
+			})
+		},
 	)
 }
 

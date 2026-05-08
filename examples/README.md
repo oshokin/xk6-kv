@@ -337,7 +337,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | `UnsupportedValueTypeError` | Attempted to `set()`/`swap()` a value that isn't a string or `[]byte` once it reaches the store. | `ErrUnsupportedValueType` |
 | `ValueParseError` | Disk increments found a non-integer payload (e.g. you stored `"foo"` and later called `incrementBy`). | `ErrValueParseFailed` |
 | `SerializerError` | JSON/string serializer failed to encode/decode a value for single-value APIs. In `setMany()`, per-entry serialization details still use `err.errors[].name === "SerializerError"` while top-level classification is `InvalidOptionsError`. | `ErrSerializerEncodeFailed`, `ErrSerializerDecodeFailed` |
-| `InternalStoreError` | A store invariant was violated (for example, an unexpected heap item type during internal memory scan/index iteration). Treat as a bug or incompatible backend state. | `ErrUnexpectedHeapType` |
+| `InternalStoreError` | A store invariant was violated (for example, an unexpected heap item type during internal memory scan/index iteration or a failed internal claim completion). Treat as a bug or incompatible backend state. | `ErrUnexpectedHeapType`, `ErrClaimCompletionFailed` |
 | `UnexpectedStoreOutputError` | Store returned a nil result without an accompanying error (indicates a buggy or incompatible backend). | `ErrUnexpectedStoreOutput` |
 | `UnknownError` | An error occurred that cannot be classified into any specific category (fallback for unclassified errors). | (Any unclassified error) |
 

@@ -541,7 +541,12 @@ declare module 'k6/x/kv' {
     id: string;
     /** Claimed key. */
     key: string;
-    /** Fence token for stale-holder protection. */
+    /**
+     * Fence token for stale-holder protection.
+     *
+     * Exposed as a JavaScript number; practical k6 runs should not approach
+     * Number.MAX_SAFE_INTEGER for this token.
+     */
     token: number;
   }
 

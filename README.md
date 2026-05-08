@@ -88,6 +88,12 @@ xk6 build --with github.com/oshokin/xk6-kv@v1.3.6
 
 > **Requirements**: Go 1.25 or higher.
 
+## Compatibility
+
+This release targets k6 v1.7.x and the `go.k6.io/k6` v1 Go module path.
+
+k6 v2 compatibility is intentionally tracked separately because k6 v2 changed the Go module path to `go.k6.io/k6/v2` and is still a release candidate.
+
 ## Quick Start
 
 ```javascript
@@ -208,7 +214,8 @@ The returned KV handle is shared across VUs, so treat its lifecycle as test-wide
 
 > ⚠️ **Configuration lock-in:** the first successful `openKv()` call fixes the store configuration
 > for the whole test run. All subsequent `openKv()` calls must provide equivalent options;
-> otherwise `openKv()` throws `KVOptionsConflictError`.
+> otherwise `openKv()` throws `KVOptionsConflictError`. Calling `close()` does not reset this
+> process-wide configuration.
 
 ```typescript
 interface OpenKvOptions {
@@ -523,6 +530,7 @@ Backend note:
 
 > ⚠️ `claimRandom()` is a local coordination primitive for VUs sharing the same `xk6-kv` process/store. It is not a distributed lock service.
 > `claimRandom()` and `popRandom()` are random allocation helpers optimized for low/moderate live-claim occupancy. Under very high live-claim occupancy, fallback selection can be biased toward scan order, but exclusivity is still preserved.
+> `claim.token` is exposed as a JavaScript number. It should not approach `Number.MAX_SAFE_INTEGER` in practical k6 runs; if that ever becomes realistic, a future major API should expose it as a string.
 
 - **`rebuildKeyList(): Promise<boolean>`** - Rebuilds in-memory key indexes (useful for disk backend with `trackKeys: true`).
 
@@ -603,6 +611,7 @@ Backend note:
     thresholds: {
       "xk6_kv_operation_failed": ["rate==0"],
       "xk6_kv_empty_result{op:claim_random}": ["rate<0.05"],
+      "xk6_kv_async_in_flight": ["value<1000"],
       "xk6_kv_index_consistent{track_keys:true}": ["value==1"],
     },
   };
@@ -702,6 +711,7 @@ The import is batch-atomic, not file-atomic: if a later line is invalid, already
 - **`close(): void`** - Synchronously closes this KV handle. Call once in `teardown()`.
   After `close()`, this handle rejects async operations with `StoreClosedError` on both backends.
   Closing one handle does not affect other open handles until the shared store refcount reaches zero.
+  It also does not allow later `openKv()` calls to switch backend, path, serialization, or key-tracking options.
   Do **not** call `close()` from `default()` iterations.
 
 ### Performance Notes

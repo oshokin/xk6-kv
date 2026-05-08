@@ -1,7 +1,10 @@
 package kv
 
 import (
+	"math"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/oshokin/xk6-kv/kv/store"
 )
@@ -81,6 +84,30 @@ func TestDiskOptionsEqual(t *testing.T) {
 			if got := tc.right.Equal(tc.left); got != tc.expect {
 				t.Fatalf("right.Equal(left) = %t, want %t", got, tc.expect)
 			}
+		})
+	}
+}
+
+func TestDiskOptionsValidateRejectsNonFiniteNumericValues(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name string
+		opts *DiskOptions
+	}{
+		{name: "timeout NaN", opts: &DiskOptions{Timeout: math.NaN()}},
+		{name: "timeout positive infinity", opts: &DiskOptions{Timeout: math.Inf(1)}},
+		{name: "timeout negative infinity", opts: &DiskOptions{Timeout: math.Inf(-1)}},
+		{name: "initial mmap size NaN", opts: &DiskOptions{InitialMmapSize: math.NaN()}},
+		{name: "initial mmap size positive infinity", opts: &DiskOptions{InitialMmapSize: math.Inf(1)}},
+		{name: "initial mmap size negative infinity", opts: &DiskOptions{InitialMmapSize: math.Inf(-1)}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Error(t, tc.opts.Validate())
 		})
 	}
 }

@@ -18,3 +18,13 @@ func TestClassifyError_UnexpectedHeapTypeIsInternalStoreError(t *testing.T) {
 	require.Equal(t, InternalStoreError, classified.Name)
 	require.Contains(t, classified.Message, store.ErrUnexpectedHeapType.Error())
 }
+
+func TestClassifyError_ClaimCompletionFailedIsInternalStoreError(t *testing.T) {
+	t.Parallel()
+
+	err := fmt.Errorf("serialized popRandom invariant: %w", store.ErrClaimCompletionFailed)
+
+	classified := classifyError(err)
+	require.Equal(t, InternalStoreError, classified.Name)
+	require.Contains(t, classified.Message, store.ErrClaimCompletionFailed.Error())
+}

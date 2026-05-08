@@ -29,6 +29,8 @@ var (
 	ErrBBoltWriteFailed = errors.New("bolt write failed")
 	// ErrBucketNotFound is returned when the requested bucket does not exist.
 	ErrBucketNotFound = errors.New("bucket not found")
+	// ErrClaimCompletionFailed indicates a claimed entry could not be completed.
+	ErrClaimCompletionFailed = errors.New("claim completion failed")
 	// ErrDiskDirectoryCreateFailed indicates disk directory creation failed.
 	ErrDiskDirectoryCreateFailed = errors.New("disk directory create failed")
 	// ErrDiskPathIsDirectory is returned when the disk store path points to a directory.

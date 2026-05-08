@@ -371,7 +371,7 @@ func (s *SerializedStore) PopRandom(prefix string) (*Entry, error) {
 	}
 
 	if !completed {
-		return nil, errors.New("popRandom claim completion failed")
+		return nil, fmt.Errorf("%w: popRandom", ErrClaimCompletionFailed)
 	}
 
 	return &Entry{

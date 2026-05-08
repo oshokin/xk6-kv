@@ -291,7 +291,8 @@ func classifyError(err error) *Error {
 		return NewError(DiskStoreExistsError, err.Error())
 	case errors.Is(err, store.ErrDiskStoreScanFailed):
 		return NewError(DiskStoreScanError, err.Error())
-	case errors.Is(err, store.ErrUnexpectedHeapType):
+	case errors.Is(err, store.ErrClaimCompletionFailed),
+		errors.Is(err, store.ErrUnexpectedHeapType):
 		return NewError(InternalStoreError, err.Error())
 	case errors.Is(err, store.ErrDiskStoreSizeFailed),
 		errors.Is(err, store.ErrDiskStoreCountFailed),

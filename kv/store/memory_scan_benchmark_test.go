@@ -102,6 +102,18 @@ func BenchmarkMemoryScanKeys_NoTracking(b *testing.B) {
 	})
 }
 
+func BenchmarkMemoryScanKeys_NoTracking_Unlimited_100k(b *testing.B) {
+	const totalPerPrefix = 100_000
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: false})
+
+	b.StopTimer()
+	seedMemoryStore(b, store, totalPerPrefix, "user:")
+	b.StartTimer()
+
+	runScanKeysBenchmark(b, store, "user:", "", 0)
+}
+
 // BenchmarkMemoryListKeys_NoTracking measures listKeys() costs in memory mode without tracking.
 func BenchmarkMemoryListKeys_NoTracking(b *testing.B) {
 	const totalPerPrefix = 10_000

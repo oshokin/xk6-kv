@@ -51,6 +51,17 @@ func TestSerializedStore_ClaimRandom_JSONDecodeErrorReleasesClaim(t *testing.T) 
 	}
 }
 
+func TestSerializedStore_PopRandom_CompletionFailureReturnsSentinel(t *testing.T) {
+	t.Parallel()
+
+	serialized := NewSerializedStore(&popRandomCompletionFailureStore{}, NewStringSerializer())
+
+	entry, err := serialized.PopRandom("user:")
+	require.Nil(t, entry)
+	require.ErrorIs(t, err, ErrClaimCompletionFailed)
+	require.ErrorContains(t, err, "popRandom")
+}
+
 type serializedRawStoreCase struct {
 	name     string
 	newStore func(*testing.T) Store
@@ -99,4 +110,24 @@ func requireRawCorruptJSONStillAvailable(t *testing.T, raw Store) {
 	released, err := raw.ReleaseClaim(claim.Ref())
 	require.NoError(t, err)
 	require.True(t, released)
+}
+
+type popRandomCompletionFailureStore struct {
+	Store
+}
+
+func (s *popRandomCompletionFailureStore) ClaimRandom(_ *ClaimOptions) (*EntryClaim, error) {
+	return &EntryClaim{
+		ID:    "claim-id",
+		Key:   "user:1",
+		Token: 1,
+		Entry: Entry{
+			Key:   "user:1",
+			Value: []byte("value"),
+		},
+	}, nil
+}
+
+func (s *popRandomCompletionFailureStore) CompleteClaim(_ *ClaimRef, _ *CompleteClaimOptions) (bool, error) {
+	return false, nil
 }

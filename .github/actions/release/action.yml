@@ -137,7 +137,9 @@ runs:
         # Create and push tag atomically.
         git tag "${{ steps.bump.outputs.next_tag }}"
         git push origin "${{ steps.bump.outputs.next_tag }}"
-        echo "should_release=true" >> "$GITHUB_OUTPUT"
+        echo "Auto-semver tag pushed; tag workflow will build the release."
+        echo "should_release=false" >> "$GITHUB_OUTPUT"
+        exit 0
 
     # Install xk6 for building k6 binaries with the extension.
     - name: Install xk6
@@ -178,14 +180,18 @@ runs:
             # Windows: create zip with k6.exe.
             mv "dist/tmp_${binary_name}" "dist/${binary_name}"
             (cd dist && zip "${archive_name}.zip" "${binary_name}")
+            cp "dist/${archive_name}.zip" "dist/k6-${os}-${arch}.zip"
             rm "dist/${binary_name}"
             echo "Created ${archive_name}.zip"
+            echo "Created k6-${os}-${arch}.zip"
           else
             # Unix: create tar.gz with k6.
             mv "dist/tmp_${binary_name}" "dist/${binary_name}"
             tar -czf "dist/${archive_name}.tar.gz" -C dist "${binary_name}"
+            cp "dist/${archive_name}.tar.gz" "dist/k6-${os}-${arch}.tar.gz"
             rm "dist/${binary_name}"
             echo "Created ${archive_name}.tar.gz"
+            echo "Created k6-${os}-${arch}.tar.gz"
           fi
         }
 
@@ -196,6 +202,14 @@ runs:
         build_and_package "darwin" "arm64" "k6"
         build_and_package "windows" "amd64" "k6.exe"
         build_and_package "windows" "arm64" "k6.exe"
+
+        # Smoke-check both versioned artifacts and stable aliases used by README.
+        test -f "dist/xk6-kv_${VERSION}_linux_amd64.tar.gz"
+        test -f "dist/k6-linux-amd64.tar.gz"
+        test -f "dist/xk6-kv_${VERSION}_darwin_arm64.tar.gz"
+        test -f "dist/k6-darwin-arm64.tar.gz"
+        test -f "dist/xk6-kv_${VERSION}_windows_amd64.zip"
+        test -f "dist/k6-windows-amd64.zip"
 
         echo ""
         echo "All binaries built and packaged successfully!"

@@ -235,6 +235,27 @@ func TestMemoryStore_RandomKeys_PrefixFilter(t *testing.T) {
 	}
 }
 
+func TestMemoryRandomKeysUntrackedDoesNotRequireSortedScan(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: false})
+	requirePopulateStore(
+		t,
+		store,
+		"user:c", "v3",
+		"order:a", "v4",
+		"user:a", "v1",
+		"user:b", "v2",
+	)
+
+	keys := store.collectMatchingKeysUntracked("user:")
+	assert.ElementsMatch(t, []string{"user:a", "user:b", "user:c"}, keys)
+
+	randomKeys, err := store.RandomKeys("user:", 3, true)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"user:a", "user:b", "user:c"}, randomKeys)
+}
+
 func TestMemoryStore_RandomKeys_UniqueNoDuplicates(t *testing.T) {
 	t.Parallel()
 

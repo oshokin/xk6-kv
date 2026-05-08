@@ -17,7 +17,8 @@ type Options struct {
 	Backend string `js:"backend"`
 
 	// Path points to the bbolt file when using the disk backend.
-	// When empty or invalid the default path is used.
+	// When empty, the default path is used.
+	// Invalid paths return an option error.
 	// Ignored by the memory backend.
 	Path string `js:"path"`
 

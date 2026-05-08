@@ -49,12 +49,9 @@ func (s *MemoryStore) RandomKeys(prefix string, count int64, unique bool) ([]str
 		return s.randomKeysTracked(prefix, count, unique), nil
 	}
 
-	page, err := s.ScanKeys(prefix, "", 0)
-	if err != nil {
-		return nil, err
-	}
+	keys := s.collectMatchingKeysUntracked(prefix)
 
-	return sampleKeys(page.Keys, count, unique), nil
+	return sampleKeys(keys, count, unique), nil
 }
 
 func (s *MemoryStore) randomKeysTracked(prefix string, count int64, unique bool) []string {
@@ -71,6 +68,24 @@ func (s *MemoryStore) randomKeysTracked(prefix string, count int64, unique bool)
 	}
 
 	return randomKeysWithReplacementFromShardRanges(ranges, total, count)
+}
+
+func (s *MemoryStore) collectMatchingKeysUntracked(prefix string) []string {
+	keys := make([]string, 0)
+
+	for _, shard := range s.shards {
+		shard.mu.RLock()
+
+		for key := range shard.container {
+			if prefix == "" || strings.HasPrefix(key, prefix) {
+				keys = append(keys, key)
+			}
+		}
+
+		shard.mu.RUnlock()
+	}
+
+	return keys
 }
 
 // buildShardRandomRanges builds immutable per-call shard snapshots for indexed

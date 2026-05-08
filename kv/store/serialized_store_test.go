@@ -16,6 +16,21 @@ func newTestSerializedMemoryStore(t *testing.T) *SerializedStore {
 	return NewSerializedStore(base, NewJSONSerializer())
 }
 
+func TestStringSerializer_CoercesNonStringValues(t *testing.T) {
+	t.Parallel()
+
+	serializer := NewStringSerializer()
+
+	data, err := serializer.Serialize(map[string]any{"a": float64(1)})
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "map[")
+	assert.Contains(t, string(data), "a:1")
+
+	value, err := serializer.Deserialize(data)
+	require.NoError(t, err)
+	assert.IsType(t, "", value)
+}
+
 // TestSerializedStore_CompareAndDeleteDetailed_NullSemantics verifies JS-facing
 // null semantics after serialization: null is a regular expected value compare.
 func TestSerializedStore_CompareAndDeleteDetailed_NullSemantics(t *testing.T) {

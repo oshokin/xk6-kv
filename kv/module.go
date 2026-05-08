@@ -28,6 +28,10 @@ type (
 
 		// mu protects store creation and configuration.
 		mu sync.Mutex
+
+		// initMu serializes openKv initialization so a partially initialized
+		// shared store cannot be observed or cleared concurrently.
+		initMu sync.Mutex
 	}
 
 	// ModuleInstance is created per VU.
@@ -116,6 +120,9 @@ func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
 
 		return nil
 	}
+
+	mi.rm.initMu.Lock()
+	defer mi.rm.initMu.Unlock()
 
 	backingStore, isNewlyCreated, err := mi.rm.getOrCreateStore(options)
 	if err != nil {

@@ -62,8 +62,16 @@ func parseSizeValue(v any) (uint64, error) {
 	case uint32:
 		return uint64(x), nil
 	case float64:
+		if err := rejectNonFiniteFloat("size", x); err != nil {
+			return 0, err
+		}
+
 		if x < 0 {
 			return 0, fmt.Errorf("negative size: %f", x)
+		}
+
+		if x > float64(math.MaxUint64) {
+			return 0, fmt.Errorf("size too large: %f", x)
 		}
 
 		if math.Trunc(x) != x {
@@ -109,6 +117,14 @@ func parseDurationValue(v any) (time.Duration, error) {
 
 		return durationFromMillis(int64(x))
 	case float64:
+		if err := rejectNonFiniteFloat("duration", x); err != nil {
+			return 0, err
+		}
+
+		if x > float64(math.MaxInt64) || x < float64(math.MinInt64) {
+			return 0, fmt.Errorf("duration too large: %f", x)
+		}
+
 		if math.Trunc(x) != x {
 			return 0, fmt.Errorf("duration must be whole milliseconds: %f", x)
 		}
@@ -124,6 +140,16 @@ func parseDurationValue(v any) (time.Duration, error) {
 	default:
 		return 0, fmt.Errorf("unsupported duration type: %T", x)
 	}
+}
+
+// rejectNonFiniteFloat rejects JavaScript numeric sentinels that cannot be
+// safely converted into Go integer-backed sizes or durations.
+func rejectNonFiniteFloat(kind string, value float64) error {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return fmt.Errorf("%s must be finite: %f", kind, value)
+	}
+
+	return nil
 }
 
 // durationFromMillis converts milliseconds to a time.Duration and returns an error if invalid.

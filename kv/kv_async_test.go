@@ -67,6 +67,32 @@ func TestKVAsync_SetMany_ResolvesWrittenCount(t *testing.T) {
 	`)
 }
 
+func TestKVAsync_StringSerialization_CoercesObjectToString(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		store.NewSerializedStore(
+			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+			store.NewStringSerializer(),
+		),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("string:object", { a: 1 })
+			.then(() => __kv.get("string:object"))
+			.then((value) => {
+				if (typeof value !== "string") {
+					throw new Error("string serializer must return string");
+				}
+				if (!value.includes("map[") || !value.includes("a:1")) {
+					throw new Error("unexpected string serializer value: " + value);
+				}
+			});
+	`)
+}
+
 func TestKVAsync_SetMany_EmptyObjectResolvesZero(t *testing.T) {
 	t.Parallel()
 
@@ -1916,6 +1942,52 @@ func TestKVAsync_OperationMetrics_EmitsAsyncInFlight(t *testing.T) {
 
 	require.Len(t, values, 2)
 	assert.ElementsMatch(t, []float64{1, 0}, values)
+}
+
+func TestKVAsync_OperationMetrics_EmitsClosedHandlePreflightError(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+	samples := attachOperationMetricsForTest(t, runtime, kv)
+
+	require.NoError(t, kv.Close())
+
+	runKVScript(t, runtime, kv, `
+		__kv.get("closed:metrics")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "StoreClosedError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+
+	assertOperationMetricsError(t, samples, opGet, StoreClosedError)
+}
+
+func TestKVAsync_OperationMetrics_EmitsDatabaseNotOpenPreflightError(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, nil)
+	samples := attachOperationMetricsForTest(t, runtime, kv)
+
+	runKVScript(t, runtime, kv, `
+		__kv.get("not-open:metrics")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "DatabaseNotOpenError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+
+	assertOperationMetricsError(t, samples, opGet, DatabaseNotOpenError)
 }
 
 func TestKVAsync_OperationMetrics_EmitsPanicAsUnknownError(t *testing.T) {
@@ -4977,6 +5049,97 @@ func runKVScript(t *testing.T, runtime *modulestest.Runtime, kv *KV, script stri
 
 	_, err := runtime.RunOnEventLoop(script)
 	require.NoError(t, err)
+}
+
+func attachOperationMetricsForTest(t *testing.T, runtime *modulestest.Runtime, kv *KV) chan k6metrics.SampleContainer {
+	t.Helper()
+
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 32)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	return samples
+}
+
+func assertOperationMetricsError(
+	t *testing.T,
+	samples chan k6metrics.SampleContainer,
+	expectedOp string,
+	expectedError ErrorName,
+) {
+	t.Helper()
+
+	metricHits := make(map[string]int)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				metricHits[metricKVOperationsTotal]++
+
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusError, status)
+
+				op, ok := sample.Tags.Get(tagOp)
+				require.True(t, ok)
+				assert.Equal(t, expectedOp, op)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+			case metricKVOperationDuration:
+				metricHits[metricKVOperationDuration]++
+
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusError, status)
+
+				op, ok := sample.Tags.Get(tagOp)
+				require.True(t, ok)
+				assert.Equal(t, expectedOp, op)
+			case metricKVOperationFailed:
+				metricHits[metricKVOperationFailed]++
+
+				op, ok := sample.Tags.Get(tagOp)
+				require.True(t, ok)
+				assert.Equal(t, expectedOp, op)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+			case metricKVErrorsTotal:
+				metricHits[metricKVErrorsTotal]++
+
+				op, ok := sample.Tags.Get(tagOp)
+				require.True(t, ok)
+				assert.Equal(t, expectedOp, op)
+
+				errorType, ok := sample.Tags.Get(tagErrorType)
+				require.True(t, ok)
+				assert.Equal(t, string(expectedError), errorType)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+			case metricKVEmptyResult:
+				metricHits[metricKVEmptyResult]++
+			}
+		}
+	}
+
+	assert.Equal(t, 1, metricHits[metricKVOperationsTotal])
+	assert.Equal(t, 1, metricHits[metricKVOperationDuration])
+	assert.Equal(t, 1, metricHits[metricKVOperationFailed])
+	assert.Equal(t, 1, metricHits[metricKVErrorsTotal])
+	assert.Zero(t, metricHits[metricKVEmptyResult])
 }
 
 type panicGetStore struct {

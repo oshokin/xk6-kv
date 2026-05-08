@@ -122,6 +122,36 @@ func BenchmarkMemoryStore_RandomKeys_WithPrefix(b *testing.B) {
 	}
 }
 
+func BenchmarkMemoryStore_RandomKeys_Untracked_FullPrefix_10k(b *testing.B) {
+	benchmarkMemoryStoreRandomKeysUntrackedFullPrefix(b, 10_000)
+}
+
+func BenchmarkMemoryStore_RandomKeys_Untracked_FullPrefix_100k(b *testing.B) {
+	benchmarkMemoryStoreRandomKeysUntrackedFullPrefix(b, 100_000)
+}
+
+func benchmarkMemoryStoreRandomKeysUntrackedFullPrefix(b *testing.B, keyCount int) {
+	b.Helper()
+	b.ReportAllocs()
+
+	const sampleCount = int64(100)
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: false})
+
+	b.StopTimer()
+	seedMemoryStore(b, store, keyCount, "pfx-")
+	b.StartTimer()
+
+	var keys []string
+
+	for b.Loop() {
+		keys, _ = store.RandomKeys("pfx-", sampleCount, true)
+	}
+
+	b.StopTimer()
+	require.Len(b, keys, int(sampleCount))
+}
+
 // BenchmarkMemoryStore_RandomKeys_TrackedShardLookupScaling stresses tracked
 // randomKeys on high shard counts to expose keyFromShardRanges lookup behavior.
 func BenchmarkMemoryStore_RandomKeys_TrackedShardLookupScaling(b *testing.B) {
