@@ -433,6 +433,41 @@ func TestImportJSONL_BatchSizeFlushesMultipleBatches(t *testing.T) {
 	assert.EqualValues(t, 5, result.Imported)
 }
 
+func TestImportJSONL_ParseErrorReportsCommittedProgress(t *testing.T) {
+	t.Parallel()
+
+	mem := store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true})
+	serialized := store.NewSerializedStore(mem, store.NewJSONSerializer())
+
+	target := filepath.Join(t.TempDir(), "partial-failure.jsonl")
+	writeJSONLFileForTest(
+		t,
+		target,
+		`{"key":"user:1","value":{"name":"A"}}`,
+		`{"key":"user:2","value":{"name":"B"}}`,
+		`{"key":"broken","value":`,
+	)
+
+	result, err := importJSONL(serialized, importJSONLOptions{
+		FileName:  target,
+		BatchSize: 2,
+	})
+	require.Error(t, err)
+	assert.Nil(t, result)
+	require.ErrorIs(t, err, store.ErrValueParseFailed)
+	require.ErrorContains(t, err, "importJSONL failed after 2 records")
+	require.ErrorContains(t, err, "bytes")
+	require.ErrorContains(t, err, "previous batches may already be committed")
+	require.ErrorContains(t, err, "line 3")
+
+	items, getErr := serialized.GetMany([]string{"user:1", "user:2", "broken"})
+	require.NoError(t, getErr)
+	require.Len(t, items, 3)
+	require.NotNil(t, items[0])
+	require.NotNil(t, items[1])
+	assert.Nil(t, items[2])
+}
+
 func TestImportJSONL_EmptyFileImportsZero(t *testing.T) {
 	t.Parallel()
 

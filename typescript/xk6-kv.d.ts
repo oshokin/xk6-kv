@@ -30,7 +30,10 @@ declare module 'k6/x/kv' {
   /**
    * Value serialization method.
    * - `"json"`: Values are JSON-encoded/decoded automatically (default)
-   * - `"string"`: Values are stored as strings/bytes
+   * - `"string"`: Strings are stored as-is; non-string values are coerced with Go `%v` formatting.
+   *
+   * Use `"json"` for structured objects and arrays. `"string"` mode is not JSON and
+   * does not preserve object/array shape for round-trips.
    */
   export type Serialization = 'json' | 'string';
 
@@ -54,6 +57,11 @@ declare module 'k6/x/kv' {
 
     /**
      * Value serialization method.
+     *
+     * Warning: `"string"` mode is coercive. Non-string values are formatted with
+     * Go `%v`, so objects and arrays do not round-trip as JSON structures.
+     * Use `"json"` for structured values.
+     *
      * @default "json"
      */
     serialization?: Serialization;
@@ -718,6 +726,7 @@ declare module 'k6/x/kv' {
     | 'InvalidBackendError'
     | 'InvalidOptionsError'
     | 'InvalidSerializationError'
+    | 'InternalStoreError'
     | 'KVOptionsConflictError'
     | 'BackupOptionsRequiredError'
     | 'RestoreOptionsRequiredError'
@@ -1441,8 +1450,9 @@ declare module 'k6/x/kv' {
      * Imports key/value entries from a JSON Lines file.
      *
      * Each line must be a JSON object: { "key": string, "value": any }.
-     * The import is streaming and batched. Previously committed batches are not
-     * rolled back if a later line is invalid.
+     * The import is streaming and batch-atomic, not file-atomic. Previously committed
+     * batches are not rolled back if a later line is invalid. Rejection messages include
+     * committed progress (records, bytes, and line context) without changing the error name.
      *
      * @param options - Required import options.
      * @returns Promise that resolves to import summary metadata.

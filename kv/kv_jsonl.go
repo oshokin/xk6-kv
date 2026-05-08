@@ -42,7 +42,34 @@ type (
 		Key   string `json:"key"`
 		Value any    `json:"value"`
 	}
+
+	importJSONLProgressError struct {
+		imported  int64
+		bytesRead int64
+		lineNo    int64
+		err       error
+	}
 )
+
+func (e *importJSONLProgressError) Error() string {
+	commitStatus := "no records were committed"
+	if e.imported > 0 {
+		commitStatus = "previous batches may already be committed"
+	}
+
+	return fmt.Sprintf(
+		"importJSONL failed after %d records and %d bytes; %s: line %d: %v",
+		e.imported,
+		e.bytesRead,
+		commitStatus,
+		e.lineNo,
+		e.err,
+	)
+}
+
+func (e *importJSONLProgressError) Unwrap() error {
+	return e.err
+}
 
 // ExportJSONL exports key/value entries to a JSON Lines file.
 func (k *KV) ExportJSONL(options sobek.Value) *sobek.Promise {
@@ -172,6 +199,7 @@ func readJSONLLines(s store.Store, input io.Reader, opts importJSONLOptions) (in
 	return readJSONLLinesWithMaxLineBytes(s, input, opts, importJSONLDefaultMaxLineBytes)
 }
 
+//nolint:funlen // this is a long function, but it is a simple reader loop.
 func readJSONLLinesWithMaxLineBytes(
 	s store.Store,
 	input io.Reader,
@@ -201,7 +229,7 @@ func readJSONLLinesWithMaxLineBytes(
 
 			entry, parseErr := parseImportJSONLLine(line, lineNo)
 			if parseErr != nil {
-				return imported, bytesRead, parseErr
+				return imported, bytesRead, wrapImportJSONLProgressError(imported, bytesRead, lineNo, parseErr)
 			}
 
 			batch = append(batch, entry)
@@ -209,7 +237,7 @@ func readJSONLLinesWithMaxLineBytes(
 			if shouldFlushImportJSONLBatch(imported, len(batch), batchSize, opts.Limit) {
 				written, flushErr := flushImportJSONLBatch(s, batch)
 				if flushErr != nil {
-					return imported, bytesRead, flushErr
+					return imported, bytesRead, wrapImportJSONLProgressError(imported, bytesRead, lineNo, flushErr)
 				}
 
 				imported += written
@@ -218,12 +246,14 @@ func readJSONLLinesWithMaxLineBytes(
 		}
 
 		if errors.Is(err, errImportJSONLLineTooLong) {
-			return imported, bytesRead, fmt.Errorf(
+			progressErr := fmt.Errorf(
 				"%w: importJSONL line %d exceeds maxLineBytes (%d bytes)",
 				store.ErrValueParseFailed,
 				lineNo+1,
 				maxLineBytes,
 			)
+
+			return imported, bytesRead, wrapImportJSONLProgressError(imported, bytesRead, lineNo+1, progressErr)
 		}
 
 		if errors.Is(err, io.EOF) {
@@ -231,25 +261,40 @@ func readJSONLLinesWithMaxLineBytes(
 		}
 
 		if err != nil {
-			return imported, bytesRead, fmt.Errorf(
+			progressErr := fmt.Errorf(
 				"%w: importJSONL line %d: %w",
 				store.ErrSnapshotReadFailed,
 				lineNo+1,
 				err,
 			)
+
+			return imported, bytesRead, wrapImportJSONLProgressError(imported, bytesRead, lineNo+1, progressErr)
 		}
 	}
 
 	if len(batch) > 0 {
 		written, err := flushImportJSONLBatch(s, batch)
 		if err != nil {
-			return imported, bytesRead, err
+			return imported, bytesRead, wrapImportJSONLProgressError(imported, bytesRead, lineNo, err)
 		}
 
 		imported += written
 	}
 
 	return imported, bytesRead, nil
+}
+
+func wrapImportJSONLProgressError(imported, bytesRead, lineNo int64, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return &importJSONLProgressError{
+		imported:  imported,
+		bytesRead: bytesRead,
+		lineNo:    lineNo,
+		err:       err,
+	}
 }
 
 func readImportJSONLLineBounded(reader *bufio.Reader, maxLineBytes int) ([]byte, int64, error) {

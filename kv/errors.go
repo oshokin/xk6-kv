@@ -67,6 +67,9 @@ const (
 	// InvalidSerializationError is emitted when openKv receives an unsupported serialization option.
 	InvalidSerializationError ErrorName = "InvalidSerializationError"
 
+	// InternalStoreError is emitted when a store invariant is violated.
+	InternalStoreError ErrorName = "InternalStoreError"
+
 	// KVOptionsConflictError is emitted when openKv is called with different options than the existing store.
 	KVOptionsConflictError ErrorName = "KVOptionsConflictError"
 
@@ -286,9 +289,10 @@ func classifyError(err error) *Error {
 		return NewError(DiskStoreDeleteError, err.Error())
 	case errors.Is(err, store.ErrDiskStoreExistsFailed):
 		return NewError(DiskStoreExistsError, err.Error())
-	case errors.Is(err, store.ErrDiskStoreScanFailed),
-		errors.Is(err, store.ErrUnexpectedHeapType):
+	case errors.Is(err, store.ErrDiskStoreScanFailed):
 		return NewError(DiskStoreScanError, err.Error())
+	case errors.Is(err, store.ErrUnexpectedHeapType):
+		return NewError(InternalStoreError, err.Error())
 	case errors.Is(err, store.ErrDiskStoreSizeFailed),
 		errors.Is(err, store.ErrDiskStoreCountFailed),
 		errors.Is(err, store.ErrDiskStoreStatFailed):

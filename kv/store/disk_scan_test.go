@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	bolt "go.etcd.io/bbolt"
 )
 
 // TestDiskStore_Scan_ReturnsDistinctBuffers ensures that Scan returns distinct buffers for each page.
@@ -501,13 +503,85 @@ func TestDiskStore_Count_MutationParity(t *testing.T) {
 			require.NoError(t, store.Delete("user:1"))
 			assertCounts(1, 1, 2)
 
-			require.NoError(t, store.RebuildKeyList())
+			written, err := store.SetMany([]Entry{
+				{Key: "user:5", Value: []byte("value-5")},
+				{Key: "order:1", Value: []byte("order-1")},
+			})
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, written)
+			assertCounts(2, 1, 4)
+
+			deleteManyResult, err := store.DeleteMany([]string{"user:4", "missing"})
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, deleteManyResult.Deleted)
+			assert.EqualValues(t, 1, deleteManyResult.Missing)
+			assertCounts(1, 1, 3)
+
+			deletePrefixResult, err := store.DeleteByPrefix("order:", 10)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, deletePrefixResult.Deleted)
 			assertCounts(1, 1, 2)
+
+			popped, err := store.PopRandom("user:")
+			require.NoError(t, err)
+			require.NotNil(t, popped)
+			assertCounts(0, 1, 1)
+
+			require.NoError(t, store.Set("user:6", "value-6"))
+			claim, err := store.ClaimRandom(&ClaimOptions{Prefix: "user:"})
+			require.NoError(t, err)
+			require.NotNil(t, claim)
+
+			completed, err := store.CompleteClaim(&ClaimRef{
+				ID:    claim.ID,
+				Key:   claim.Key,
+				Token: claim.Token,
+			}, &CompleteClaimOptions{DeleteKey: true})
+			require.NoError(t, err)
+			assert.True(t, completed)
+			assertCounts(0, 1, 1)
+
+			require.NoError(t, store.RebuildKeyList())
+			assertCounts(0, 1, 1)
 
 			require.NoError(t, store.Clear())
 			assertCounts(0, 0, 0)
 		})
 	}
+}
+
+func TestDiskStore_Count_MutationParityAfterRestoreAndReopen(t *testing.T) {
+	t.Parallel()
+
+	source := newTestDiskStore(t, true, "", true)
+	requirePopulateStore(
+		t,
+		source,
+		"user:restore:1", "value-1",
+		"user:restore:2", "value-2",
+		"order:restore:1", "order-1",
+	)
+
+	snapshotPath := filepath.Join(t.TempDir(), "restore-source.kv")
+	_, err := source.Backup(&BackupOptions{FileName: snapshotPath})
+	require.NoError(t, err)
+
+	target := newTestDiskStore(t, true, "", true)
+	require.NoError(t, target.Set("stale-before-restore", "stale"))
+
+	_, err = target.Restore(&RestoreOptions{FileName: snapshotPath})
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, requireCountMatchesScan(t, target, "user:restore:"))
+	assert.EqualValues(t, 1, requireCountMatchesScan(t, target, "order:restore:"))
+	assert.EqualValues(t, 3, requireCountMatchesScan(t, target, ""))
+
+	targetPath := target.path
+	require.NoError(t, target.Close())
+
+	reopened := newTestDiskStore(t, true, targetPath, true)
+	assert.EqualValues(t, 2, requireCountMatchesScan(t, reopened, "user:restore:"))
+	assert.EqualValues(t, 1, requireCountMatchesScan(t, reopened, "order:restore:"))
+	assert.EqualValues(t, 3, requireCountMatchesScan(t, reopened, ""))
 }
 
 func TestDiskStore_ListKeys_EmptyStore(t *testing.T) {
@@ -743,4 +817,54 @@ func TestDiskStore_ListKeys_EqualsScanKeysFirstPage(t *testing.T) {
 			assert.Equal(t, page.Keys, keys)
 		})
 	}
+}
+
+func TestDiskStore_ScanAndListKeysIgnoreStalePositiveIndex(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("user:stale", "value"))
+	require.NoError(t, store.Set("user:real", "value"))
+
+	// Simulate stale-positive index by deleting only from bbolt.
+	err := store.handle.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(store.bucket)
+		require.NotNil(t, bucket)
+
+		return bucket.Delete([]byte("user:stale"))
+	})
+	require.NoError(t, err)
+
+	scanPage := mustScanKeysStore(t, store, "user:", "", 0)
+	assert.Equal(t, []string{"user:real"}, scanPage.Keys)
+
+	listKeys, err := store.ListKeys("user:", 0)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"user:real"}, listKeys)
+}
+
+func TestDiskStore_ScanAndListKeysIgnoreStaleNegativeIndex(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("user:1", "value"))
+	require.NoError(t, store.Set("user:2", "value"))
+	require.NoError(t, store.Set("order:1", "value"))
+
+	store.keysLock.Lock()
+	delete(store.keysMap, "user:2")
+	store.ost.Delete("user:2")
+	store.keysLock.Unlock()
+
+	page1 := mustScanKeysStore(t, store, "user:", "", 1)
+	assert.Equal(t, []string{"user:1"}, page1.Keys)
+	assert.Equal(t, "user:1", page1.NextKey)
+
+	page2 := mustScanKeysStore(t, store, "user:", page1.NextKey, 1)
+	assert.Equal(t, []string{"user:2"}, page2.Keys)
+	assert.Empty(t, page2.NextKey)
+
+	listKeys, err := store.ListKeys("user:", 0)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"user:1", "user:2"}, listKeys)
 }

@@ -35,7 +35,7 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    For prefix cardinality checks, try:
 
    ```bash
-   k6 run examples/count-prefix.js
+   k6 run examples/count.js
    ```
 
    For all-or-nothing bulk writes with detailed batch diagnostics, try:
@@ -154,6 +154,7 @@ Each line must be:
 
 Invalid input rejects with `InvalidOptionsError`.
 Malformed JSONL records reject with a parse/read error.
+The import is batch-atomic, not file-atomic: previous successful batches remain committed if a later record fails.
 
 ## Error Manual
 
@@ -334,6 +335,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | `UnsupportedValueTypeError` | Attempted to `set()`/`swap()` a value that isn't a string or `[]byte` once it reaches the store. | `ErrUnsupportedValueType` |
 | `ValueParseError` | Disk increments found a non-integer payload (e.g. you stored `"foo"` and later called `incrementBy`). | `ErrValueParseFailed` |
 | `SerializerError` | JSON/string serializer failed to encode/decode a value for single-value APIs. In `setMany()`, per-entry serialization details still use `err.errors[].name === "SerializerError"` while top-level classification is `InvalidOptionsError`. | `ErrSerializerEncodeFailed`, `ErrSerializerDecodeFailed` |
+| `InternalStoreError` | A store invariant was violated (for example, an unexpected heap item type during internal memory scan/index iteration). Treat as a bug or incompatible backend state. | `ErrUnexpectedHeapType` |
 | `UnexpectedStoreOutputError` | Store returned a nil result without an accompanying error (indicates a buggy or incompatible backend). | `ErrUnexpectedStoreOutput` |
 | `UnknownError` | An error occurred that cannot be classified into any specific category (fallback for unclassified errors). | (Any unclassified error) |
 
@@ -383,7 +385,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | **Transient** | Retry with backoff: `BackupInProgressError`, `RestoreInProgressError` |
 | **User error** | Fix input and retry: `KeyNotFoundError`, `ValueNumberRequiredError`, `SnapshotNotFoundError` (on first run) |
 | **Configuration** | Check paths/permissions/mode: `DiskPathError`, `SnapshotPermissionError`, `DiskStoreOpenError`, `StoreReadOnlyError` |
-| **System failure** | Fail-fast and investigate: `DiskStoreWriteError`, `SnapshotIOError`, `BucketNotFoundError`, `UnknownError` |
+| **System failure** | Fail-fast and investigate: `DiskStoreWriteError`, `SnapshotIOError`, `BucketNotFoundError`, `InternalStoreError`, `UnknownError` |
 
 **Best practices:**
 

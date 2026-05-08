@@ -51,10 +51,6 @@ func (s *DiskStore) ScanKeys(prefix, afterKey string, limit int64) (*KeyScanPage
 	}
 	defer release()
 
-	if s.trackKeys {
-		return s.scanKeysFromIndex(prefix, afterKey, limit), nil
-	}
-
 	page := &KeyScanPage{
 		Keys: make([]string, 0),
 	}
@@ -94,23 +90,10 @@ func (s *DiskStore) Count(prefix string) (int64, error) {
 	defer release()
 
 	if s.trackKeys {
-		s.keysLock.RLock()
-
-		if s.ost != nil {
-			if prefix == "" {
-				total := int64(len(s.keysList))
-				s.keysLock.RUnlock()
-
-				return total, nil
-			}
-
-			left, right := s.ost.RangeBounds(prefix)
-			s.keysLock.RUnlock()
-
-			return int64(right - left), nil
+		count, ok := s.countFromIndex(prefix)
+		if ok {
+			return count, nil
 		}
-
-		s.keysLock.RUnlock()
 	}
 
 	total, err := s.countByCursor(prefix)
@@ -121,73 +104,21 @@ func (s *DiskStore) Count(prefix string) (int64, error) {
 	return total, nil
 }
 
-func (s *DiskStore) scanKeysFromIndex(prefix, afterKey string, limit int64) *KeyScanPage {
+func (s *DiskStore) countFromIndex(prefix string) (int64, bool) {
 	s.keysLock.RLock()
 	defer s.keysLock.RUnlock()
 
-	page := &KeyScanPage{
-		Keys: make([]string, 0),
+	if s.ost == nil {
+		return 0, false
 	}
-
-	if s.ost == nil || s.ost.Len() == 0 {
-		return page
-	}
-
-	var (
-		left  int
-		right int
-	)
 
 	if prefix == "" {
-		left = 0
-		right = s.ost.Len()
-	} else {
-		left, right = s.ost.RangeBounds(prefix)
+		return int64(len(s.keysList)), true
 	}
 
-	if left >= right {
-		return page
-	}
+	left, right := s.ost.RangeBounds(prefix)
 
-	start := left
-	if afterKey != "" {
-		// Start from rank of afterKey, but ensure we're within the prefix range.
-		start = max(s.ost.Rank(afterKey), left)
-
-		// If the key at start is <= afterKey, we need to advance to the next key.
-		// This handles the "strictly after" semantics required by ScanKeys.
-		if start < right {
-			if keyAtStart, ok := s.ost.Kth(start); ok && keyAtStart <= afterKey {
-				start++
-			}
-		}
-	}
-
-	if start >= right {
-		return page
-	}
-
-	for i := start; i < right; i++ {
-		if limit > 0 && int64(len(page.Keys)) >= limit {
-			break
-		}
-
-		key, ok := s.ost.Kth(i)
-		if !ok {
-			continue
-		}
-
-		page.Keys = append(page.Keys, key)
-	}
-
-	if limit > 0 && len(page.Keys) > 0 {
-		nextIndex := start + len(page.Keys)
-		if nextIndex < right {
-			page.NextKey = page.Keys[len(page.Keys)-1]
-		}
-	}
-
-	return page
+	return int64(right - left), true
 }
 
 // fillDiskScanPage populates page with cursor results that match prefix/afterKey/limit constraints.

@@ -89,3 +89,12 @@ func normalizeCompleteClaimOptions(opts *CompleteClaimOptions) *CompleteClaimOpt
 		DeleteKey: opts.DeleteKey,
 	}
 }
+
+// Ref returns the release/complete reference for this claim.
+func (c *EntryClaim) Ref() *ClaimRef {
+	return &ClaimRef{
+		ID:    c.ID,
+		Key:   c.Key,
+		Token: c.Token,
+	}
+}

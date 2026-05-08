@@ -150,7 +150,11 @@ func (k *KV) runAsyncWithStore(
 		})
 	}
 
+	finishAsync := k.beginAsyncOperation()
+
 	go func() {
+		defer finishAsync()
+
 		defer func() {
 			if r := recover(); r != nil {
 				panicErr := fmt.Errorf("panic recovered during store operation: %v", r)
@@ -198,6 +202,21 @@ func (k *KV) runAsyncWithStore(
 	}()
 
 	return promise
+}
+
+func (k *KV) beginAsyncOperation() func() {
+	if k.operationMetrics == nil {
+		return func() {}
+	}
+
+	ctx := k.vu.Context()
+	state := k.vu.State()
+
+	k.operationMetrics.addAsyncInFlight(ctx, state, 1)
+
+	return func() {
+		k.operationMetrics.addAsyncInFlight(ctx, state, -1)
+	}
 }
 
 // runAsyncWithStoreObserved wraps runAsyncWithStore with per-operation metric emission.

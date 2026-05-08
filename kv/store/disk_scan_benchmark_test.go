@@ -42,3 +42,62 @@ func BenchmarkDiskStore_Scan(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkDiskStore_KeyReadAPIs measures public key-only reads and prefix
+// counts. The size matrix keeps the index-vs-cursor trade-off visible when
+// changing disk trackKeys behavior.
+func BenchmarkDiskStore_KeyReadAPIs(b *testing.B) {
+	const (
+		scanLimit = 100
+		listLimit = 0
+	)
+
+	sizes := []struct {
+		name           string
+		keysPerPrefix  int
+		otherKeyPrefix string
+	}{
+		{name: "small", keysPerPrefix: 100, otherKeyPrefix: "order:"},
+		{name: "medium", keysPerPrefix: 10_000, otherKeyPrefix: "order:"},
+		{name: "large", keysPerPrefix: 100_000, otherKeyPrefix: "order:"},
+	}
+
+	for _, trackKeys := range []bool{true, false} {
+		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
+			for _, size := range sizes {
+				b.Run(size.name, func(b *testing.B) {
+					store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-key-read-*.db")
+
+					b.StopTimer()
+					seedDiskStore(b, store, size.keysPerPrefix, "user:")
+					seedDiskStore(b, store, size.keysPerPrefix, size.otherKeyPrefix)
+					b.StartTimer()
+
+					b.Run("ScanKeysLimit100", func(b *testing.B) {
+						b.ReportAllocs()
+
+						for b.Loop() {
+							_, _ = store.ScanKeys("user:", "", scanLimit)
+						}
+					})
+
+					b.Run("ListKeysAllPrefix", func(b *testing.B) {
+						b.ReportAllocs()
+
+						for b.Loop() {
+							_, _ = store.ListKeys("user:", listLimit)
+						}
+					})
+
+					b.Run("CountPrefix", func(b *testing.B) {
+						b.ReportAllocs()
+
+						for b.Loop() {
+							_, _ = store.Count("user:")
+						}
+					})
+				})
+			}
+		})
+	}
+}

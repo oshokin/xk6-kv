@@ -251,6 +251,13 @@ interface OpenKvOptions {
 
 **Note:** With `serialization: "string"`, string values are stored as-is. Non-string values are converted with Go `fmt` `%v` formatting (for example, an object can become `map[a:1]`). This mode is not JSON and is not intended for structured value round-trips; use `serialization: "json"` for objects/arrays.
 
+```javascript
+const kv = openKv({ serialization: 'string' });
+
+await kv.set('x', { a: 1 });
+console.log(await kv.get('x')); // Go-style string, not { a: 1 }
+```
+
 > ⚠️ **Snapshot path sharing:** If you omit `backup().fileName` or `restore().fileName`, the memory backend deliberately falls back to the same `.k6.kv` file the disk backend uses. This lets you run ultra-fast tests with `backend: "memory"` and then immediately replay the generated dataset via `backend: "disk"` without touching paths. If you *don't* want that coupling (for example, you run disk workloads concurrently), always pass an explicit `fileName`.
 
 **Memory Backend Sharding:**
@@ -435,7 +442,7 @@ Backend note:
   ```
 
   Backend note:
-  - disk backend uses in-memory key index when `trackKeys: true`, otherwise bbolt cursor scan;
+  - disk backend reads key names from bbolt cursors so results reflect the durable store;
   - memory backend uses key-only shard iterators and merges them lexicographically;
   - `listKeys()` is not cursor-paginated; use `scanKeys()` for key-only cursor pagination;
   - use `scan()` when you need key/value entries.
@@ -566,6 +573,9 @@ Backend note:
   - `xk6_kv_operation_failed` (Rate, tags: `op`, `backend`, `track_keys`, `serialization`)
   - `xk6_kv_errors_total` (Counter, tags: `op`, `backend`, `error_type`, `track_keys`, `serialization`)
   - `xk6_kv_empty_result` (Rate for `random_key`/`random_keys`/`pop_random`/`claim_random`, tags: `op`, `backend`, `track_keys`, `serialization`)
+  - `xk6_kv_async_in_flight` (Gauge for async store operations currently running, tags: `backend`, `track_keys`, `serialization`)
+
+  `xk6_kv_async_in_flight` is the current saturation signal for the async bridge. There is no `waiting` metric because xk6-kv does not currently have an async limiter or queue; if one is added later, a low-cardinality waiting gauge can be added alongside it.
 
   ```javascript
   const kv = openKv({
@@ -683,7 +693,7 @@ Each line must be a JSON object with:
 - `value` - required JSON value, including `null`.
 
 `importJSONL()` rejects blank lines and malformed JSON records. Errors include the source line number.
-The import is not a global transaction: if a later line is invalid, already committed batches remain imported, while the currently failed batch is not partially written.
+The import is batch-atomic, not file-atomic: if a later line is invalid, already committed batches remain imported, while the currently failed batch is not partially written. Failure messages include committed progress (`records`, `bytes`, and line context) so callers can locate the bad record and decide whether a retry is safe.
 
 - **`close(): void`** - Synchronously closes this KV handle. Call once in `teardown()`.
   After `close()`, this handle rejects async operations with `StoreClosedError` on both backends.
@@ -701,18 +711,19 @@ The import is not a global transaction: if a later line is invalid, already comm
 - **Random key workloads:** Calling `randomKey()` repeatedly with `trackKeys: false` (especially on the disk backend) keeps a read transaction open while it counts and selects keys, which can stall the lone bbolt writer until the call finishes. Turn on `trackKeys` (for O(1)/O(log n) sampling) or throttle/redesign these workloads to avoid head-of-line blocking.
 - **`randomKeys()` complexity by backend:** With `trackKeys: true`, both backends use key indexes for small samples; memory first builds shard ranges (O(shards * log n)) and then selects sampled keys by rank, while disk may fall back to cursor scan for near-full unique samples. With `trackKeys: false`, it collects candidates via `scanKeys()` and samples in memory (linear in matching keys).
 - **Memory `trackKeys: false` scan/list costs:** `scan()`, `scanKeys()`, `list()`, and `listKeys()` use untracked shard-map iteration. On large keyspaces, repeated pagination can become expensive; if these operations are hot, prefer `trackKeys: true`.
+- **Disk backend and `trackKeys`:** bbolt is the persistent source of truth. With `trackKeys: true`, the disk backend maintains an exact derived in-memory key index rebuilt from bbolt on open/restore and updated after successful mutations. That index accelerates `randomKey()`, `randomKeys()`, and `count()`, while cursor-style key reads (`scanKeys()` and `listKeys()`) still read from bbolt.
 - **Bound large reads and writes:** For large keyspaces, prefer `scan()` / `scanKeys()` with bounded positive `limit` values instead of `list()` / `listKeys()` or unlimited `limit <= 0` calls. Oversized positive limits are rejected to avoid unbounded allocations and long transactions.
 - **`count()` / `count({ prefix })` complexity:**
   - `count()` (same as `size()`):
     - memory backend: O(shards)
     - disk backend with `trackKeys: true`: O(1)
-    - disk backend with `trackKeys: false`: uses bbolt bucket stats (not guaranteed constant-time)
+    - disk backend with `trackKeys: false`: bbolt bucket stats (not guaranteed constant-time)
   - `count({ prefix })`:
     - memory + `trackKeys: true`: O(shards * log n)
     - memory + `trackKeys: false`: O(n)
     - disk + `trackKeys: true`: O(log n)
     - disk + `trackKeys: false`: O(k), where `k` is number of keys under prefix
-- **Prefix cardinality on large disk datasets:** If `count({ prefix })` is hot, prefer `trackKeys: true`. Without tracking, the disk path walks a bbolt cursor through matching keys.
+- **Prefix cardinality on large disk datasets:** If `count({ prefix })` is hot on disk, prefer `trackKeys: true`. Without tracking, the disk path walks a bbolt cursor through matching keys.
 - Both backends are optimized for concurrent workloads, but there's synchronization overhead between VUs
 
 ## Usage Examples

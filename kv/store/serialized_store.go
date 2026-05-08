@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+const serializedPopRandomClaimOwner = "__xk6_kv_pop_random"
+
 // SerializedStore wraps an underlying Store and transparently applies a Serializer
 // to values on write/read. This allows callers to work with rich types while the
 // Store persists/returns raw bytes (or strings) internally.
@@ -337,19 +339,45 @@ func (s *SerializedStore) RandomKeys(prefix string, count int64, unique bool) ([
 
 // PopRandom atomically selects and removes a random matching entry and deserializes its value.
 func (s *SerializedStore) PopRandom(prefix string) (*Entry, error) {
-	entry, err := s.store.PopRandom(prefix)
-	if err != nil || entry == nil {
-		return entry, err
+	claim, err := s.store.ClaimRandom(&ClaimOptions{
+		Prefix: prefix,
+		Owner:  serializedPopRandomClaimOwner,
+		TTLMs:  DefaultClaimTTLMs,
+	})
+	if err != nil || claim == nil {
+		return nil, err
 	}
 
-	decoded, err := s.deserializeValue(entry.Value)
+	decoded, err := s.deserializeValue(claim.Entry.Value)
+	if err != nil {
+		released, releaseErr := s.store.ReleaseClaim(claim.Ref())
+		if releaseErr != nil {
+			return nil, errors.Join(err, releaseErr)
+		}
+
+		if !released {
+			return nil, fmt.Errorf("%w: popRandom claim release failed after decode error", err)
+		}
+
+		return nil, err
+	}
+
+	completed, err := s.store.CompleteClaim(
+		claim.Ref(),
+		&CompleteClaimOptions{DeleteKey: true},
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	entry.Value = decoded
+	if !completed {
+		return nil, errors.New("popRandom claim completion failed")
+	}
 
-	return entry, nil
+	return &Entry{
+		Key:   claim.Entry.Key,
+		Value: decoded,
+	}, nil
 }
 
 // ClaimRandom atomically leases a random matching entry and deserializes its value.
@@ -361,6 +389,15 @@ func (s *SerializedStore) ClaimRandom(opts *ClaimOptions) (*EntryClaim, error) {
 
 	decoded, err := s.deserializeValue(claim.Entry.Value)
 	if err != nil {
+		released, releaseErr := s.store.ReleaseClaim(claim.Ref())
+		if releaseErr != nil {
+			return nil, errors.Join(err, releaseErr)
+		}
+
+		if !released {
+			return nil, fmt.Errorf("%w: claim release failed after decode error", err)
+		}
+
 		return nil, err
 	}
 

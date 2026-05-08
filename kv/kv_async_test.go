@@ -1852,6 +1852,72 @@ func TestKVAsync_OperationMetrics_EmitsExpectedSamples(t *testing.T) {
 	assert.Zero(t, emptyZero, "empty-result metric should be emitted only for allocation operations")
 }
 
+func TestKVAsync_OperationMetrics_EmitsAsyncInFlight(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	registry := runtime.VU.InitEnv().Registry
+	rootTags := registry.RootTagSet()
+
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	var err error
+
+	kv.operationMetrics, err = newKVOperationMetrics(registry, Options{
+		Backend:       BackendMemory,
+		Serialization: SerializationJSON,
+		TrackKeys:     true,
+		Metrics:       &MetricsOptions{Operations: true},
+	})
+	require.NoError(t, err)
+
+	samples := make(chan k6metrics.SampleContainer, 16)
+	runtime.MoveToVUContext(&lib.State{
+		BuiltinMetrics: runtime.BuiltinMetrics,
+		Samples:        samples,
+		Tags:           lib.NewVUStateTags(rootTags),
+	})
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("async:in-flight", "value")
+			.then((value) => {
+				if (value !== "value") {
+					throw new Error("unexpected resolved value");
+				}
+			});
+	`)
+
+	var values []float64
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			if sample.Metric.Name != metricKVAsyncInFlight {
+				continue
+			}
+
+			values = append(values, sample.Value)
+
+			_, hasOp := sample.Tags.Get(tagOp)
+			assert.False(t, hasOp, "async saturation metric must not carry per-operation labels")
+
+			backend, hasBackend := sample.Tags.Get(tagBackend)
+			require.True(t, hasBackend)
+			assert.Equal(t, BackendMemory, backend)
+
+			trackKeys, hasTrackKeys := sample.Tags.Get(tagTrackKeys)
+			require.True(t, hasTrackKeys)
+			assert.Equal(t, "true", trackKeys)
+
+			serialization, hasSerialization := sample.Tags.Get(tagSerialization)
+			require.True(t, hasSerialization)
+			assert.Equal(t, "json", serialization)
+		}
+	}
+
+	require.Len(t, values, 2)
+	assert.ElementsMatch(t, []float64{1, 0}, values)
+}
+
 func TestKVAsync_OperationMetrics_EmitsValidationError(t *testing.T) {
 	t.Parallel()
 
@@ -4138,6 +4204,27 @@ func TestKVAsync_ImportJSONL_MalformedJSONRejectsPromise(t *testing.T) {
 			.catch((err) => {
 				if (!err || err.name !== "ValueParseError") {
 					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+				if (!String(err.message).includes("importJSONL failed after 1 records")) {
+					throw new Error("missing import progress: " + String(err.message));
+				}
+				if (!String(err.message).includes("previous batches may already be committed")) {
+					throw new Error("missing partial commit warning: " + String(err.message));
+				}
+				if (!String(err.message).includes("line 2")) {
+					throw new Error("missing failing line: " + String(err.message));
+				}
+				return __kv.getMany(["user:1", "user:2"]);
+			})
+			.then((items) => {
+				if (!Array.isArray(items) || items.length !== 2) {
+					throw new Error("unexpected getMany shape");
+				}
+				if (items[0].exists !== true) {
+					throw new Error("committed batch was not preserved");
+				}
+				if (items[1].exists !== false) {
+					throw new Error("failed record must not be imported");
 				}
 			});
 	`)

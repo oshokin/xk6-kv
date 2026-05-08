@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"go.k6.io/k6/lib"
@@ -17,6 +18,7 @@ const (
 	metricKVOperationFailed   = "xk6_kv_operation_failed"
 	metricKVErrorsTotal       = "xk6_kv_errors_total"
 	metricKVEmptyResult       = "xk6_kv_empty_result"
+	metricKVAsyncInFlight     = "xk6_kv_async_in_flight"
 
 	tagOp        = "op"
 	tagStatus    = "status"
@@ -71,6 +73,8 @@ type (
 		operationFailed   *metrics.Metric
 		errorsTotal       *metrics.Metric
 		emptyResult       *metrics.Metric
+		asyncInFlight     *metrics.Metric
+		asyncInFlightNow  atomic.Int64
 
 		backend       string
 		serialization string
@@ -116,6 +120,11 @@ func newKVOperationMetrics(registry *metrics.Registry, options Options) (*kvOper
 		return nil, fmt.Errorf("register %s: %w", metricKVEmptyResult, err)
 	}
 
+	asyncInFlight, err := registry.NewMetric(metricKVAsyncInFlight, metrics.Gauge, metrics.Default)
+	if err != nil {
+		return nil, fmt.Errorf("register %s: %w", metricKVAsyncInFlight, err)
+	}
+
 	serialization := options.Serialization
 	if serialization == "" {
 		serialization = DefaultSerialization
@@ -127,6 +136,7 @@ func newKVOperationMetrics(registry *metrics.Registry, options Options) (*kvOper
 		operationFailed:   operationFailed,
 		errorsTotal:       errorsTotal,
 		emptyResult:       emptyResult,
+		asyncInFlight:     asyncInFlight,
 		backend:           options.Backend,
 		serialization:     serialization,
 		trackKeys:         strconv.FormatBool(options.TrackKeys),
@@ -195,6 +205,29 @@ func (m *kvOperationMetrics) emit(ctx context.Context, state *lib.State, sample 
 			metrics.B(sample.emptyResult),
 		)
 	}
+}
+
+func (m *kvOperationMetrics) addAsyncInFlight(ctx context.Context, state *lib.State, delta int64) {
+	if m == nil {
+		return
+	}
+
+	current := m.asyncInFlightNow.Add(delta)
+	m.emitAsyncInFlight(ctx, state, current)
+}
+
+func (m *kvOperationMetrics) emitAsyncInFlight(ctx context.Context, state *lib.State, value int64) {
+	if m == nil || ctx == nil || state == nil || state.Samples == nil || state.Tags == nil {
+		return
+	}
+
+	tagsAndMeta := state.Tags.GetCurrentValues()
+	tags := tagsAndMeta.Tags.
+		With(tagBackend, m.backend).
+		With(tagTrackKeys, m.trackKeys).
+		With(tagSerialization, m.serialization)
+
+	m.pushSample(ctx, state, m.asyncInFlight, tags, tagsAndMeta.Metadata, time.Now(), float64(value))
 }
 
 func (m *kvOperationMetrics) pushSample(
