@@ -8,7 +8,7 @@
 >
 > - Atomic operations: `incrementBy`, `getOrSet`, `swap`, `compareAndSwap`, `deleteIfExists`, `compareAndDelete`.
 > - Random keys: `randomKey()` plus batch `randomKeys()` for key-only sampling workflows.
-> - Optional key tracking for **O(1) random sampling** (disk & memory backends).
+> - Optional key tracking for faster random key sampling (disk & memory backends).
 > - Disk backend path overrides for custom artifact persistence.
 >
 > All code is licensed under **GNU AGPL v3.0**.
@@ -21,7 +21,7 @@ A k6 extension providing a persistent key-value store to share state across Virt
 - 🔄 **Flexible Storage**: In-memory (ephemeral) or disk-based (persistent) backends
 - 📊 **Atomic Operations**: Increment, compare-and-swap, and more
 - 🎲 **Random Key Selection**: Uniform sampling with optional prefix filtering
-- 🔍 **Key Tracking**: Optional O(1) random key access via in-memory indexing
+- 🔍 **Key Tracking**: Optional faster random key access via in-memory indexing
 - 🏷️ **Prefix Support**: Filter operations by key prefixes
 - 📦 **Stable bbolt Bucket**: Disk backend always uses the `k6` bucket (**original upstream bug tied it to the DB path and could orphan data - now fixed**)
 - 🧭 **Cursor Scanning**: Stream large datasets via `scan()` / `scanKeys()` with continuation tokens
@@ -241,13 +241,15 @@ interface OpenKvOptions {
 **Options:**
 
 - `backend`: `"memory"` (ephemeral, fastest) or `"disk"` (persistent bbolt)
-- `serialization`: `"json"` (structured) or `"string"` (raw bytes)
-- `trackKeys`: Enable in-memory key indexing for O(1) `randomKey()` performance
+- `serialization`: `"json"` (structured) or `"string"` (string/raw bytes)
+- `trackKeys`: Enable in-memory key indexing for faster `randomKey()`/`randomKeys()` selection (see Performance & Complexity)
 - `path`: (Disk only) Override bbolt file location
 - `memory.shardCount`: (Memory only) Number of shards for concurrent performance. If `<= 0` or omitted, defaults to `runtime.NumCPU()` (automatic, recommended). If `> 65536`, automatically capped at 65536. Ignored by disk backend. When `memory` is omitted, defaults are applied.
 - `disk`: (Disk only) Optional bbolt tuning. When `disk` is omitted, bbolt defaults apply (1s lock timeout, syncs enabled, array freelist, etc.).
 - `disk.readOnly`: Requires the bbolt file (and `k6` bucket) to already exist; opening in read-only mode cannot create the bucket and will fail if the file is missing or empty.
 - `metrics.operations`: Enables automatic per-method metrics (`xk6_kv_operations_total`, `xk6_kv_operation_duration`, `xk6_kv_operation_failed`, `xk6_kv_errors_total`, `xk6_kv_empty_result`).
+
+**Note:** With `serialization: "string"`, string values are stored as-is. Non-string values are converted with Go `fmt` `%v` formatting (for example, an object can become `map[a:1]`). This mode is not JSON and is not intended for structured value round-trips; use `serialization: "json"` for objects/arrays.
 
 > ⚠️ **Snapshot path sharing:** If you omit `backup().fileName` or `restore().fileName`, the memory backend deliberately falls back to the same `.k6.kv` file the disk backend uses. This lets you run ultra-fast tests with `backend: "memory"` and then immediately replay the generated dataset via `backend: "disk"` without touching paths. If you *don't* want that coupling (for example, you run disk workloads concurrently), always pass an explicit `fileName`.
 

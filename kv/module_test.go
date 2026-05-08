@@ -183,6 +183,73 @@ func TestOpenKV_AllowsEquivalentDiskPaths(t *testing.T) {
 	})
 }
 
+func TestOpenKV_MemoryPathDoesNotCauseConflict(t *testing.T) {
+	t.Parallel()
+
+	rootModule := newTestRootModule(t)
+	runtime := modulestest.NewRuntime(t)
+	moduleInstance := rootModule.NewModuleInstance(runtime.VU).(*ModuleInstance)
+
+	first := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend": BackendMemory,
+		"path":    "/tmp/ignored-a.db",
+	})
+	second := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend": BackendMemory,
+	})
+
+	require.NotPanics(t, func() {
+		moduleInstance.OpenKv(first)
+	})
+	require.NotPanics(t, func() {
+		moduleInstance.OpenKv(second)
+	})
+
+	t.Cleanup(func() {
+		if moduleInstance.kv != nil {
+			_ = moduleInstance.kv.Close()
+		}
+	})
+}
+
+func TestOpenKV_DiskMemoryOptionsDoNotCauseConflict(t *testing.T) {
+	t.Parallel()
+
+	rootModule := newTestRootModule(t)
+	runtime := modulestest.NewRuntime(t)
+	moduleInstance := rootModule.NewModuleInstance(runtime.VU).(*ModuleInstance)
+
+	dbPath := filepath.Join(t.TempDir(), "kv.db")
+
+	// Close store before TempDir cleanup removes db files.
+	t.Cleanup(func() {
+		cleanupRootModule(t, rootModule)
+
+		if moduleInstance.kv != nil {
+			_ = moduleInstance.kv.Close()
+		}
+	})
+
+	first := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend": BackendDisk,
+		"path":    dbPath,
+		"memory": map[string]any{
+			"shardCount": 64,
+		},
+	})
+	second := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend": BackendDisk,
+		"path":    dbPath,
+	})
+
+	require.NotPanics(t, func() {
+		moduleInstance.OpenKv(first)
+	})
+	require.NotPanics(t, func() {
+		moduleInstance.OpenKv(second)
+	})
+}
+
 // TestOpenKV_InitializesReportStatsMetrics verifies that openKv wires reportStats metric emitters.
 func TestOpenKV_InitializesReportStatsMetrics(t *testing.T) {
 	t.Parallel()

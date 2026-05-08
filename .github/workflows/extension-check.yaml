@@ -17,7 +17,7 @@ on:
 env:
   # Tool versions.
   GOLANGCI_LINT_VERSION: "v2.12.2"
-  GO_VERSION: "1.25.9"
+  GO_VERSION: "1.25.10"
   XK6_VERSION: "v1.4.1"
 
   # Test configuration.
@@ -76,7 +76,7 @@ jobs:
       fail-fast: false
       # Create a matrix of 2 jobs: 1 Go version × 2 platforms.
       matrix:
-        go-version: ["1.25.9"]
+        go-version: ["1.25.10"]
         platform: [ubuntu-latest, windows-latest]
     steps:
       # Checkout the repository code.

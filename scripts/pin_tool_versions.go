@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	goversion "go/version"
 	"io/fs"
 	"log"
 	"os/exec"
@@ -20,10 +21,12 @@ import (
 type (
 	// resolvedInputs groups version and root data so call sites do not pass loose tuples.
 	resolvedInputs struct {
-		// XK6 stores the module metadata used for xk6 and Go version pins.
+		// XK6 stores the module metadata used for xk6 version pins.
 		XK6 *moduleInfo
 		// Lint stores the module metadata used for golangci-lint pins.
 		Lint *moduleInfo
+		// GoVersion stores the local go.mod Go directive used for Go version pins.
+		GoVersion string
 		// Root is the absolute repository root where target files are located.
 		Root string
 	}
@@ -70,28 +73,13 @@ type (
 const (
 	// dryRunFlagName is the CLI flag that previews edits without touching files.
 	dryRunFlagName = "dry-run"
-	// dryRunFlagUsage explains that dry-run mode only reports pending writes.
-	dryRunFlagUsage = "print changes without writing files"
 	// rootFlagName is the CLI flag that overrides repository root discovery.
 	rootFlagName = "root"
-	// rootFlagUsage explains how the script chooses the repository root.
-	rootFlagUsage = "repository root (defaults to auto-detect)"
 
 	// xk6LatestModuleQuery asks Go to resolve the latest xk6 module version.
 	xk6LatestModuleQuery = "go.k6.io/xk6@latest"
 	// golangCILintLatestModuleQuery asks Go to resolve the latest golangci-lint module version.
 	golangCILintLatestModuleQuery = "github.com/golangci/golangci-lint/v2@latest"
-	// goExecutableName is the command used for module metadata lookup.
-	goExecutableName = "go"
-	// goListCommand is the go subcommand that emits module metadata.
-	goListCommand = "list"
-	// goListModuleFlag scopes go list to module metadata instead of packages.
-	goListModuleFlag = "-m"
-	// goListJSONFlag requests machine-readable module metadata from go list.
-	goListJSONFlag = "-json"
-
-	// currentDirPath is resolved to an absolute path before walking parents.
-	currentDirPath = "."
 	// goModFileName marks the repository root for this script.
 	goModFileName = "go.mod"
 	// githubDirName names GitHub automation configuration directories.
@@ -108,10 +96,18 @@ const (
 	releaseActionFile = "action.yml"
 	// taskfileName is updated so local lint tasks use the same pinned tools.
 	taskfileName = "taskfile.yaml"
+	// devcontainerDirName names the development container configuration directory.
+	devcontainerDirName = ".devcontainer"
+	// devcontainerFileName is updated so container Go matches go.mod.
+	devcontainerFileName = "devcontainer.json"
 
 	// expectedSingleReplacement protects against silently editing duplicate or missing config lines.
 	expectedSingleReplacement = 1
 
+	// goModVersionPattern matches the local Go directive in go.mod.
+	goModVersionPattern = `(?m)^go ([0-9]+\.[0-9]+(?:\.[0-9]+)?)$`
+	// goModVersionLine renders the local Go directive in go.mod.
+	goModVersionLine = `go %s`
 	// golangCILintVersionPattern matches the workflow env var for golangci-lint.
 	golangCILintVersionPattern = `(?m)^  GOLANGCI_LINT_VERSION: ".*"$`
 	// goVersionPattern matches the workflow env var for Go.
@@ -128,6 +124,8 @@ const (
 	taskfileGolangCITagPattern = `(?m)^  GOLANGCI_TAG: ".*"$`
 	// taskfileXK6TagPattern matches the taskfile xk6 tag.
 	taskfileXK6TagPattern = `(?m)^  XK6_TAG: ".*"$`
+	// devcontainerGoVersionPattern matches the Go feature version in devcontainer.json.
+	devcontainerGoVersionPattern = `(?m)^			"version": ".*"$`
 
 	// golangCILintVersionLine renders the workflow env var for golangci-lint.
 	golangCILintVersionLine = `  GOLANGCI_LINT_VERSION: "%s"`
@@ -145,52 +143,14 @@ const (
 	taskfileGolangCITagLine = `  GOLANGCI_TAG: "%s"`
 	// taskfileXK6TagLine renders the taskfile xk6 tag.
 	taskfileXK6TagLine = `  XK6_TAG: "%s"`
-
-	// changedDryRunStatusPrefix prefixes files that would change in dry-run mode.
-	changedDryRunStatusPrefix = "would update:"
-	// changedStatusPrefix prefixes files rewritten by the script.
-	changedStatusPrefix = "updated:  "
-	// unchangedStatusPrefix prefixes files that already contain current versions.
-	unchangedStatusPrefix = "no changes:"
-	// doneMessage is printed after all configured updates are processed.
-	doneMessage = "Done. Review changes and commit if desired."
-	// statusLineFormat renders a status prefix followed by a target file path.
-	statusLineFormat = "%s %s\n"
-	// resolvedXK6VersionFormat reports the resolved xk6 module version.
-	resolvedXK6VersionFormat = "Resolved xk6@latest -> %s\n"
-	// resolvedXK6GoVersionFormat reports the Go version required by xk6.
-	resolvedXK6GoVersionFormat = "Resolved go.k6.io/xk6 Go version -> %s\n"
-	// resolvedGolangCILintVersionFormat reports the resolved golangci-lint module version.
-	resolvedGolangCILintVersionFormat = "Resolved golangci-lint@latest -> %s\n"
-
-	// emptyXK6VersionErrorFormat identifies an invalid go list response for xk6.
-	emptyXK6VersionErrorFormat = "go list returned empty xk6 version (query=%q)"
-	// emptyXK6GoVersionErrorFormat identifies an invalid go list response for xk6's Go version.
-	emptyXK6GoVersionErrorFormat = "go list returned empty xk6 go version (query=%q)"
-	// emptyGolangCILintVersionErrorFormat identifies an invalid go list response for golangci-lint.
-	emptyGolangCILintVersionErrorFormat = "go list returned empty golangci-lint version (query=%q)"
-	// writeFileErrorFormat wraps write failures with the target path.
-	writeFileErrorFormat = "write %s: %w"
-	// replacementCountErrorFormat reports patterns that match too many or too few lines.
-	replacementCountErrorFormat = "%s: expected %d replacements for %q, got %d"
-	// statFileErrorFormat wraps stat failures with the target path.
-	statFileErrorFormat = "stat %s: %w"
-	// readFileErrorFormat wraps read failures with the target path.
-	readFileErrorFormat = "read %s: %w"
-	// resolveCurrentDirectoryErrorFormat wraps failure to resolve the process directory.
-	resolveCurrentDirectoryErrorFormat = "resolve current directory: %w"
-	// repoRootNotFoundErrorMessage explains why repository root discovery failed.
-	repoRootNotFoundErrorMessage = "unable to locate repo root (no go.mod found)"
-	// goListErrorFormat wraps go list failures with stderr/stdout output.
-	goListErrorFormat = "go list %s: %w\n%s"
-	// parseGoListOutputErrorFormat wraps malformed go list JSON output.
-	parseGoListOutputErrorFormat = "parse go list output for %s: %w"
+	// devcontainerGoVersionLine renders the Go feature version in devcontainer.json.
+	devcontainerGoVersionLine = `			"version": "%s"`
 )
 
 // main parses CLI flags and runs the version pinning workflow.
 func main() {
-	dryRun := flag.Bool(dryRunFlagName, false, dryRunFlagUsage)
-	rootFlag := flag.String(rootFlagName, "", rootFlagUsage)
+	dryRun := flag.Bool(dryRunFlagName, false, "print changes without writing files")
+	rootFlag := flag.String(rootFlagName, "", "repository root (defaults to auto-detect)")
 
 	flag.Parse()
 
@@ -201,7 +161,7 @@ func main() {
 
 // run resolves current tool versions and applies them to configured files.
 func run(files afero.Fs, rootInput string, dryRun bool) error {
-	inputs, err := resolveInputs(files, rootInput)
+	inputs, err := resolveInputs(files, rootInput, dryRun)
 	if err != nil {
 		return err
 	}
@@ -212,7 +172,7 @@ func run(files afero.Fs, rootInput string, dryRun bool) error {
 }
 
 // resolveInputs collects the repository root and module versions needed for all updates.
-func resolveInputs(files afero.Fs, rootInput string) (*resolvedInputs, error) {
+func resolveInputs(files afero.Fs, rootInput string, dryRun bool) (*resolvedInputs, error) {
 	root, err := resolveRepoRoot(files, rootInput)
 	if err != nil {
 		return nil, err
@@ -229,29 +189,31 @@ func resolveInputs(files afero.Fs, rootInput string) (*resolvedInputs, error) {
 	}
 
 	if xk6.Version == "" {
-		return nil, fmt.Errorf(emptyXK6VersionErrorFormat, xk6.Query)
-	}
-
-	if xk6.GoVersion == "" {
-		return nil, fmt.Errorf(emptyXK6GoVersionErrorFormat, xk6.Query)
+		return nil, fmt.Errorf("go list returned empty xk6 version (query=%q)", xk6.Query)
 	}
 
 	if lint.Version == "" {
-		return nil, fmt.Errorf(emptyGolangCILintVersionErrorFormat, lint.Query)
+		return nil, fmt.Errorf("go list returned empty golangci-lint version (query=%q)", lint.Query)
+	}
+
+	goVersion, err := reconcileGoModVersion(files, root, []*moduleInfo{xk6, lint}, dryRun)
+	if err != nil {
+		return nil, err
 	}
 
 	return &resolvedInputs{
-		XK6:  xk6,
-		Lint: lint,
-		Root: root,
+		XK6:       xk6,
+		Lint:      lint,
+		GoVersion: goVersion,
+		Root:      root,
 	}, nil
 }
 
 // printResolvedVersions writes the version lookup summary for the operator.
 func printResolvedVersions(inputs *resolvedInputs) {
-	fmt.Printf(resolvedXK6VersionFormat, inputs.XK6.Version)
-	fmt.Printf(resolvedXK6GoVersionFormat, inputs.XK6.GoVersion)
-	fmt.Printf(resolvedGolangCILintVersionFormat, inputs.Lint.Version)
+	fmt.Printf("Resolved xk6@latest -> %s\n", inputs.XK6.Version)
+	fmt.Printf("Resolved go.mod Go version -> %s\n", inputs.GoVersion)
+	fmt.Printf("Resolved golangci-lint@latest -> %s\n", inputs.Lint.Version)
 	fmt.Println()
 }
 
@@ -268,7 +230,7 @@ func buildUpdates(inputs *resolvedInputs) []*fileUpdate {
 				},
 				{
 					Re:   regexp.MustCompile(goVersionPattern),
-					With: fmt.Sprintf(goVersionLine, inputs.XK6.GoVersion),
+					With: fmt.Sprintf(goVersionLine, inputs.GoVersion),
 					Want: expectedSingleReplacement,
 				},
 				{
@@ -278,7 +240,7 @@ func buildUpdates(inputs *resolvedInputs) []*fileUpdate {
 				},
 				{
 					Re:   regexp.MustCompile(goVersionMatrixPattern),
-					With: fmt.Sprintf(goVersionMatrixLine, inputs.XK6.GoVersion),
+					With: fmt.Sprintf(goVersionMatrixLine, inputs.GoVersion),
 					Want: expectedSingleReplacement,
 				},
 			},
@@ -288,7 +250,7 @@ func buildUpdates(inputs *resolvedInputs) []*fileUpdate {
 			Replacements: []*replacement{
 				{
 					Re:   regexp.MustCompile(releaseGoVersionPattern),
-					With: fmt.Sprintf(releaseGoVersionLine, inputs.XK6.GoVersion),
+					With: fmt.Sprintf(releaseGoVersionLine, inputs.GoVersion),
 					Want: expectedSingleReplacement,
 				},
 				{
@@ -313,6 +275,16 @@ func buildUpdates(inputs *resolvedInputs) []*fileUpdate {
 				},
 			},
 		},
+		{
+			Path: filepath.Join(inputs.Root, devcontainerDirName, devcontainerFileName),
+			Replacements: []*replacement{
+				{
+					Re:   regexp.MustCompile(devcontainerGoVersionPattern),
+					With: fmt.Sprintf(devcontainerGoVersionLine, inputs.GoVersion),
+					Want: expectedSingleReplacement,
+				},
+			},
+		},
 	}
 }
 
@@ -326,16 +298,16 @@ func applyUpdates(files afero.Fs, updates []*fileUpdate, dryRun bool) error {
 
 		switch {
 		case changed && dryRun:
-			fmt.Printf(statusLineFormat, changedDryRunStatusPrefix, update.Path)
+			fmt.Printf("would update: %s\n", update.Path)
 		case changed:
-			fmt.Printf(statusLineFormat, changedStatusPrefix, update.Path)
+			fmt.Printf("updated:   %s\n", update.Path)
 		default:
-			fmt.Printf(statusLineFormat, unchangedStatusPrefix, update.Path)
+			fmt.Printf("no changes: %s\n", update.Path)
 		}
 	}
 
 	fmt.Println()
-	fmt.Println(doneMessage)
+	fmt.Println("Done. Review changes and commit if desired.")
 
 	return nil
 }
@@ -371,7 +343,7 @@ func applyFileUpdate(files afero.Fs, update *fileUpdate, dryRun bool) (bool, err
 		updated,
 		original.Mode,
 	); err != nil {
-		return false, fmt.Errorf(writeFileErrorFormat, update.Path, err)
+		return false, fmt.Errorf("write %s: %w", update.Path, err)
 	}
 
 	return true, nil
@@ -381,7 +353,7 @@ func applyFileUpdate(files afero.Fs, update *fileUpdate, dryRun bool) (bool, err
 func replaceExactly(input []byte, re *regexp.Regexp, replacement string, want int, fileName string) ([]byte, error) {
 	matches := re.FindAllIndex(input, -1)
 	if got := len(matches); got != want {
-		return nil, fmt.Errorf(replacementCountErrorFormat, fileName, want, re.String(), got)
+		return nil, fmt.Errorf("%s: expected %d replacements for %q, got %d", fileName, want, re.String(), got)
 	}
 
 	return re.ReplaceAllLiteral(input, []byte(replacement)), nil
@@ -391,12 +363,12 @@ func replaceExactly(input []byte, re *regexp.Regexp, replacement string, want in
 func readFileWithMode(files afero.Fs, path string) (*fileContent, error) {
 	fi, err := files.Stat(path)
 	if err != nil {
-		return nil, fmt.Errorf(statFileErrorFormat, path, err)
+		return nil, fmt.Errorf("stat %s: %w", path, err)
 	}
 
 	data, err := afero.ReadFile(files, path)
 	if err != nil {
-		return nil, fmt.Errorf(readFileErrorFormat, path, err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
 	return &fileContent{
@@ -405,15 +377,94 @@ func readFileWithMode(files afero.Fs, path string) (*fileContent, error) {
 	}, nil
 }
 
+// readGoModVersion parses the local go.mod Go directive used for Go tool pins.
+func readGoModVersion(files afero.Fs, path string) (string, error) {
+	content, err := readFileWithMode(files, path)
+	if err != nil {
+		return "", err
+	}
+
+	matches := regexp.MustCompile(goModVersionPattern).FindSubmatch(content.Data)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("%s: unable to find go directive", path)
+	}
+
+	return string(matches[1]), nil
+}
+
+// reconcileGoModVersion raises go.mod when resolved components require newer Go.
+func reconcileGoModVersion(files afero.Fs, root string, modules []*moduleInfo, dryRun bool) (string, error) {
+	goModPath := filepath.Join(root, goModFileName)
+
+	current, err := readGoModVersion(files, goModPath)
+	if err != nil {
+		return "", err
+	}
+
+	required := requiredGoVersion(current, modules)
+	if required == current {
+		return current, nil
+	}
+
+	update := &fileUpdate{
+		Path: goModPath,
+		Replacements: []*replacement{
+			{
+				Re:   regexp.MustCompile(goModVersionPattern),
+				With: fmt.Sprintf(goModVersionLine, required),
+				Want: expectedSingleReplacement,
+			},
+		},
+	}
+
+	if _, err := applyFileUpdate(files, update, dryRun); err != nil {
+		return "", err
+	}
+
+	fmt.Printf("Raised go.mod Go version -> %s\n", required)
+
+	if dryRun {
+		return required, nil
+	}
+
+	if err := runGoModTidy(root); err != nil {
+		return "", err
+	}
+
+	return readGoModVersion(files, goModPath)
+}
+
+// requiredGoVersion returns the maximum Go version from go.mod and component metadata.
+func requiredGoVersion(current string, modules []*moduleInfo) string {
+	required := current
+
+	for _, module := range modules {
+		if module.GoVersion == "" {
+			continue
+		}
+
+		if compareGoVersions(module.GoVersion, required) > 0 {
+			required = module.GoVersion
+		}
+	}
+
+	return required
+}
+
+// compareGoVersions compares Go language versions using Go's semantic version rules.
+func compareGoVersions(left string, right string) int {
+	return goversion.Compare("go"+left, "go"+right)
+}
+
 // resolveRepoRoot finds the nearest parent directory containing go.mod.
 func resolveRepoRoot(files afero.Fs, explicit string) (string, error) {
 	if explicit != "" {
 		return filepath.Abs(explicit)
 	}
 
-	cwd, err := filepath.Abs(currentDirPath)
+	cwd, err := filepath.Abs(".")
 	if err != nil {
-		return "", fmt.Errorf(resolveCurrentDirectoryErrorFormat, err)
+		return "", fmt.Errorf("resolve current directory: %w", err)
 	}
 
 	dir := cwd
@@ -424,7 +475,7 @@ func resolveRepoRoot(files afero.Fs, explicit string) (string, error) {
 
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", errors.New(repoRootNotFoundErrorMessage)
+			return "", errors.New("unable to locate repo root (no go.mod found)")
 		}
 
 		dir = parent
@@ -437,26 +488,39 @@ func fileExists(files afero.Fs, path string) bool {
 	return err == nil
 }
 
+// runGoModTidy refreshes go.mod and go.sum after raising the Go directive.
+func runGoModTidy(root string) error {
+	cmd := exec.CommandContext(context.Background(), "go", "mod", "tidy")
+	cmd.Dir = root
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("go mod tidy: %w\n%s", err, string(out))
+	}
+
+	return nil
+}
+
 // goListModule resolves one module query using `go list -m -json`.
 func goListModule(module string) (*moduleInfo, error) {
 	//nolint:gosec // module queries are fixed by this tool, not user-provided shell input.
 	cmd := exec.CommandContext(
 		context.Background(),
-		goExecutableName,
-		goListCommand,
-		goListModuleFlag,
-		goListJSONFlag,
+		"go",
+		"list",
+		"-m",
+		"-json",
 		module,
 	)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf(goListErrorFormat, module, err, string(out))
+		return nil, fmt.Errorf("go list %s: %w\n%s", module, err, string(out))
 	}
 
 	var info moduleInfo
 	if err := json.Unmarshal(out, &info); err != nil {
-		return nil, fmt.Errorf(parseGoListOutputErrorFormat, module, err)
+		return nil, fmt.Errorf("parse go list output for %s: %w", module, err)
 	}
 
 	return &info, nil

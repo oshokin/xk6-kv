@@ -90,11 +90,28 @@ func NewOptionsFrom(vu modules.VU, options sobek.Value) (Options, error) {
 		)
 	}
 
-	return opts, nil
+	return opts.Canonical(), nil
+}
+
+// Canonical normalizes options so backend-ignored fields cannot trigger false
+// equivalence mismatches.
+func (o Options) Canonical() Options {
+	switch o.Backend {
+	case BackendMemory:
+		o.Path = ""
+		o.DiskOptions = nil
+	case BackendDisk:
+		o.MemoryOptions = nil
+	}
+
+	return o
 }
 
 // Equal checks if two Options are equal.
 func (o Options) Equal(other Options) bool {
+	o = o.Canonical()
+	other = other.Canonical()
+
 	return o.Backend == other.Backend &&
 		o.Path == other.Path &&
 		o.Serialization == other.Serialization &&

@@ -1,6 +1,6 @@
 module github.com/oshokin/xk6-kv
 
-go 1.25.9
+go 1.25.10
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0

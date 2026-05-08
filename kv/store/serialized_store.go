@@ -75,10 +75,9 @@ func (s *SerializedStore) GetMany(keys []string) ([]*Entry, error) {
 
 // Set serializes the provided value to bytes and stores it under the given key.
 func (s *SerializedStore) Set(key string, value any) error {
-	// Serialize the value.
-	serializedValue, err := s.serializer.Serialize(value)
+	serializedValue, err := s.serializeWriteValue(value)
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrSerializerEncodeFailed, err)
+		return err
 	}
 
 	// Store the serialized value.
@@ -91,7 +90,7 @@ func (s *SerializedStore) SetMany(entries []Entry) (int64, error) {
 	entryErrors := make([]EntryError, 0)
 
 	for i := range entries {
-		serializedValue, err := s.serializer.Serialize(entries[i].Value)
+		serializedValue, err := s.serializeWriteValue(entries[i].Value)
 		if err != nil {
 			entryErrors = append(entryErrors, EntryError{
 				Key:     entries[i].Key,
@@ -125,9 +124,9 @@ func (s *SerializedStore) IncrementBy(key string, delta int64) (int64, error) {
 // the existing value if present. The returned value is always deserialized (if
 // raw type is []byte/string), and "loaded" indicates whether the value existed.
 func (s *SerializedStore) GetOrSet(key string, value any) (any, bool, error) {
-	serializedValue, err := s.serializer.Serialize(value)
+	serializedValue, err := s.serializeWriteValue(value)
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: %w", ErrSerializerEncodeFailed, err)
+		return nil, false, err
 	}
 
 	rawValue, loaded, err := s.store.GetOrSet(key, serializedValue)
@@ -145,9 +144,9 @@ func (s *SerializedStore) GetOrSet(key string, value any) (any, bool, error) {
 // returns the previous value (deserialized when applicable). The 'loaded' flag
 // is false when the key did not previously exist.
 func (s *SerializedStore) Swap(key string, value any) (any, bool, error) {
-	serializedValue, err := s.serializer.Serialize(value)
+	serializedValue, err := s.serializeWriteValue(value)
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: %w", ErrSerializerEncodeFailed, err)
+		return nil, false, err
 	}
 
 	prevRaw, loaded, err := s.store.Swap(key, serializedValue)
@@ -193,7 +192,7 @@ func (s *SerializedStore) CompareAndSwapDetailed(
 	oldCompareValue = nil
 
 	if oldValue != nil {
-		oldSerializedValue, err = s.serializer.Serialize(oldValue)
+		oldSerializedValue, err = s.serializeWriteValue(oldValue)
 		if err != nil {
 			return nil, err
 		}
@@ -201,7 +200,7 @@ func (s *SerializedStore) CompareAndSwapDetailed(
 		oldCompareValue = oldSerializedValue
 	}
 
-	newSerializedValue, err := s.serializer.Serialize(newValue)
+	newSerializedValue, err := s.serializeWriteValue(newValue)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +265,7 @@ func (s *SerializedStore) CompareAndDeleteDetailed(
 	oldValue any,
 	includeCurrentOnMismatch bool,
 ) (*CompareAndDeleteDetailedResult, error) {
-	serializedOldValue, err := s.serializer.Serialize(oldValue)
+	serializedOldValue, err := s.serializeWriteValue(oldValue)
 	if err != nil {
 		return nil, err
 	}
@@ -461,6 +460,27 @@ func (s *SerializedStore) GetSerializer() Serializer {
 // during a swap unless you control compatibility semantics externally.
 func (s *SerializedStore) SetSerializer(serializer Serializer) {
 	s.serializer = serializer
+}
+
+func normalizeSerializerEncodeError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	if errors.Is(err, ErrSerializerEncodeFailed) {
+		return err
+	}
+
+	return fmt.Errorf("%w: %w", ErrSerializerEncodeFailed, err)
+}
+
+func (s *SerializedStore) serializeWriteValue(value any) ([]byte, error) {
+	serializedValue, err := s.serializer.Serialize(value)
+	if err != nil {
+		return nil, normalizeSerializerEncodeError(err)
+	}
+
+	return serializedValue, nil
 }
 
 // deserializeValue decodes a raw value coming from the underlying store.
