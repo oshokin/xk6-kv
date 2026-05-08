@@ -5,6 +5,8 @@ import (
 
 	"github.com/grafana/sobek"
 	"go.k6.io/k6/js/common"
+
+	"github.com/oshokin/xk6-kv/kv/store"
 )
 
 type deleteByPrefixOptions struct {
@@ -72,6 +74,10 @@ func importDeleteByPrefixOptions(rt *sobek.Runtime, options sobek.Value) (delete
 			InvalidOptionsError,
 			fmt.Sprintf("deleteByPrefix limit must be a positive integer; got %d", limit),
 		)
+	}
+
+	if err := rejectIfAbove("deleteByPrefix", "limit", limit, store.MaxDeleteByPrefixLimit); err != nil {
+		return parsed, err
 	}
 
 	parsed.Prefix = prefix

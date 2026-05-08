@@ -201,54 +201,59 @@ func TestKVAsync_SetMany_SerializationFailureRejectsAndWritesNothing(t *testing.
 	`)
 }
 
-func TestKVAsync_CompareAndSwapDetailed_SerializationFailureRejectsPromise(t *testing.T) {
+func TestKVAsync_CompareDetailed_SerializationFailureRejectsPromise(t *testing.T) {
 	t.Parallel()
 
-	runtime := modulestest.NewRuntime(t)
-	kv := NewKV(
-		runtime.VU,
-		store.NewSerializedStore(
-			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
-			store.NewJSONSerializer(),
-		),
-	)
+	cases := []struct {
+		name   string
+		script string
+	}{
+		{
+			name: "CompareAndSwapDetailed",
+			script: `
+				__kv.compareAndSwapDetailed("k", null, () => {}, { includeCurrentOnMismatch: true })
+					.then(() => {
+						throw new Error("expected rejection");
+					})
+					.catch((err) => {
+						if (!err || err.name !== "SerializerError") {
+							throw new Error("unexpected error class: " + String(err && err.name));
+						}
+					});
+			`,
+		},
+		{
+			name: "CompareAndDeleteDetailed",
+			script: `
+				__kv.compareAndDeleteDetailed("k", () => {}, { includeCurrentOnMismatch: true })
+					.then(() => {
+						throw new Error("expected rejection");
+					})
+					.catch((err) => {
+						if (!err || err.name !== "SerializerError") {
+							throw new Error("unexpected error class: " + String(err && err.name));
+						}
+					});
+			`,
+		},
+	}
 
-	runKVScript(t, runtime, kv, `
-		__kv.compareAndSwapDetailed("k", null, () => {}, { includeCurrentOnMismatch: true })
-			.then(() => {
-				throw new Error("expected rejection");
-			})
-			.catch((err) => {
-				if (!err || err.name !== "SerializerError") {
-					throw new Error("unexpected error class: " + String(err && err.name));
-				}
-			});
-	`)
-}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-func TestKVAsync_CompareAndDeleteDetailed_SerializationFailureRejectsPromise(t *testing.T) {
-	t.Parallel()
+			runtime := modulestest.NewRuntime(t)
+			kv := NewKV(
+				runtime.VU,
+				store.NewSerializedStore(
+					store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+					store.NewJSONSerializer(),
+				),
+			)
 
-	runtime := modulestest.NewRuntime(t)
-	kv := NewKV(
-		runtime.VU,
-		store.NewSerializedStore(
-			store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
-			store.NewJSONSerializer(),
-		),
-	)
-
-	runKVScript(t, runtime, kv, `
-		__kv.compareAndDeleteDetailed("k", () => {}, { includeCurrentOnMismatch: true })
-			.then(() => {
-				throw new Error("expected rejection");
-			})
-			.catch((err) => {
-				if (!err || err.name !== "SerializerError") {
-					throw new Error("unexpected error class: " + String(err && err.name));
-				}
-			});
-	`)
+			runKVScript(t, runtime, kv, testCase.script)
+		})
+	}
 }
 
 func TestKVAsync_GetMany_ResolvesItemsAndExistsFlags(t *testing.T) {

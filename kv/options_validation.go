@@ -119,3 +119,14 @@ func parseOptionalInt64Option(method, field string, value sobek.Value) (int64, b
 
 	return parsedValue, true, nil
 }
+
+func rejectIfAbove(method, field string, value, maximum int64) error {
+	if value <= maximum {
+		return nil
+	}
+
+	return NewError(
+		InvalidOptionsError,
+		fmt.Sprintf("%s options.%s must be less than or equal to %d; got %d", method, field, maximum, value),
+	)
+}

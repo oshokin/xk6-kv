@@ -168,6 +168,45 @@ func TestMemoryStore_ClaimRandom_ExpiredClaimBecomesAvailable(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_ClaimRandom_HighOccupancyReturnsOnlyFreeKey(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+			freeKey := seedAndPreclaimAllButOne(t, store)
+
+			claim, err := store.ClaimRandom(&ClaimOptions{
+				Prefix: "key:",
+				TTLMs:  30_000,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, claim)
+			assert.Equal(t, freeKey, claim.Key)
+		})
+	}
+}
+
+func TestMemoryStore_PopRandom_HighOccupancyReturnsOnlyFreeKey(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+			freeKey := seedAndPreclaimAllButOne(t, store)
+
+			entry, err := store.PopRandom("key:")
+			require.NoError(t, err)
+			require.NotNil(t, entry)
+			assert.Equal(t, freeKey, entry.Key)
+		})
+	}
+}
+
 func TestMemoryStore_ReleaseClaim_And_CompleteClaim(t *testing.T) {
 	t.Parallel()
 
@@ -262,6 +301,42 @@ func TestMemoryStore_ReleaseClaim_And_CompleteClaim(t *testing.T) {
 			assert.True(t, exists)
 		})
 	}
+}
+
+func seedAndPreclaimAllButOne(t *testing.T, store Store) string {
+	t.Helper()
+
+	const keysCount = 100
+
+	for i := range keysCount {
+		require.NoError(t, store.Set("key:"+strconv.Itoa(i), "value"))
+	}
+
+	claimed := make(map[string]struct{}, keysCount-1)
+	for range keysCount - 1 {
+		claim, err := store.ClaimRandom(&ClaimOptions{
+			Prefix: "key:",
+			TTLMs:  30_000,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, claim)
+
+		claimed[claim.Key] = struct{}{}
+	}
+
+	var freeKey string
+
+	for i := range keysCount {
+		key := "key:" + strconv.Itoa(i)
+		if _, ok := claimed[key]; !ok {
+			require.Empty(t, freeKey, "expected exactly one free key")
+			freeKey = key
+		}
+	}
+
+	require.NotEmpty(t, freeKey)
+
+	return freeKey
 }
 
 func TestMemoryStore_PopRandom_Concurrent_NoDuplicateKeys(t *testing.T) {

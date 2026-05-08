@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.k6.io/k6/js/modulestest"
+
+	"github.com/oshokin/xk6-kv/kv/store"
 )
 
 func TestImportDeleteByPrefixOptions_NullRejects(t *testing.T) {
@@ -150,6 +152,23 @@ func TestImportDeleteByPrefixOptions_FractionalLimitRejects(t *testing.T) {
 	var kvErr *Error
 	require.ErrorAs(t, err, &kvErr)
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+}
+
+func TestImportDeleteByPrefixOptions_LimitAboveMaxRejects(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	_, err := importDeleteByPrefixOptions(rt, rt.ToValue(map[string]any{
+		"prefix": "tmp:",
+		"limit":  store.MaxDeleteByPrefixLimit + 1,
+	}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+	assert.Contains(t, kvErr.Message, "deleteByPrefix options.limit")
 }
 
 func TestImportDeleteByPrefixOptions_ValidOptions(t *testing.T) {

@@ -315,7 +315,7 @@ const result = await kv.deleteByPrefix({
 `deleteByPrefix()` details:
 
 - `prefix` is required and must be a non-empty string.
-- `limit` is required and must be a positive integer.
+- `limit` is required, must be a positive integer, and is capped at `100000`.
 - `done === true` means no matching keys remain after this call.
 - If `done === false`, repeat the same call until completion.
 - Use `listKeys({ prefix, limit })` first for a read-only preview.
@@ -352,7 +352,7 @@ Backend note:
   ```typescript
   interface ScanOptions {
     prefix?: string; // Filter by key prefix
-    limit?: number;  // Max results per page (<= 0 means "read to the end")
+    limit?: number;  // Max results per page; positive values are capped at 100000
     cursor?: string; // Opaque cursor produced by the previous page ("" starts a new scan)
   }
 
@@ -363,7 +363,7 @@ Backend note:
   }
   ```
 
-  Use `scan()` when the keyspace is too large to materialize with `list()` or when you need restart-safe pagination.
+  Use `scan()` with a bounded positive `limit` when the keyspace is too large to materialize with `list()` or when you need restart-safe pagination.
   Treat `cursor` as an opaque continuation token. Do not parse, modify, or construct it manually.
   Use a cursor only with the same logical scan options that produced it, especially the same `prefix`.
   Pagination is cursor-based, but it is not a long-lived snapshot. If keys are inserted or deleted between page calls, later pages may reflect those changes.
@@ -374,7 +374,7 @@ Backend note:
   ```typescript
   interface ScanKeysOptions {
     prefix?: string; // Filter by key prefix
-    limit?: number;  // Max keys per page (<= 0 means "read to the end")
+    limit?: number;  // Max keys per page; positive values are capped at 100000
     cursor?: string; // Opaque cursor produced by the previous page ("" starts a new scan)
   }
 
@@ -413,7 +413,7 @@ Backend note:
   ```typescript
   interface ListOptions {
     prefix?: string  // Filter by key prefix
-    limit?: number   // Max results (<= 0 means no limit)
+    limit?: number   // Max results; positive values are capped at 250000
   }
   ```
 
@@ -422,7 +422,7 @@ Backend note:
   ```typescript
   interface ListKeysOptions {
     prefix?: string  // Optional key prefix filter
-    limit?: number   // Max keys (<= 0 means no limit)
+    limit?: number   // Max keys; positive values are capped at 250000
   }
   ```
 
@@ -511,6 +511,7 @@ Backend note:
   ```
 
 > ⚠️ `claimRandom()` is a local coordination primitive for VUs sharing the same `xk6-kv` process/store. It is not a distributed lock service.
+> `claimRandom()` and `popRandom()` are random allocation helpers optimized for low/moderate live-claim occupancy. Under very high live-claim occupancy, fallback selection can be biased toward scan order, but exclusivity is still preserved.
 
 - **`rebuildKeyList(): Promise<boolean>`** - Rebuilds in-memory key indexes (useful for disk backend with `trackKeys: true`).
 
@@ -650,7 +651,7 @@ console.log(result.bytesWritten);
 
 - `fileName` is required and must be a non-empty string.
 - `prefix` is optional; empty or omitted means all keys.
-- `limit` is optional; if omitted or `<= 0`, all matching entries are exported.
+- `limit` is optional; if omitted or `<= 0`, all matching entries are exported. Positive values are capped at `1000000`.
 
 `exportJSONL()` writes to a temporary file, flushes and fsyncs it, renames it into place, then syncs the parent directory. On Unix-like filesystems this gives atomic replacement in the common same-directory case. On platforms where `os.Rename` is not guaranteed atomic, this remains a best-effort crash-safety strategy and still avoids intentionally writing partial data directly into the target file.
 
@@ -669,8 +670,8 @@ console.log(result.bytesRead);
 `importJSONL()` options:
 
 - `fileName` is required and must be a non-empty string.
-- `limit` is optional; if omitted or `<= 0`, all records are imported.
-- `batchSize` is optional; if omitted or `<= 0`, the default batch size is used.
+- `limit` is optional; if omitted or `<= 0`, all records are imported. Positive values are capped at `1000000`.
+- `batchSize` is optional; if omitted or `<= 0`, the default batch size is used. Positive values are capped at `10000`.
 - `importJSONL()` enforces a per-line safety cap of 64 MiB; oversized records are rejected with a line-numbered parse error.
 
 `importJSONL()` streams records and writes them in `setMany()` batches. Existing keys are overwritten.
@@ -700,6 +701,7 @@ The import is not a global transaction: if a later line is invalid, already comm
 - **Random key workloads:** Calling `randomKey()` repeatedly with `trackKeys: false` (especially on the disk backend) keeps a read transaction open while it counts and selects keys, which can stall the lone bbolt writer until the call finishes. Turn on `trackKeys` (for O(1)/O(log n) sampling) or throttle/redesign these workloads to avoid head-of-line blocking.
 - **`randomKeys()` complexity by backend:** With `trackKeys: true`, both backends use key indexes for small samples; memory first builds shard ranges (O(shards * log n)) and then selects sampled keys by rank, while disk may fall back to cursor scan for near-full unique samples. With `trackKeys: false`, it collects candidates via `scanKeys()` and samples in memory (linear in matching keys).
 - **Memory `trackKeys: false` scan/list costs:** `scan()`, `scanKeys()`, `list()`, and `listKeys()` use untracked shard-map iteration. On large keyspaces, repeated pagination can become expensive; if these operations are hot, prefer `trackKeys: true`.
+- **Bound large reads and writes:** For large keyspaces, prefer `scan()` / `scanKeys()` with bounded positive `limit` values instead of `list()` / `listKeys()` or unlimited `limit <= 0` calls. Oversized positive limits are rejected to avoid unbounded allocations and long transactions.
 - **`count()` / `count({ prefix })` complexity:**
   - `count()` (same as `size()`):
     - memory backend: O(shards)

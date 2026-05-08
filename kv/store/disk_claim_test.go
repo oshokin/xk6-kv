@@ -168,6 +168,45 @@ func TestDiskStore_ClaimRandom_ExpiredClaimBecomesAvailable(t *testing.T) {
 	}
 }
 
+func TestDiskStore_ClaimRandom_HighOccupancyReturnsOnlyFreeKey(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			freeKey := seedAndPreclaimAllButOne(t, store)
+
+			claim, err := store.ClaimRandom(&ClaimOptions{
+				Prefix: "key:",
+				TTLMs:  30_000,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, claim)
+			assert.Equal(t, freeKey, claim.Key)
+		})
+	}
+}
+
+func TestDiskStore_PopRandom_HighOccupancyReturnsOnlyFreeKey(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			freeKey := seedAndPreclaimAllButOne(t, store)
+
+			entry, err := store.PopRandom("key:")
+			require.NoError(t, err)
+			require.NotNil(t, entry)
+			assert.Equal(t, freeKey, entry.Key)
+		})
+	}
+}
+
 func TestDiskStore_ReleaseClaim_And_CompleteClaim(t *testing.T) {
 	t.Parallel()
 

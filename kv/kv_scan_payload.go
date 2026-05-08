@@ -198,6 +198,10 @@ func importScanLikeOptions(
 	}
 
 	if parsedLimitSet {
+		if parseErr = rejectIfAbove(method, "limit", parsedLimit, store.MaxScanLimit); parseErr != nil {
+			return "", "", 0, false, parseErr
+		}
+
 		limit = parsedLimit
 		limitSet = true
 	}
@@ -240,6 +244,10 @@ func importListOptions(rt *sobek.Runtime, options sobek.Value) (listOptions, err
 	}
 
 	if isSet {
+		if err := rejectIfAbove("list", "limit", parsedLimit, store.MaxListLimit); err != nil {
+			return listOptions, err
+		}
+
 		listOptions.Limit = parsedLimit
 		listOptions.limitSet = true
 	}
@@ -278,6 +286,10 @@ func importListKeysOptions(rt *sobek.Runtime, options sobek.Value) (listKeysOpti
 	}
 
 	if limitSet {
+		if err := rejectIfAbove("listKeys", "limit", limit, store.MaxListLimit); err != nil {
+			return parsedOptions, err
+		}
+
 		parsedOptions.Limit = limit
 	}
 

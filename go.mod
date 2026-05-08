@@ -6,6 +6,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/grafana/sobek v0.0.0-20260429085637-a66d4790012b
+	github.com/spf13/afero v1.15.0
 	github.com/stretchr/testify v1.11.1
 	go.etcd.io/bbolt v1.4.3
 	go.k6.io/k6 v1.7.1
@@ -44,7 +45,6 @@ require (
 	github.com/redis/go-redis/v9 v9.18.0 // indirect
 	github.com/serenize/snaker v0.0.0-20201027110005-a7ad2135616e // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
-	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/tidwall/match v1.2.0 // indirect

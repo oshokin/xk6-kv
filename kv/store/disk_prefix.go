@@ -23,6 +23,15 @@ func (s *DiskStore) DeleteByPrefix(prefix string, limit int64) (*DeleteByPrefixR
 		return nil, fmt.Errorf("%w: limit must be positive: %d", ErrKVOptionsInvalid, limit)
 	}
 
+	if limit > MaxDeleteByPrefixLimit {
+		return nil, fmt.Errorf(
+			"%w: limit must be less than or equal to %d: %d",
+			ErrKVOptionsInvalid,
+			MaxDeleteByPrefixLimit,
+			limit,
+		)
+	}
+
 	if err := s.ensureWritable(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreDeleteFailed, err)
 	}

@@ -103,6 +103,23 @@ func TestImportExportJSONLOptions_FractionalLimitRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+func TestImportExportJSONLOptions_LimitAboveMaxRejects(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	_, err := importExportJSONLOptions(rt, rt.ToValue(map[string]any{
+		"fileName": "./exports/users.jsonl",
+		"limit":    MaxExportJSONLLimit + 1,
+	}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+	assert.Contains(t, kvErr.Message, "exportJSONL options.limit")
+}
+
 func TestImportExportJSONLOptions_ZeroAndNegativeLimitAllowed(t *testing.T) {
 	t.Parallel()
 
@@ -243,6 +260,40 @@ func TestImportImportJSONLOptions_FractionalBatchSizeRejects(t *testing.T) {
 	require.ErrorAs(t, err, &kvErr)
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 	assert.Contains(t, kvErr.Message, "options.batchSize")
+}
+
+func TestImportImportJSONLOptions_LimitAboveMaxRejects(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	_, err := importImportJSONLOptions(rt, rt.ToValue(map[string]any{
+		"fileName": "./imports/users.jsonl",
+		"limit":    MaxImportJSONLLimit + 1,
+	}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+	assert.Contains(t, kvErr.Message, "importJSONL options.limit")
+}
+
+func TestImportImportJSONLOptions_BatchSizeAboveMaxRejects(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	_, err := importImportJSONLOptions(rt, rt.ToValue(map[string]any{
+		"fileName":  "./imports/users.jsonl",
+		"batchSize": MaxJSONLBatchSize + 1,
+	}))
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+	assert.Contains(t, kvErr.Message, "importJSONL options.batchSize")
 }
 
 func TestImportImportJSONLOptions_ZeroAndNegativeLimitAllowed(t *testing.T) {

@@ -68,6 +68,10 @@ func importImportJSONLOptions(rt *sobek.Runtime, options sobek.Value) (importJSO
 	}
 
 	if batchSizeSet {
+		if err := rejectIfAbove("importJSONL", "batchSize", batchSize, MaxJSONLBatchSize); err != nil {
+			return parsed, err
+		}
+
 		parsed.BatchSize = batchSize
 	}
 
@@ -118,7 +122,17 @@ func parseRequiredJSONLFileNameAndLimit(
 	}
 
 	parsedLimit := int64(0)
+
 	if limitSet {
+		maxLimit := MaxExportJSONLLimit
+		if method == "importJSONL" {
+			maxLimit = MaxImportJSONLLimit
+		}
+
+		if err := rejectIfAbove(method, "limit", limit, maxLimit); err != nil {
+			return nil, "", 0, err
+		}
+
 		parsedLimit = limit
 	}
 

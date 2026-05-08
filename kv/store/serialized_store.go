@@ -18,6 +18,8 @@ type SerializedStore struct {
 
 // NewSerializedStore constructs a SerializedStore over the given Store and Serializer.
 // It does not take ownership of the Store; Close must be called explicitly if needed.
+// The serializer is immutable for the store lifetime because changing it would
+// make already persisted values unreadable or incorrectly decoded.
 func NewSerializedStore(store Store, serializer Serializer) *SerializedStore {
 	return &SerializedStore{
 		store:      store,
@@ -124,42 +126,14 @@ func (s *SerializedStore) IncrementBy(key string, delta int64) (int64, error) {
 // the existing value if present. The returned value is always deserialized (if
 // raw type is []byte/string), and "loaded" indicates whether the value existed.
 func (s *SerializedStore) GetOrSet(key string, value any) (any, bool, error) {
-	serializedValue, err := s.serializeWriteValue(value)
-	if err != nil {
-		return nil, false, err
-	}
-
-	rawValue, loaded, err := s.store.GetOrSet(key, serializedValue)
-	if err != nil {
-		return nil, false, err
-	}
-
-	// Decode the returned value (either existing or just-stored).
-	decoded, err := s.deserializeValue(rawValue)
-
-	return decoded, loaded, err
+	return s.writeAndDecodeLoadedValue(key, value, s.store.GetOrSet)
 }
 
 // Swap replaces the current value for a key with the serialized new value and
 // returns the previous value (deserialized when applicable). The 'loaded' flag
 // is false when the key did not previously exist.
 func (s *SerializedStore) Swap(key string, value any) (any, bool, error) {
-	serializedValue, err := s.serializeWriteValue(value)
-	if err != nil {
-		return nil, false, err
-	}
-
-	prevRaw, loaded, err := s.store.Swap(key, serializedValue)
-	if err != nil || !loaded {
-		// Either an error occurred, or the key didn't exist (loaded=false).
-		// In both cases, return nil for previous value (no previous value to decode).
-		return nil, loaded, err
-	}
-
-	// Decode the returned value: key existed, so we have a previous value to deserialize.
-	prevDecoded, err := s.deserializeValue(prevRaw)
-
-	return prevDecoded, true, err
+	return s.writeAndDecodeLoadedValue(key, value, s.store.Swap)
 }
 
 // CompareAndSwap performs an atomic CAS using serialized 'oldValue' and 'newValue'.
@@ -310,12 +284,7 @@ func (s *SerializedStore) ScanKeys(prefix, afterKey string, limit int64) (*KeySc
 
 // ListKeys returns matching keys without cloning, deserializing, or returning values.
 func (s *SerializedStore) ListKeys(prefix string, limit int64) ([]string, error) {
-	page, err := s.ScanKeys(prefix, "", limit)
-	if err != nil {
-		return nil, err
-	}
-
-	return page.Keys, nil
+	return s.store.ListKeys(prefix, limit)
 }
 
 // Scan returns a page of key-value pairs, ordered lexicographically.
@@ -448,18 +417,24 @@ func (s *SerializedStore) Close() error {
 	return s.store.Close()
 }
 
-// GetSerializer returns the currently configured serializer.
-func (s *SerializedStore) GetSerializer() Serializer {
-	return s.serializer
-}
+func (s *SerializedStore) writeAndDecodeLoadedValue(
+	key string,
+	value any,
+	write func(string, any) (any, bool, error),
+) (any, bool, error) {
+	serializedValue, err := s.serializeWriteValue(value)
+	if err != nil {
+		return nil, false, err
+	}
 
-// SetSerializer replaces the current serializer with a new one.
-// Changing serializers while there are already-serialized values in
-// the store may make old entries unreadable with the new serializer.
-// Coordinate such changes carefully, and avoid concurrent reads
-// during a swap unless you control compatibility semantics externally.
-func (s *SerializedStore) SetSerializer(serializer Serializer) {
-	s.serializer = serializer
+	rawValue, loaded, err := write(key, serializedValue)
+	if err != nil || !loaded {
+		return nil, loaded, err
+	}
+
+	decoded, err := s.deserializeValue(rawValue)
+
+	return decoded, true, err
 }
 
 func normalizeSerializerEncodeError(err error) error {

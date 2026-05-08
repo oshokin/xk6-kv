@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.k6.io/k6/js/modulestest"
+
+	"github.com/oshokin/xk6-kv/kv/store"
 )
 
 func TestImportListKeysOptions_Nullish(t *testing.T) {
@@ -93,6 +95,17 @@ func TestImportListKeysOptions_ZeroAndNegativeLimitAllowed(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, limit, opts.Limit)
 	}
+}
+
+func TestImportListKeysOptions_LimitAboveMaxRejects(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	_, err := importListKeysOptions(rt, rt.ToValue(map[string]any{
+		"limit": store.MaxListLimit + 1,
+	}))
+	requireInvalidOptionsError(t, err, "listKeys options.limit")
 }
 
 func TestImportScanKeysOptions_Nullish(t *testing.T) {
@@ -197,4 +210,48 @@ func TestImportScanKeysOptions_ZeroAndNegativeLimitAllowed(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, limit, opts.Limit)
 	}
+}
+
+func TestImportScanKeysOptions_LimitAboveMaxRejects(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	_, err := importScanKeysOptions(rt, rt.ToValue(map[string]any{
+		"limit": store.MaxScanLimit + 1,
+	}))
+	requireInvalidOptionsError(t, err, "scanKeys options.limit")
+}
+
+func TestImportScanOptions_LimitAboveMaxRejects(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	_, err := importScanOptions(rt, rt.ToValue(map[string]any{
+		"limit": store.MaxScanLimit + 1,
+	}))
+	requireInvalidOptionsError(t, err, "scan options.limit")
+}
+
+func TestImportListOptions_LimitAboveMaxRejects(t *testing.T) {
+	t.Parallel()
+
+	rt := modulestest.NewRuntime(t).VU.Runtime()
+
+	_, err := importListOptions(rt, rt.ToValue(map[string]any{
+		"limit": store.MaxListLimit + 1,
+	}))
+	requireInvalidOptionsError(t, err, "list options.limit")
+}
+
+func requireInvalidOptionsError(t *testing.T, err error, messagePart string) {
+	t.Helper()
+
+	require.Error(t, err)
+
+	var kvErr *Error
+	require.ErrorAs(t, err, &kvErr)
+	assert.Equal(t, InvalidOptionsError, kvErr.Name)
+	assert.Contains(t, kvErr.Message, messagePart)
 }

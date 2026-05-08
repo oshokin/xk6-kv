@@ -270,13 +270,8 @@ func (s *MemoryStore) mergeIteratorHeap(iteratorHeap shardIteratorHeap, limit in
 
 	heap.Init(&iteratorHeap)
 
-	var initialCapacity int
-	if limit > 0 {
-		initialCapacity = int(limit)
-	}
-
 	var (
-		entries = make([]Entry, 0, initialCapacity)
+		entries = make([]Entry, 0, initialPageCapacity(limit))
 		emitted int64
 		lastKey string
 		nextKey string
@@ -332,13 +327,8 @@ func (s *MemoryStore) mergeKeyIteratorHeap(iteratorHeap keyShardIteratorHeap, li
 
 	heap.Init(&iteratorHeap)
 
-	var initialCapacity int
-	if limit > 0 {
-		initialCapacity = int(limit)
-	}
-
 	var (
-		keys    = make([]string, 0, initialCapacity)
+		keys    = make([]string, 0, initialPageCapacity(limit))
 		emitted int64
 		lastKey string
 		nextKey string
@@ -618,6 +608,18 @@ func (it *untrackedKeyShardIterator) Next() (string, bool) {
 			return "", false
 		}
 	}
+}
+
+func initialPageCapacity(limit int64) int {
+	if limit <= 0 {
+		return 0
+	}
+
+	if limit > MaxScanLimit {
+		return int(MaxScanLimit)
+	}
+
+	return int(limit)
 }
 
 // fillBuffer copies a bounded batch of keys while holding the shard read lock.

@@ -20,6 +20,15 @@ func (s *MemoryStore) DeleteByPrefix(prefix string, limit int64) (*DeleteByPrefi
 		return nil, fmt.Errorf("%w: limit must be positive: %d", ErrKVOptionsInvalid, limit)
 	}
 
+	if limit > MaxDeleteByPrefixLimit {
+		return nil, fmt.Errorf(
+			"%w: limit must be less than or equal to %d: %d",
+			ErrKVOptionsInvalid,
+			MaxDeleteByPrefixLimit,
+			limit,
+		)
+	}
+
 	keys, err := s.selectKeysByPrefix(prefix, limit)
 	if err != nil {
 		return nil, err

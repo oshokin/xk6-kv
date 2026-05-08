@@ -184,6 +184,7 @@ declare module 'k6/x/kv' {
     /**
      * Maximum number of results to return.
      * If <= 0 or omitted, returns all matching entries.
+     * Positive values must be <= 250,000.
      */
     limit?: number;
   }
@@ -201,6 +202,7 @@ declare module 'k6/x/kv' {
     /**
      * Maximum number of keys to return.
      * If omitted or <= 0, all matching keys are returned.
+     * Positive values must be <= 250,000.
      */
     limit?: number;
   }
@@ -217,6 +219,7 @@ declare module 'k6/x/kv' {
     /**
      * Required positive integer.
      * Bounds the number of keys deleted by one call.
+     * Must be <= 100,000.
      */
     limit: number;
   }
@@ -233,6 +236,7 @@ declare module 'k6/x/kv' {
     /**
      * Maximum number of results per page.
      * If <= 0, returns all matching entries (behaves like list()).
+     * Positive values must be <= 100,000.
      */
     limit?: number;
 
@@ -258,6 +262,7 @@ declare module 'k6/x/kv' {
     /**
      * Maximum number of keys per page.
      * If <= 0, returns all matching keys.
+     * Positive values must be <= 100,000.
      */
     limit?: number;
 
@@ -393,6 +398,7 @@ declare module 'k6/x/kv' {
     /**
      * Optional maximum number of entries to export.
      * If omitted or <= 0, all matching entries are exported.
+     * Positive values must be <= 1,000,000.
      */
     limit?: number;
   }
@@ -421,12 +427,14 @@ declare module 'k6/x/kv' {
     /**
      * Optional maximum number of records to import.
      * If omitted or <= 0, all records are imported.
+     * Positive values must be <= 1,000,000.
      */
     limit?: number;
 
     /**
      * Optional number of records to write per SetMany batch.
      * If omitted or <= 0, the default batch size is used.
+     * Positive values must be <= 10,000.
      */
     batchSize?: number;
   }

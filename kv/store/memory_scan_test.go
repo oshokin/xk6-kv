@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 
@@ -536,6 +537,32 @@ func TestMemoryStore_ListKeys_EqualsScanKeysFirstPage(t *testing.T) {
 
 			page := mustScanKeysStore(t, store, "user:", "", 2)
 			assert.Equal(t, page.Keys, keys)
+		})
+	}
+}
+
+func TestMemoryStore_ScanHugeLimitDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run(fmt.Sprintf("trackKeys=%t", trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+			_, err := store.SetMany([]Entry{
+				{Key: "user:1", Value: []byte("one")},
+				{Key: "user:2", Value: []byte("two")},
+				{Key: "user:3", Value: []byte("three")},
+			})
+			require.NoError(t, err)
+
+			page, err := store.Scan("user:", "", math.MaxInt64)
+			require.NoError(t, err)
+			require.Len(t, page.Entries, 3)
+
+			keyPage, err := store.ScanKeys("user:", "", math.MaxInt64)
+			require.NoError(t, err)
+			require.Len(t, keyPage.Keys, 3)
 		})
 	}
 }

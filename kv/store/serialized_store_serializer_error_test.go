@@ -32,38 +32,36 @@ func newSerializedStoreWithRawEncodeError(t *testing.T, err error) *SerializedSt
 	return NewSerializedStore(base, &rawEncodeErrorSerializer{err: err})
 }
 
-func TestSerializedStore_Set_NormalizesSerializerEncodeError(t *testing.T) {
+func TestSerializedStore_NormalizesSerializerEncodeError(t *testing.T) {
 	t.Parallel()
 
-	rootErr := errors.New("serialize failed")
-	store := newSerializedStoreWithRawEncodeError(t, rootErr)
+	assertSerializedStoreEncodeError(t, "Set", func(s *SerializedStore) error {
+		return s.Set("k", "v")
+	})
+	assertSerializedStoreEncodeError(t, "CompareAndSwapDetailed", func(s *SerializedStore) error {
+		_, err := s.CompareAndSwapDetailed("k", nil, "next", true)
 
-	err := store.Set("k", "v")
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrSerializerEncodeFailed)
-	require.ErrorIs(t, err, rootErr)
+		return err
+	})
+	assertSerializedStoreEncodeError(t, "CompareAndDeleteDetailed", func(s *SerializedStore) error {
+		_, err := s.CompareAndDeleteDetailed("k", "expected", true)
+
+		return err
+	})
 }
 
-func TestSerializedStore_CompareAndSwapDetailed_NormalizesSerializerEncodeError(t *testing.T) {
-	t.Parallel()
+func assertSerializedStoreEncodeError(t *testing.T, name string, run func(*SerializedStore) error) {
+	t.Helper()
 
-	rootErr := errors.New("serialize failed")
-	store := newSerializedStoreWithRawEncodeError(t, rootErr)
+	t.Run(name, func(t *testing.T) {
+		t.Parallel()
 
-	_, err := store.CompareAndSwapDetailed("k", nil, "next", true)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrSerializerEncodeFailed)
-	require.ErrorIs(t, err, rootErr)
-}
+		rootErr := errors.New("serialize failed")
+		store := newSerializedStoreWithRawEncodeError(t, rootErr)
 
-func TestSerializedStore_CompareAndDeleteDetailed_NormalizesSerializerEncodeError(t *testing.T) {
-	t.Parallel()
-
-	rootErr := errors.New("serialize failed")
-	store := newSerializedStoreWithRawEncodeError(t, rootErr)
-
-	_, err := store.CompareAndDeleteDetailed("k", "expected", true)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrSerializerEncodeFailed)
-	require.ErrorIs(t, err, rootErr)
+		err := run(store)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrSerializerEncodeFailed)
+		require.ErrorIs(t, err, rootErr)
+	})
 }
