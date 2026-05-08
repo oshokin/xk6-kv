@@ -9,7 +9,7 @@ import { openKv } from "k6/x/kv";
 const TASK_PREFIX = "ops-metrics:task:";
 const TASK_COUNT = 20;
 
-// Track keys for fast random claiming and enable operation metric emission.
+// Use memory trackKeys for fast random claiming and enable operation metric emission.
 const kv = openKv({
   backend: "memory",
   trackKeys: true,
@@ -41,7 +41,7 @@ export default async function () {
   const claim = await kv.claimRandom({
     prefix: TASK_PREFIX,
     owner: `vu:${__VU}`,
-    ttlMs: 10000,
+    ttl: 10000,
   });
 
   check(Boolean(claim), {

@@ -25,7 +25,9 @@ type Options struct {
 	// Valid values: "json" (structured), "string" (raw string to []byte).
 	Serialization string `js:"serialization"`
 
-	// TrackKeys enables in-memory key indexing for faster List/RandomKey/prefix ops.
+	// TrackKeys enables an in-memory key index.
+	// It accelerates randomKey/randomKeys/count paths where supported.
+	// Cursor scans still read from the backend source of truth.
 	// This consumes additional memory proportional to the number of keys.
 	TrackKeys bool `js:"trackKeys"`
 

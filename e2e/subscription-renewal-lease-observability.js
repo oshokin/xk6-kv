@@ -87,7 +87,7 @@ async function claimLease(vuId) {
     const claim = await kv.claimRandom({
       prefix: SUBSCRIPTION_PREFIX,
       owner: `renewal-worker:${vuId}`,
-      ttlMs: CLAIM_TTL_MS
+      ttl: CLAIM_TTL_MS
     });
 
     if (claim !== null) {
