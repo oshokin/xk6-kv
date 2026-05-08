@@ -493,7 +493,7 @@ Backend note:
 
 - **`popRandom(options?: { prefix?: string }): Promise<{ key: string, value: any } | null>`** - Atomically picks and removes one random matching entry. Resolves to `null` when no match exists.
 
-- **`claimRandom(options?: { prefix?: string, owner?: string, ttl?: number }): Promise<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } } | null>`** - Atomically leases one random matching entry. Live claims are excluded from later `claimRandom()` and `popRandom()` calls until released/completed or expired. If `ttl` is omitted, the default lease is **30000ms (30 seconds)**.
+- **`claimRandom(options?: { prefix?: string, owner?: string, ttl?: number }): Promise<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } } | null>`** - Atomically leases one random matching entry. Live claims are excluded from later `claimRandom()` and `popRandom()` calls until released/completed or expired. If `ttl` is omitted, the default lease is **30000ms (30 seconds)**. `ttl` must be a positive integer and is capped at **86400000ms (24 hours)**. `owner` is optional diagnostic metadata capped at **256 bytes** and is not emitted as a metrics label.
 
 - **`releaseClaim(claim: { id: string, key: string, token: number }): Promise<boolean>`** - Releases a live claim back to the pool. Returns `false` for stale/expired/missing claims.
 

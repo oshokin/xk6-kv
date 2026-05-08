@@ -193,6 +193,10 @@ func (s *DiskStore) ClaimRandom(opts *ClaimOptions) (*EntryClaim, error) {
 	}
 
 	normalized := normalizeClaimOptions(opts)
+	if err := validateClaimOptions(normalized); err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UnixMilli()
 
 	var claim *EntryClaim

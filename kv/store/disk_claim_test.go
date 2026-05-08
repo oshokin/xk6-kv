@@ -137,6 +137,72 @@ func TestDiskStore_ClaimRandom_ExcludesLiveClaim(t *testing.T) {
 	}
 }
 
+func TestDiskStore_ClaimRandom_TTLMustNotExceedMax(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			require.NoError(t, store.Set("user:1", "alpha"))
+
+			claim, err := store.ClaimRandom(&ClaimOptions{
+				Prefix: "user:",
+				TTLMs:  MaxClaimTTLMs,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, claim)
+
+			released, err := store.ReleaseClaim(claim.Ref())
+			require.NoError(t, err)
+			require.True(t, released)
+
+			claim, err = store.ClaimRandom(&ClaimOptions{
+				Prefix: "user:",
+				TTLMs:  MaxClaimTTLMs + 1,
+			})
+			require.ErrorIs(t, err, ErrKVOptionsInvalid)
+			require.Nil(t, claim)
+		})
+	}
+}
+
+func TestDiskStore_ClaimRandom_OwnerMustNotExceedMax(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			require.NoError(t, store.Set("user:1", "alpha"))
+
+			owner := strings.Repeat("o", MaxClaimOwnerBytes)
+			claim, err := store.ClaimRandom(&ClaimOptions{
+				Prefix: "user:",
+				Owner:  owner,
+				TTLMs:  DefaultClaimTTLMs,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, claim)
+			assert.Equal(t, owner, claim.Owner)
+
+			released, err := store.ReleaseClaim(claim.Ref())
+			require.NoError(t, err)
+			require.True(t, released)
+
+			claim, err = store.ClaimRandom(&ClaimOptions{
+				Prefix: "user:",
+				Owner:  strings.Repeat("o", MaxClaimOwnerBytes+1),
+				TTLMs:  DefaultClaimTTLMs,
+			})
+			require.ErrorIs(t, err, ErrKVOptionsInvalid)
+			require.Nil(t, claim)
+		})
+	}
+}
+
 func TestDiskStore_ClaimRandom_ExpiredClaimBecomesAvailable(t *testing.T) {
 	t.Parallel()
 

@@ -84,6 +84,16 @@ func importClaimRandomOptions(rt *sobek.Runtime, options sobek.Value) (*claimRan
 	}
 
 	if isSet {
+		if len(owner) > store.MaxClaimOwnerBytes {
+			return nil, NewError(
+				InvalidOptionsError,
+				fmt.Sprintf(
+					"claimRandom options.owner must be less than or equal to %d bytes",
+					store.MaxClaimOwnerBytes,
+				),
+			)
+		}
+
 		result.Owner = owner
 	}
 
@@ -98,6 +108,10 @@ func importClaimRandomOptions(rt *sobek.Runtime, options sobek.Value) (*claimRan
 				InvalidOptionsError,
 				"claimRandom options.ttl must be a positive integer",
 			)
+		}
+
+		if err := rejectIfAbove("claimRandom", "ttl", ttl, store.MaxClaimTTLMs); err != nil {
+			return nil, err
 		}
 
 		result.TTLMs = ttl
@@ -116,12 +130,12 @@ func importClaimRefPayload(rt *sobek.Runtime, method string, claim sobek.Value) 
 
 	claimObj := claim.ToObject(rt)
 
-	id, err := parseRequiredStringArg(method, "claim.id", claimObj.Get("id"))
+	id, err := parseRequiredNonEmptyStringArg(method, "claim.id", claimObj.Get("id"))
 	if err != nil {
 		return nil, err
 	}
 
-	key, err := parseRequiredStringArg(method, "claim.key", claimObj.Get("key"))
+	key, err := parseRequiredNonEmptyStringArg(method, "claim.key", claimObj.Get("key"))
 	if err != nil {
 		return nil, err
 	}

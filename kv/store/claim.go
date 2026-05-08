@@ -1,8 +1,14 @@
 package store
 
+import "fmt"
+
 const (
 	// DefaultClaimTTLMs is the default lease duration used by ClaimRandom.
 	DefaultClaimTTLMs int64 = 30_000
+	// MaxClaimTTLMs bounds claim leases to avoid accidental forever leases and timestamp overflow.
+	MaxClaimTTLMs int64 = 24 * 60 * 60 * 1000
+	// MaxClaimOwnerBytes bounds optional diagnostic owner metadata stored with claims.
+	MaxClaimOwnerBytes = 256
 )
 
 type (
@@ -75,6 +81,27 @@ func normalizeClaimOptions(opts *ClaimOptions) *ClaimOptions {
 	}
 
 	return normalized
+}
+
+// validateClaimOptions rejects claim options that would make lease arithmetic unsafe.
+func validateClaimOptions(opts *ClaimOptions) error {
+	if opts.TTLMs > MaxClaimTTLMs {
+		return fmt.Errorf(
+			"%w: claim ttl must be less than or equal to %d ms",
+			ErrKVOptionsInvalid,
+			MaxClaimTTLMs,
+		)
+	}
+
+	if len(opts.Owner) > MaxClaimOwnerBytes {
+		return fmt.Errorf(
+			"%w: claim owner must be less than or equal to %d bytes",
+			ErrKVOptionsInvalid,
+			MaxClaimOwnerBytes,
+		)
+	}
+
+	return nil
 }
 
 // normalizeCompleteClaimOptions applies defaults for completion behavior.

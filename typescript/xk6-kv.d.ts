@@ -522,10 +522,12 @@ declare module 'k6/x/kv' {
     prefix?: string;
     /**
      * Optional claim owner for diagnostics (for example VU/scenario labels).
+     * Must be less than or equal to 256 bytes.
      */
     owner?: string;
     /**
      * Lease duration in milliseconds.
+     * Must be a positive integer less than or equal to 86,400,000 (24 hours).
      * @default 30000
      */
     ttl?: number;
@@ -549,7 +551,7 @@ declare module 'k6/x/kv' {
   export interface Claim<T = any> extends ClaimRef {
     /** Claimed entry snapshot. */
     entry: Entry & { value: T };
-    /** Optional diagnostic owner. */
+    /** Optional diagnostic owner, capped at 256 bytes when the claim is created. */
     owner?: string;
     /** Expiration timestamp in Unix milliseconds. */
     expiresAt: number;
@@ -1363,6 +1365,7 @@ declare module 'k6/x/kv' {
      * Atomically leases a random matching entry.
      * Resolves to null when no free entry exists.
      * If options.ttl is omitted, lease duration defaults to 30000ms (30 seconds).
+     * The maximum lease duration is 86,400,000ms (24 hours).
      */
     claimRandom<T = any>(options?: ClaimRandomOptions): Promise<Claim<T> | null>;
 

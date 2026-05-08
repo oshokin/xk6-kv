@@ -78,6 +78,10 @@ func (s *MemoryStore) ClaimRandom(opts *ClaimOptions) (*EntryClaim, error) {
 	defer release()
 
 	normalized := normalizeClaimOptions(opts)
+	if err := validateClaimOptions(normalized); err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UnixMilli()
 
 	for range randomKeyMaxAttempts {

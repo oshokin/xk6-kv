@@ -4830,8 +4830,14 @@ func TestKVAsync_Claim_InvalidOptions_RejectsPromise(t *testing.T) {
 			expectInvalidOptions(__kv.popRandom("bad"), "popRandom.options"),
 			expectInvalidOptions(__kv.claimRandom({ ttl: 0 }), "claimRandom.ttl.positive"),
 			expectInvalidOptions(__kv.claimRandom({ ttl: 1.5 }), "claimRandom.ttl.integer"),
+			expectInvalidOptions(__kv.claimRandom({ ttl: Number.MAX_SAFE_INTEGER }), "claimRandom.ttl.max"),
+			expectInvalidOptions(__kv.claimRandom({ owner: "o".repeat(257) }), "claimRandom.owner.max"),
 			expectInvalidOptions(__kv.releaseClaim("bad"), "releaseClaim.claim"),
+			expectInvalidOptions(__kv.releaseClaim({ id: "", key: "k", token: 1 }), "releaseClaim.claim.id.empty"),
+			expectInvalidOptions(__kv.releaseClaim({ id: "c", key: "", token: 1 }), "releaseClaim.claim.key.empty"),
 			expectInvalidOptions(__kv.completeClaim("bad"), "completeClaim.claim"),
+			expectInvalidOptions(__kv.completeClaim({ id: "", key: "k", token: 1 }), "completeClaim.claim.id.empty"),
+			expectInvalidOptions(__kv.completeClaim({ id: "c", key: "", token: 1 }), "completeClaim.claim.key.empty"),
 			expectInvalidOptions(__kv.completeClaim({ id: "x", key: "k", token: 1 }, "bad"), "completeClaim.options")
 		]);
 	`)
