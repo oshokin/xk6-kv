@@ -26,6 +26,10 @@ func (s *DiskStore) CompareAndSwapDetailed(
 	newValue any,
 	includeCurrentOnMismatch bool,
 ) (*CompareAndSwapDetailedResult, error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return nil, err
+	}
+
 	release, err := s.beginOperation()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
@@ -110,6 +114,10 @@ func (s *DiskStore) CompareAndDeleteDetailed(
 	oldValue any,
 	includeCurrentOnMismatch bool,
 ) (*CompareAndDeleteDetailedResult, error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return nil, err
+	}
+
 	release, err := s.beginOperation()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)

@@ -7,6 +7,8 @@ type (
 	//
 	//   - Keys are strings. Values are implementation-dependent and typically stored
 	//     as byte slices after serialization by a higher layer.
+	//   - Single-key methods reject empty keys. GetMany intentionally treats empty
+	//     keys as missing reads for public API compatibility.
 	//   - Implementations SHOULD preserve lexicographic key ordering where it
 	//     matters (e.g., List()).
 	//   - Methods that return a boolean typically indicate whether the underlying

@@ -24,6 +24,10 @@ func (s *MemoryStore) CompareAndSwapDetailed(
 	newValue any,
 	includeCurrentOnMismatch bool,
 ) (*CompareAndSwapDetailedResult, error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return nil, err
+	}
+
 	release, err := s.guardMutation()
 	if err != nil {
 		return nil, err
@@ -104,6 +108,10 @@ func (s *MemoryStore) CompareAndDeleteDetailed(
 	oldValue any,
 	includeCurrentOnMismatch bool,
 ) (*CompareAndDeleteDetailedResult, error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return nil, err
+	}
+
 	release, err := s.guardMutation()
 	if err != nil {
 		return nil, err

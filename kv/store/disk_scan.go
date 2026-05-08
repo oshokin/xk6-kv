@@ -242,7 +242,7 @@ func (s *DiskStore) setDiskNextKey(page *ScanPage, cursor *bolt.Cursor, prefix [
 		return
 	}
 
-	// Peek ahead: cursor is already positioned after lastKey from the loop.
+	// Position the cursor at lastKey and advance once, because pagination is exclusive.
 	nextKey, _ := cursor.Next()
 	if nextKey == nil {
 		return
@@ -261,7 +261,7 @@ func (s *DiskStore) setDiskKeyNextKey(page *KeyScanPage, cursor *bolt.Cursor, pr
 		return
 	}
 
-	// Peek ahead: cursor is already positioned after lastKey from the loop.
+	// Position the cursor at lastKey and advance once, because pagination is exclusive.
 	nextKey, _ := cursor.Next()
 	if nextKey == nil {
 		return

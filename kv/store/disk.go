@@ -207,6 +207,10 @@ func (s *DiskStore) Open() error {
 
 // Get retrieves the raw []byte value from the disk store.
 func (s *DiskStore) Get(key string) (any, error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return nil, err
+	}
+
 	release, err := s.beginOperation()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
@@ -244,8 +248,8 @@ func (s *DiskStore) Get(key string) (any, error) {
 // Set inserts or updates the value for a given key.
 // If this is a new key and tracking is enabled, we update indexes.
 func (s *DiskStore) Set(key string, value any) error {
-	if key == "" {
-		return ErrKeyEmpty
+	if err := validateNonEmptyKey(key); err != nil {
+		return err
 	}
 
 	release, err := s.beginOperation()
@@ -299,6 +303,10 @@ func (s *DiskStore) Set(key string, value any) error {
 // Absent keys are treated as 0. Values must be decimal ASCII int64.
 // Returns the new value as int64.
 func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return 0, err
+	}
+
 	release, err := s.beginOperation()
 	if err != nil {
 		return 0, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
@@ -372,6 +380,10 @@ func (s *DiskStore) IncrementBy(key string, delta int64) (int64, error) {
 // GetOrSet returns the existing value (loaded=true) if key is present,
 // otherwise stores "value" and returns it (loaded=false).
 func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, err error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return nil, false, err
+	}
+
 	release, err := s.beginOperation()
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
@@ -436,6 +448,10 @@ func (s *DiskStore) GetOrSet(key string, value any) (actual any, loaded bool, er
 
 // Swap replaces the value and returns the previous value (if existed) and whether it existed.
 func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return nil, false, err
+	}
+
 	release, err := s.beginOperation()
 	if err != nil {
 		return nil, false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
@@ -499,6 +515,10 @@ func (s *DiskStore) Swap(key string, value any) (previous any, loaded bool, err 
 // If tracking is enabled, removes from keysList/keysMap in O(1)
 // (swap-with-last trick) and updates the OSTree.
 func (s *DiskStore) Delete(key string) error {
+	if err := validateNonEmptyKey(key); err != nil {
+		return err
+	}
+
 	release, err := s.beginOperation()
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
@@ -549,6 +569,10 @@ func (s *DiskStore) Delete(key string) error {
 // We always validate against bbolt to avoid stale-positive answers from
 // in-memory indexes.
 func (s *DiskStore) Exists(key string) (bool, error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return false, err
+	}
+
 	release, err := s.beginOperation()
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
@@ -576,6 +600,10 @@ func (s *DiskStore) Exists(key string) (bool, error) {
 
 // DeleteIfExists deletes key if it exists. Returns true if deleted.
 func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return false, err
+	}
+
 	release, err := s.beginOperation()
 	if err != nil {
 		return false, fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)

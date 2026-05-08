@@ -91,6 +91,10 @@ func (s *MemoryStore) Close() error {
 // The returned value is the stored bytes; serialization concerns are handled
 // by the SerializedStore wrapper. If the key does not exist, an error is returned.
 func (s *MemoryStore) Get(key string) (any, error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return nil, err
+	}
+
 	shard := s.getShardByKey(key)
 
 	shard.mu.RLock()
@@ -108,8 +112,8 @@ func (s *MemoryStore) Get(key string) (any, error) {
 // Set associates value with key, overwriting any previous value.
 // The value must be a []byte or string; other types result in an error.
 func (s *MemoryStore) Set(key string, value any) error {
-	if key == "" {
-		return ErrKeyEmpty
+	if err := validateNonEmptyKey(key); err != nil {
+		return err
 	}
 
 	release, err := s.guardMutation()
@@ -144,6 +148,10 @@ func (s *MemoryStore) Set(key string, value any) error {
 // Absent keys are treated as 0. Values must be decimal ASCII int64.
 // Returns the new value as int64.
 func (s *MemoryStore) IncrementBy(key string, delta int64) (int64, error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return 0, err
+	}
+
 	release, err := s.guardMutation()
 	if err != nil {
 		return 0, err
@@ -186,6 +194,10 @@ func (s *MemoryStore) IncrementBy(key string, delta int64) (int64, error) {
 // GetOrSet returns the existing value (loaded=true) if key is present,
 // otherwise stores value and returns it (loaded=false).
 func (s *MemoryStore) GetOrSet(key string, value any) (actual any, loaded bool, err error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return nil, false, err
+	}
+
 	release, err := s.guardMutation()
 	if err != nil {
 		return nil, false, err
@@ -221,6 +233,10 @@ func (s *MemoryStore) GetOrSet(key string, value any) (actual any, loaded bool, 
 // Swap replaces the current value for key with value, returning the previous value
 // (cloned) and whether it existed.
 func (s *MemoryStore) Swap(key string, value any) (previous any, loaded bool, err error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return nil, false, err
+	}
+
 	release, err := s.guardMutation()
 	if err != nil {
 		return nil, false, err
@@ -253,6 +269,10 @@ func (s *MemoryStore) Swap(key string, value any) (previous any, loaded bool, er
 
 // Delete removes key if present.
 func (s *MemoryStore) Delete(key string) error {
+	if err := validateNonEmptyKey(key); err != nil {
+		return err
+	}
+
 	release, err := s.guardMutation()
 	if err != nil {
 		return err
@@ -279,6 +299,10 @@ func (s *MemoryStore) Delete(key string) error {
 
 // Exists reports whether key is present in the store.
 func (s *MemoryStore) Exists(key string) (bool, error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return false, err
+	}
+
 	shard := s.getShardByKey(key)
 
 	shard.mu.RLock()
@@ -305,6 +329,10 @@ func (s *MemoryStore) Clear() error {
 // DeleteIfExists deletes key only if present.
 // Returns true if a deletion occurred.
 func (s *MemoryStore) DeleteIfExists(key string) (bool, error) {
+	if err := validateNonEmptyKey(key); err != nil {
+		return false, err
+	}
+
 	release, err := s.guardMutation()
 	if err != nil {
 		return false, err
