@@ -89,6 +89,7 @@ func requireRawCorruptJSONStillAvailable(t *testing.T, raw Store) {
 
 	value, err := raw.Get(corruptJSONKey)
 	require.NoError(t, err)
+	//nolint:testifylint // autofix turns this to incorrect JSONEq call.
 	require.Equal(t, []byte(corruptJSONValue), value)
 
 	claim, err := raw.ClaimRandom(&ClaimOptions{Prefix: "bad:"})

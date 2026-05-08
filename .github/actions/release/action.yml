@@ -110,6 +110,7 @@ runs:
     # Create and push the new version tag for auto-semver releases.
     # Skip when running in an existing tag-release context.
     - name: Create and push tag
+      id: tag
       if: steps.bump.outputs.has_release == '1'
       shell: bash
       env:
@@ -118,6 +119,7 @@ runs:
         # Skip tag creation for tag-release workflows (tag already exists).
         if [[ "$IS_TAG_RELEASE" == "true" ]]; then
           echo "Running in tag-release mode - skipping tag creation"
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
         
@@ -128,16 +130,18 @@ runs:
         if git rev-parse "${{ steps.bump.outputs.next_tag }}" >/dev/null 2>&1; then
           echo "Tag ${{ steps.bump.outputs.next_tag }} already exists! Another release beat us to it."
           echo "This is expected behavior with concurrent PRs. Skipping release."
+          echo "should_release=false" >> "$GITHUB_OUTPUT"
           exit 0
         fi
 
         # Create and push tag atomically.
         git tag "${{ steps.bump.outputs.next_tag }}"
         git push origin "${{ steps.bump.outputs.next_tag }}"
+        echo "should_release=true" >> "$GITHUB_OUTPUT"
 
     # Install xk6 for building k6 binaries with the extension.
     - name: Install xk6
-      if: steps.bump.outputs.has_release == '1'
+      if: steps.bump.outputs.has_release == '1' && steps.tag.outputs.should_release != 'false'
       shell: bash
       run: |
         go install go.k6.io/xk6/cmd/xk6@${{ env.XK6_VERSION }}
@@ -145,7 +149,7 @@ runs:
     # Build k6 binaries with xk6-kv extension for all platforms.
     # This creates pre-compiled binaries and packages them GoReleaser-style.
     - name: Build and package k6 binaries with xk6-kv
-      if: steps.bump.outputs.has_release == '1'
+      if: steps.bump.outputs.has_release == '1' && steps.tag.outputs.should_release != 'false'
       shell: bash
       run: |
         MODULE_NAME=$(go list -m)
@@ -201,7 +205,7 @@ runs:
 
     # Generate changelog from commits since last tag.
     - name: Generate changelog
-      if: steps.bump.outputs.has_release == '1'
+      if: steps.bump.outputs.has_release == '1' && steps.tag.outputs.should_release != 'false'
       id: changelog
       shell: bash
       run: |
@@ -262,7 +266,7 @@ runs:
 
     # Create GitHub release with packaged binaries.
     - name: Create GitHub Release
-      if: steps.bump.outputs.has_release == '1'
+      if: steps.bump.outputs.has_release == '1' && steps.tag.outputs.should_release != 'false'
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.bump.outputs.next_tag }}

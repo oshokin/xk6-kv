@@ -110,6 +110,34 @@ func TestDiskStore_PopRandom_AllowsExpiredClaim(t *testing.T) {
 	}
 }
 
+func TestDiskStore_PopRandom_ExpiredClaimAvailableWhenFullCleanupThrottled(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			require.NoError(t, store.Set("user:1", "alpha"))
+
+			claim, err := store.ClaimRandom(&ClaimOptions{
+				Prefix: "user:",
+				TTLMs:  5,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, claim)
+
+			time.Sleep(10 * time.Millisecond)
+			store.lastClaimsCleanupUnixMilli.Store(time.Now().UnixMilli())
+
+			entry, err := store.PopRandom("user:")
+			require.NoError(t, err)
+			require.NotNil(t, entry)
+			assert.Equal(t, "user:1", entry.Key)
+		})
+	}
+}
+
 func TestDiskStore_ClaimRandom_ExcludesLiveClaim(t *testing.T) {
 	t.Parallel()
 
@@ -221,6 +249,38 @@ func TestDiskStore_ClaimRandom_ExpiredClaimBecomesAvailable(t *testing.T) {
 			require.NotNil(t, firstClaim)
 
 			time.Sleep(10 * time.Millisecond)
+
+			secondClaim, err := store.ClaimRandom(&ClaimOptions{
+				Prefix: "user:",
+				TTLMs:  10_000,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, secondClaim)
+			assert.Equal(t, firstClaim.Key, secondClaim.Key)
+			assert.Greater(t, secondClaim.Token, firstClaim.Token)
+		})
+	}
+}
+
+func TestDiskStore_ClaimRandom_ExpiredClaimAvailableWhenFullCleanupThrottled(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			require.NoError(t, store.Set("user:1", "alpha"))
+
+			firstClaim, err := store.ClaimRandom(&ClaimOptions{
+				Prefix: "user:",
+				TTLMs:  5,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, firstClaim)
+
+			time.Sleep(10 * time.Millisecond)
+			store.lastClaimsCleanupUnixMilli.Store(time.Now().UnixMilli())
 
 			secondClaim, err := store.ClaimRandom(&ClaimOptions{
 				Prefix: "user:",

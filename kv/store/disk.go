@@ -58,6 +58,10 @@ type DiskStore struct {
 	testRestoreHook func()
 	// claimToken is a process-local monotonically increasing token for claims.
 	claimToken atomic.Int64
+	// claimsCleanupMu serializes throttled full scans of expired claim records.
+	claimsCleanupMu sync.Mutex
+	// lastClaimsCleanupUnixMilli records when the last full expired-claims scan succeeded.
+	lastClaimsCleanupUnixMilli atomic.Int64
 }
 
 const (

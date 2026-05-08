@@ -30,6 +30,8 @@ type diskClaimRecord struct {
 const (
 	// diskClaimsBucketName is the name of the claims bucket.
 	diskClaimsBucketName = "__xk6_kv_claims"
+	// diskClaimsCleanupIntervalMs throttles full expired-claim scans in allocation paths.
+	diskClaimsCleanupIntervalMs int64 = 5_000
 )
 
 //nolint:gochecknoglobals // immutable internal bbolt key bytes reused across claim operations.
@@ -78,7 +80,7 @@ func (s *DiskStore) PopRandom(prefix string) (*Entry, error) {
 			return err
 		}
 
-		if err := cleanupExpiredClaimsInBucket(claimsBucket, now); err != nil {
+		if err := s.cleanupExpiredClaimsInBucketIfDue(claimsBucket, now); err != nil {
 			return err
 		}
 
@@ -212,7 +214,7 @@ func (s *DiskStore) ClaimRandom(opts *ClaimOptions) (*EntryClaim, error) {
 			return err
 		}
 
-		if err := cleanupExpiredClaimsInBucket(claimsBucket, now); err != nil {
+		if err := s.cleanupExpiredClaimsInBucketIfDue(claimsBucket, now); err != nil {
 			return err
 		}
 
@@ -571,6 +573,33 @@ func keyHasLiveClaimTx(claims *bolt.Bucket, key string, now int64) (bool, error)
 	}
 
 	return true, nil
+}
+
+func (s *DiskStore) cleanupExpiredClaimsInBucketIfDue(claims *bolt.Bucket, now int64) error {
+	if !s.claimsCleanupDue(now) {
+		return nil
+	}
+
+	s.claimsCleanupMu.Lock()
+	defer s.claimsCleanupMu.Unlock()
+
+	if !s.claimsCleanupDue(now) {
+		return nil
+	}
+
+	if err := cleanupExpiredClaimsInBucket(claims, now); err != nil {
+		return err
+	}
+
+	s.lastClaimsCleanupUnixMilli.Store(now)
+
+	return nil
+}
+
+func (s *DiskStore) claimsCleanupDue(now int64) bool {
+	last := s.lastClaimsCleanupUnixMilli.Load()
+
+	return last == 0 || now-last >= diskClaimsCleanupIntervalMs
 }
 
 func cleanupExpiredClaimsInBucket(claims *bolt.Bucket, now int64) error {

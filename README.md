@@ -579,7 +579,7 @@ Backend note:
   - `xk6_kv_empty_result` (Rate for `random_key`/`random_keys`/`pop_random`/`claim_random`, tags: `op`, `backend`, `track_keys`, `serialization`)
   - `xk6_kv_async_in_flight` (Gauge for async store operations currently running, tags: `backend`, `track_keys`, `serialization`)
 
-  `xk6_kv_async_in_flight` is the current saturation signal for the async bridge. There is no `waiting` metric because xk6-kv does not currently have an async limiter or queue; if one is added later, a low-cardinality waiting gauge can be added alongside it.
+  `xk6_kv_async_in_flight` is the current saturation signal for background store operations in the async bridge. It is decremented when the store goroutine queues its event-loop completion callback, so it is not a count of unresolved JavaScript promises. There is no `waiting` metric because xk6-kv does not currently have an async limiter or queue; if one is added later, a low-cardinality waiting gauge can be added alongside it.
 
   ```javascript
   const kv = openKv({
