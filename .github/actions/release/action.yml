@@ -137,8 +137,8 @@ runs:
         # Create and push tag atomically.
         git tag "${{ steps.bump.outputs.next_tag }}"
         git push origin "${{ steps.bump.outputs.next_tag }}"
-        echo "Auto-semver tag pushed; tag workflow will build the release."
-        echo "should_release=false" >> "$GITHUB_OUTPUT"
+        echo "Auto-semver tag pushed; building the release in this workflow."
+        echo "should_release=true" >> "$GITHUB_OUTPUT"
         exit 0
 
     # Install xk6 for building k6 binaries with the extension.
