@@ -1,4 +1,5 @@
 import { check } from 'k6';
+import { Rate } from 'k6/metrics';
 import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
@@ -33,13 +34,16 @@ const kv = createKv(TEST_NAME, {
   }
 });
 
+// allocationDrained tracks empty-pool hit rate without failing check output.
+const allocationDrained = new Rate('allocation_drained');
+
 // options configures the load profile and pass/fail thresholds.
 export const options = {
   vus: VUS,
   iterations: ITERATIONS,
   thresholds: {
     'checks{allocation:attempted}': ['rate>0.99'],
-    'checks{allocation:drained}': ['rate>0.30']
+    allocation_drained: ['rate>0.30']
   }
 };
 
@@ -70,7 +74,5 @@ export default async function credentialPoolDrainObservability() {
     'allocation:attempted': () => true
   });
 
-  check(credential === null, {
-    'allocation:drained': () => credential === null
-  });
+  allocationDrained.add(credential === null);
 }

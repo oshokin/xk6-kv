@@ -578,7 +578,8 @@ export default async function apiOutputValidationTest() {
 
   // getOrSet() with new key: Verify that non-existent keys return loaded=false
   // and the default value is correctly set and returned.
-  const newResult = await kv.getOrSet('newKey', 555);
+  const newKey = `newKey:${Date.now()}`;
+  const newResult = await kv.getOrSet(newKey, 555);
   const newKeys = Object.keys(newResult);
 
   check(newResult, {

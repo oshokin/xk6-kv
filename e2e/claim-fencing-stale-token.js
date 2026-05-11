@@ -39,6 +39,8 @@ const FENCING_PREFIX = __ENV.FENCING_PREFIX || 'fencing:claim:';
 const LEASE_TTL_MS = parseInt(__ENV.LEASE_TTL_MS || '15000', 10);
 // Number of deterministic key lanes available for VU mapping.
 const KEY_POOL_SIZE = parseInt(__ENV.KEY_POOL_SIZE || String(VUS), 10);
+// Fixed-width lane IDs prevent prefix collisions (e.g. 1 vs 10).
+const KEY_WIDTH = Math.max(3, String(KEY_POOL_SIZE).length);
 
 // Test name used for generating test-specific database and snapshot paths.
 const TEST_NAME = 'claim-fencing-stale-token';
@@ -66,7 +68,10 @@ export async function setup() {
   await baseSetup();
 
   for (let i = 1; i <= KEY_POOL_SIZE; i += 1) {
-    await kv.set(`${FENCING_PREFIX}${i}`, {
+    const lane = String(i).padStart(KEY_WIDTH, '0');
+    const keyPrefix = `${FENCING_PREFIX}${lane}:`;
+    const key = `${keyPrefix}item`;
+    await kv.set(key, {
       id: i,
       name: `fencing-item-${i}`,
       createdAt: Date.now(),
@@ -81,12 +86,14 @@ export const teardown = createTeardown(kv, TEST_NAME);
 // only the fresh token can complete the current live claim.
 export default async function claimFencingStaleToken() {
   const vuSlot = ((exec.vu.idInTest - 1) % KEY_POOL_SIZE) + 1;
-  const key = `${FENCING_PREFIX}${vuSlot}`;
+  const lane = String(vuSlot).padStart(KEY_WIDTH, '0');
+  const keyPrefix = `${FENCING_PREFIX}${lane}:`;
+  const key = `${keyPrefix}item`;
   const owner = `scenario:${exec.scenario.name}:vu:${exec.vu.idInTest}`;
 
   // Acquire the first lease token for this key.
   const initialClaim = await kv.claimRandom({
-    prefix: key,
+    prefix: keyPrefix,
     owner,
     ttl: LEASE_TTL_MS,
   });
@@ -99,7 +106,7 @@ export default async function claimFencingStaleToken() {
   // Hand off ownership and obtain a fresh token for the same key.
   const releasedInitial = await kv.releaseClaim(initialClaim);
   const reclaimed = await kv.claimRandom({
-    prefix: key,
+    prefix: keyPrefix,
     owner: `${owner}:reclaim`,
     ttl: LEASE_TTL_MS,
   });

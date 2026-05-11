@@ -272,7 +272,8 @@ export default async function scanListConcurrency() {
 
   // Validate bounded termination over a shard-sized prefix.
   const terminationSeed = String(iteration % TOTAL_INVOICES).padStart(KEY_PADDING, '0');
-  const terminationPrefix = `${INVOICE_PREFIX}${terminationSeed.slice(0, 2)}`;
+  const terminationPrefixLen = Math.min(KEY_PADDING, 5);
+  const terminationPrefix = `${INVOICE_PREFIX}${terminationSeed.slice(0, terminationPrefixLen)}`;
   const scanTerminates = await scanKeysTerminates(terminationPrefix, Math.max(1, Math.floor(LIST_PAGE_SIZE / 2)), 12);
 
   const scanCursorShape = scanOutcomes.every((result) => (

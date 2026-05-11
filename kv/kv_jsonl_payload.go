@@ -1,7 +1,6 @@
 package kv
 
 import (
-	"path/filepath"
 	"strings"
 
 	"github.com/grafana/sobek"
@@ -136,5 +135,5 @@ func parseRequiredJSONLFileNameAndLimit(
 		parsedLimit = limit
 	}
 
-	return optionsObj, filepath.Clean(fileName), parsedLimit, nil
+	return optionsObj, fileName, parsedLimit, nil
 }

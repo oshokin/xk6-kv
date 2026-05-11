@@ -1,7 +1,6 @@
 package kv
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/grafana/sobek"
@@ -146,7 +145,7 @@ func TestImportExportJSONLOptions_ValidOptions(t *testing.T) {
 		"limit":    int64(10),
 	}))
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Clean("./exports/users.jsonl"), opts.FileName)
+	assert.Equal(t, "./exports/users.jsonl", opts.FileName)
 	assert.Equal(t, "user:", opts.Prefix)
 	assert.EqualValues(t, 10, opts.Limit)
 }
@@ -335,7 +334,7 @@ func TestImportImportJSONLOptions_ValidMinimalOptions(t *testing.T) {
 		"fileName": "./imports/users.jsonl",
 	}))
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Clean("./imports/users.jsonl"), opts.FileName)
+	assert.Equal(t, "./imports/users.jsonl", opts.FileName)
 	assert.EqualValues(t, 0, opts.Limit)
 	assert.EqualValues(t, 0, opts.BatchSize)
 }
@@ -351,7 +350,7 @@ func TestImportImportJSONLOptions_ValidFullOptions(t *testing.T) {
 		"batchSize": int64(10),
 	}))
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Clean("./imports/users.jsonl"), opts.FileName)
+	assert.Equal(t, "./imports/users.jsonl", opts.FileName)
 	assert.EqualValues(t, 50, opts.Limit)
 	assert.EqualValues(t, 10, opts.BatchSize)
 }

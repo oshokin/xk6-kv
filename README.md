@@ -829,16 +829,25 @@ task build-k6
 
 | Task | Description |
 | ------ | ------------- |
-| `task install-tools` | Install dev tools (gofumpt, golangci-lint, xk6) |
-| `task lint-fix` | Fix linting issues and format code |
-| `task lint` | Check code without modifications |
+| `task` | Show common tasks |
+| `task install-githooks` | Configure Git hooks for this repository |
+| `task remove-githooks` | Disable Git hooks for this repository |
+| `task fetch-tags` | Fetch tags from origin |
+| `task version-check` | Check what the next version would be based on commits |
+| `task pin-tool-versions` | Pin CI/local tool versions to current module releases |
+| `task install-lint` | Install golangci-lint into ./bin |
+| `task install-xk6` | Install xk6 into ./bin |
+| `task install-tools` | Install golangci-lint and xk6 |
+| `task lint-fix` | Run golangci-lint with --fix |
+| `task lint` | Run golangci-lint |
 | `task test` | Run unit tests |
-| `task test-race` | Run tests with race detector |
-| `task build-k6` | Build k6 with local extension |
-| `task test-e2e-all` | Run all end-to-end scenarios |
+| `task test-race` | Run unit tests with race detector |
+| `task build-k6` | Build k6 with local xk6-kv and xk6-file extensions into ./bin/k6 |
+| `task test-e2e-all` | Run all E2E tests sequentially (all backends + key tracking combinations) |
+| `task test-e2e-single E2E_SCENARIO=tenant-prefix-count-window` | Run single E2E scenario (all backend + key tracking combinations) |
 | `task clean` | Remove ./bin and .k6.kv |
-| `task install-githooks` | Enable semantic commit validation |
-| `task version-check` | Preview next version |
+
+E2E task overrides: set `VUS` and `ITERATIONS` to change load shape.
 
 ### Code Quality
 

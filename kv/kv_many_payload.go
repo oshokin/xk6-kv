@@ -25,29 +25,34 @@ func importGetManyKeys(value sobek.Value) ([]string, error) {
 
 	exported := value.Export()
 
-	rawItems, ok := exported.([]any)
-	if !ok {
+	switch rawItems := exported.(type) {
+	case []any:
+		keys := make([]string, len(rawItems))
+
+		for i, raw := range rawItems {
+			key, ok := raw.(string)
+			if !ok {
+				return nil, NewError(
+					InvalidOptionsError,
+					fmt.Sprintf("getMany keys[%d] must be a string; got %T", i, raw),
+				)
+			}
+
+			keys[i] = key
+		}
+
+		return keys, nil
+	case []string:
+		keys := make([]string, len(rawItems))
+		copy(keys, rawItems)
+
+		return keys, nil
+	default:
 		return nil, NewError(
 			InvalidOptionsError,
 			fmt.Sprintf("getMany keys must be an array of strings; got %T", exported),
 		)
 	}
-
-	keys := make([]string, len(rawItems))
-
-	for i, raw := range rawItems {
-		key, ok := raw.(string)
-		if !ok {
-			return nil, NewError(
-				InvalidOptionsError,
-				fmt.Sprintf("getMany keys[%d] must be a string; got %T", i, raw),
-			)
-		}
-
-		keys[i] = key
-	}
-
-	return keys, nil
 }
 
 func importDeleteManyKeys(value sobek.Value) ([]string, error) {
@@ -60,36 +65,51 @@ func importDeleteManyKeys(value sobek.Value) ([]string, error) {
 
 	exported := value.Export()
 
-	rawItems, ok := exported.([]any)
-	if !ok {
+	switch rawItems := exported.(type) {
+	case []any:
+		keys := make([]string, len(rawItems))
+
+		for i, raw := range rawItems {
+			key, ok := raw.(string)
+			if !ok {
+				return nil, NewError(
+					InvalidOptionsError,
+					fmt.Sprintf("deleteMany keys[%d] must be a string; got %T", i, raw),
+				)
+			}
+
+			if key == "" {
+				return nil, NewError(
+					InvalidOptionsError,
+					fmt.Sprintf("deleteMany keys[%d] must be a non-empty string", i),
+				)
+			}
+
+			keys[i] = key
+		}
+
+		return keys, nil
+	case []string:
+		keys := make([]string, len(rawItems))
+
+		for i, key := range rawItems {
+			if key == "" {
+				return nil, NewError(
+					InvalidOptionsError,
+					fmt.Sprintf("deleteMany keys[%d] must be a non-empty string", i),
+				)
+			}
+
+			keys[i] = key
+		}
+
+		return keys, nil
+	default:
 		return nil, NewError(
 			InvalidOptionsError,
 			fmt.Sprintf("deleteMany keys must be an array of non-empty strings; got %T", exported),
 		)
 	}
-
-	keys := make([]string, len(rawItems))
-
-	for i, raw := range rawItems {
-		key, ok := raw.(string)
-		if !ok {
-			return nil, NewError(
-				InvalidOptionsError,
-				fmt.Sprintf("deleteMany keys[%d] must be a string; got %T", i, raw),
-			)
-		}
-
-		if key == "" {
-			return nil, NewError(
-				InvalidOptionsError,
-				fmt.Sprintf("deleteMany keys[%d] must be a non-empty string", i),
-			)
-		}
-
-		keys[i] = key
-	}
-
-	return keys, nil
 }
 
 func importSetManyEntries(entriesValue sobek.Value) ([]store.Entry, error) {
