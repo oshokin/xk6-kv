@@ -144,7 +144,7 @@ func (s *DiskStore) randomKeysWithReplacementFromTrackingRange(left, total int, 
 	keys := make([]string, 0, count)
 
 	for range count {
-		//nolint:gosec // math/rand/v2 is enough for non-crypto sampling.
+		// #nosec G404 -- math/rand/v2 is intentional for non-cryptographic load-test sampling.
 		offset := rand.IntN(total)
 
 		key, ok := s.ost.Kth(left + offset)
@@ -286,7 +286,8 @@ func (s *DiskStore) randomSelectableKeyWithTrackingLocked(prefix string) (string
 		return "", false
 	}
 
-	idx := left + rand.IntN(right-left) //nolint:gosec // math/rand/v2 is enough for non-crypto sampling.
+	// #nosec G404 -- indexed selection uses pseudo-random sampling only.
+	idx := left + rand.IntN(right-left)
 
 	return s.ost.KthSelectable(idx)
 }
@@ -304,7 +305,8 @@ func (s *DiskStore) randomKeyWithTracking(prefix string) (string, error) {
 			return "", nil
 		}
 
-		return s.keysList[rand.IntN(len(s.keysList))], nil //nolint:gosec // math/rand/v2 is safe.
+		// #nosec G404 -- key sampling does not need cryptographic randomness.
+		return s.keysList[rand.IntN(len(s.keysList))], nil
 	}
 
 	// Prefix form: consult OSTree index.
@@ -319,7 +321,9 @@ func (s *DiskStore) randomKeyWithTracking(prefix string) (string, error) {
 	}
 
 	// Pick random index in range and retrieve Kth element.
-	idx := l + rand.IntN(r-l) //nolint:gosec // math/rand/v2 is safe.
+
+	// #nosec G404 -- key sampling does not need cryptographic randomness.
+	idx := l + rand.IntN(r-l)
 	if key, ok := s.ost.Kth(idx); ok {
 		return key, nil
 	}
@@ -349,7 +353,9 @@ func (s *DiskStore) randomKeyWithoutTracking(prefix string) (string, error) {
 		}
 
 		// Pass 2: pick and return the r-th key from the same snapshot.
-		target := rand.Int64N(count) //nolint:gosec // math/rand/v2 is safe
+
+		// #nosec G404 -- key sampling does not need cryptographic randomness.
+		target := rand.Int64N(count)
 
 		key, found := s.keyByIndexInBucket(bucket, prefix, target)
 		if found {

@@ -126,6 +126,8 @@ const (
 	releaseXK6VersionPattern = `(?m)^        echo "XK6_VERSION=[^"]+" >> \$GITHUB_ENV$`
 	// taskfileGolangCITagPattern matches the taskfile golangci-lint tag.
 	taskfileGolangCITagPattern = `(?m)^  GOLANGCI_TAG: ".*"$`
+	// taskfileGoVersionPattern matches the taskfile Go toolchain pin.
+	taskfileGoVersionPattern = `(?m)^  GO_VERSION: ".*"$`
 	// taskfileXK6TagPattern matches the taskfile xk6 tag.
 	taskfileXK6TagPattern = `(?m)^  XK6_TAG: ".*"$`
 	// taskfileXK6FileTagPattern matches the taskfile xk6-file tag.
@@ -147,6 +149,8 @@ const (
 	releaseXK6VersionLine = `        echo "XK6_VERSION=%s" >> $GITHUB_ENV`
 	// taskfileGolangCITagLine renders the taskfile golangci-lint tag.
 	taskfileGolangCITagLine = `  GOLANGCI_TAG: "%s"`
+	// taskfileGoVersionLine renders the taskfile Go toolchain pin.
+	taskfileGoVersionLine = `  GO_VERSION: "%s"`
 	// taskfileXK6TagLine renders the taskfile xk6 tag.
 	taskfileXK6TagLine = `  XK6_TAG: "%s"`
 	// taskfileXK6FileTagLine renders the taskfile xk6-file tag.
@@ -282,6 +286,11 @@ func buildUpdates(inputs *resolvedInputs) []*fileUpdate {
 		{
 			Path: filepath.Join(inputs.Root, taskfileName),
 			Replacements: []*replacement{
+				{
+					Re:   regexp.MustCompile(taskfileGoVersionPattern),
+					With: fmt.Sprintf(taskfileGoVersionLine, inputs.GoVersion),
+					Want: expectedSingleReplacement,
+				},
 				{
 					Re:   regexp.MustCompile(taskfileGolangCITagPattern),
 					With: fmt.Sprintf(taskfileGolangCITagLine, inputs.Lint.Version),
@@ -527,7 +536,7 @@ func runGoModTidy(root string) error {
 
 // goListModule resolves one module query using `go list -m -json`.
 func goListModule(module string) (*moduleInfo, error) {
-	//nolint:gosec // module queries are fixed by this tool, not user-provided shell input.
+	// #nosec G204 -- module query constants are fixed inside this tool, not user-controlled input.
 	cmd := exec.CommandContext(
 		context.Background(),
 		"go",

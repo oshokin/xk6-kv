@@ -89,8 +89,10 @@ linters:
     - usestdlibvars # Detects the possibility to use variables/constants from the standard library.
     - usetesting # Checks for wrong usage of t.Setenv and os.Setenv in tests.
     - wastedassign # Finds wasted assignment statements.
-    - whitespace # Detects leading and trailing whitespace.
-    - wsl_v5 # Whitespace linter that enforces a consistent style.
+    # NOTE: keep only wsl_v5 for whitespace/style autofixes.
+    # Running both `whitespace` and `wsl_v5` causes overlapping --fix edits
+    # and noisy "changes skipped due to conflicts" warnings in lint-fix.
+    - wsl_v5 # Whitespace/style linter used as the single source of truth.
 
   # Settings for specific linters.
   # Each linter can have its own configuration options.

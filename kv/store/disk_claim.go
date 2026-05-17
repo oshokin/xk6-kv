@@ -233,7 +233,8 @@ func (s *DiskStore) popRandomBolt(prefix string) (*Entry, error) {
 		}
 
 		for range randomKeyMaxAttempts {
-			target := rand.Int64N(matchCount) //nolint:gosec // math/rand/v2 is enough for non-crypto sampling.
+			// #nosec G404 -- claim allocation uses pseudo-random sampling, not crypto.
+			target := rand.Int64N(matchCount)
 
 			key, found := s.keyByIndexInBucket(bucket, prefix, target)
 			if !found {
@@ -376,7 +377,8 @@ func (s *DiskStore) claimRandomBolt(opts *ClaimOptions) (*EntryClaim, error) {
 		}
 
 		for range randomKeyMaxAttempts {
-			target := rand.Int64N(matchCount) //nolint:gosec // non-crypto sampling is intended.
+			// #nosec G404 -- claim allocation uses pseudo-random sampling, not crypto.
+			target := rand.Int64N(matchCount)
 
 			key, found := s.keyByIndexInBucket(bucket, normalized.Prefix, target)
 			if !found {

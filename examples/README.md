@@ -2,6 +2,8 @@
 
 This directory contains runnable k6 scripts that exercise every major `kv.*` API surface. They double as integration tests and living documentation.
 
+**Suggested first runs** (also listed in the root [README](../README.md#start-here-existing-scripts)): `claim-random-default-ttl.js`, `pop-random-unique-users.js`, `import-csv.js`, `export-jsonl.js`.
+
 ## Running the examples
 
 1. Build or download a k6 binary that bundles this extension (see the root `README.md` for install options).

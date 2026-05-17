@@ -77,7 +77,9 @@ func (t *OSTreeOf[M]) Insert(key string) {
 func (t *OSTreeOf[M]) InsertWithMeta(key string, meta M) {
 	// Using global rand to maintain uniform distribution
 	// of priorities for balanced tree structure.
-	priority := rand.Int() //nolint:gosec // math/rand/v2 is safe.
+
+	// #nosec G404 -- treap balancing does not require cryptographic randomness.
+	priority := rand.Int()
 	t.root = insert(t.root, key, priority, meta)
 }
 

@@ -116,8 +116,12 @@ func (s *MemoryStore) hashKey(key string) int {
 		hashFn = selectShardHashFunc(defaultShardHashStrategy)
 	}
 
-	//nolint:gosec // s.shardCount is always positive (>= 1) and used only for sharding distribution.
-	return int(hashFn(key) % uint64(s.shardCount))
+	// #nosec G115 -- s.shardCount is always positive and bounded by int.
+	shardCount := uint64(s.shardCount)
+	shardIdx := hashFn(key) % shardCount
+
+	// #nosec G115 -- shardIdx is always in [0, shardCount), and shardCount comes from positive int shard count.
+	return int(shardIdx)
 }
 
 // lockAllShardReaders locks all the shard readers.

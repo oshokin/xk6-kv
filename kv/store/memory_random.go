@@ -158,7 +158,7 @@ func randomKeysWithReplacementFromShardRanges(ranges []shardRandomRange, total i
 	keys := make([]string, 0, count)
 
 	for range count {
-		//nolint:gosec // math/rand/v2 is enough for non-crypto sampling.
+		// #nosec G404 -- math/rand/v2 is intentional for non-cryptographic load-test sampling.
 		offset := rand.IntN(total)
 
 		key, ok := keyFromShardRanges(ranges, offset)
@@ -268,7 +268,9 @@ func (s *MemoryStore) tryRandomKeyTrackedNoPrefix() (string, bool) {
 	}
 
 	// Select random index across all shards.
-	idx := rand.IntN(total) //nolint:gosec // math/rand/v2 is enough for our use case.
+
+	// #nosec G404 -- math/rand/v2 is intentional for non-cryptographic load-test sampling.
+	idx := rand.IntN(total)
 
 	// Find which shard contains the selected index by subtracting shard sizes.
 	for _, shard := range s.shards {
@@ -300,7 +302,8 @@ func (s *MemoryStore) tryRandomKeyTrackedWithPrefix(prefix string) (string, bool
 		return "", true
 	}
 
-	idx := rand.IntN(totalMatch) //nolint:gosec // math/rand/v2 is enough for our use case.
+	// #nosec G404 -- math/rand/v2 is intentional for non-cryptographic load-test sampling.
+	idx := rand.IntN(totalMatch)
 
 	return s.selectKeyFromShardByIndex(prefix, counts, idx)
 }
@@ -398,7 +401,8 @@ func (s *MemoryStore) tryRandomKeyScanNoPrefix() (string, bool) {
 		return "", true
 	}
 
-	target := rand.IntN(total) //nolint:gosec // math/rand/v2 is enough for our use case.
+	// #nosec G404 -- math/rand/v2 is intentional for non-cryptographic load-test sampling.
+	target := rand.IntN(total)
 
 	for i, count := range counts {
 		if count == 0 {
@@ -440,7 +444,9 @@ func (s *MemoryStore) tryRandomKeyScanWithPrefix(prefix string) (string, bool) {
 
 			// Reservoir sampling: each key has 1/seen probability of being selected.
 			// This ensures uniform distribution without knowing total count upfront.
-			if rand.IntN(seen) == 0 { //nolint:gosec // math/rand/v2 is enough for our use case.
+
+			// #nosec G404 -- reservoir sampling only needs pseudo-randomness.
+			if rand.IntN(seen) == 0 {
 				selected = key
 			}
 		}

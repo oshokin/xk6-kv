@@ -3,34 +3,121 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/oshokin/xk6-kv)](https://goreportcard.com/report/github.com/oshokin/xk6-kv)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-> **Fork Notice**  
-> This project is a fork of [oleiade/xk6-kv](https://github.com/oleiade/xk6-kv), extended with **additional atomic primitives** and **random-key utilities**:
->
-> - Atomic operations: `incrementBy`, `getOrSet`, `swap`, `compareAndSwap`, `deleteIfExists`, `compareAndDelete`.
-> - Random keys: `randomKey()` plus batch `randomKeys()` for key-only sampling workflows.
-> - Optional key tracking for faster random key sampling (disk & memory backends).
-> - Disk backend path overrides for custom artifact persistence.
->
-> All code is licensed under **GNU AGPL v3.0**.
+**Mutable local test-data pools, leases, and response capture for k6 — without Redis.**
 
-A k6 extension providing a persistent key-value store to share state across Virtual Users (VUs). Supports both **in-memory** and **persistent bbolt** backends, deterministic `list()` ordering, and high-level atomic helpers designed for safe concurrent access in load tests.
+> If you only need read-only fixtures, use k6 [SharedArray](https://grafana.com/docs/k6/latest/javascript-api/k6-data/sharedarray/). If you need mutable local allocation, leases, or response capture, use **xk6-kv**.
 
-## Features
+Use **xk6-kv** when your k6 test needs writable shared state inside one k6 process:
 
-- 🔒 **Thread-Safe**: Secure state sharing across Virtual Users
-- 🔄 **Flexible Storage**: In-memory (ephemeral) or disk-based (persistent) backends
-- 📊 **Atomic Operations**: Increment, compare-and-swap, and more
-- 🎲 **Random Key Selection**: Uniform sampling with optional prefix filtering
-- 🔍 **Key Tracking**: Optional faster random key access via in-memory indexing
-- 🏷️ **Prefix Support**: Filter operations by key prefixes
-- 📦 **Stable bbolt Bucket**: Disk backend always uses the `k6` bucket (**original upstream bug tied it to the DB path and could orphan data - now fixed**)
-- 🧭 **Cursor Scanning**: Stream large datasets via `scan()` / `scanKeys()` with continuation tokens
-- 📝 **Serialization**: JSON or string serialization
-- 💾 **Snapshots**: Export/import bbolt files for backups and data seeding
-- 📘 **TypeScript Support**: Full type declarations for IntelliSense and type safety
-- ⚡ **High Performance**: Optimized for concurrent workloads
-- 🔀 **Automatic Sharding**: Memory backend automatically shards data across CPU cores for 2-3.5x performance gains on multi-core systems
-- 🧰 **bbolt tuning knobs**: Exposes timeout, noSync/noGrowSync/noFreelistSync, freelist type, preLoadFreelist, initial mmap size, and mlock so advanced users can dial back fsync overhead when durability trade-offs are acceptable
+- give each VU a **unique user or credential** without races;
+- **claim** or **pop** rows from a local pool (CSV/JSONL import, `setMany`, or runtime writes);
+- build **task queues** and producer/consumer flows;
+- share **mutable** state between scenarios;
+- **export** captured data after a run (`exportJSONL`, disk backend, snapshots).
+
+## Why not just SharedArray?
+
+[`SharedArray`](https://grafana.com/docs/k6/latest/javascript-api/k6-data/sharedarray/) is read-only after initialization and is not meant for communication between VUs. **xk6-kv** adds a process-local, concurrency-safe store with:
+
+- lease-based allocation: `claimRandom`, `claimKey`, `claimRandomMany`;
+- one-shot drains: `popRandom`, `popRandomMany`;
+- streaming seed import: `importCSV`, `importJSONL`;
+- portable export: `exportJSONL`, `backup`, `restore`;
+- CAS-style operations (`compareAndSwap`, `incrementBy`, …) and operation metrics.
+
+## xk6-kv vs built-in k6
+
+| Need | k6 built-in | xk6-kv |
+| --- | --- | --- |
+| Read-only shared fixtures | `SharedArray` | yes (import once, read many) |
+| Mutable shared state across VUs | no | yes (memory or disk backend) |
+| Unique credential / user allocation | manual indexing / external store | `claimRandom`, `claimKey`, `claimRandomMany` |
+| One-shot task queue (consume once) | manual | `popRandom`, `popRandomMany` |
+| Large CSV/JSONL seed files | load in `setup` yourself | `importCSV`, `importJSONL` |
+| Response capture to file | `handleSummary` / custom scripts | `exportJSONL`, `backup` / `restore` |
+| Local mutable coordination without Redis | no | yes |
+
+## When not to use xk6-kv
+
+- You need **coordination across multiple k6 processes** or machines (use Redis, a queue, or your orchestrator).
+- You need **Grafana Cloud** to resolve the extension automatically without a custom binary ([Extensions Registry](https://grafana.com/docs/k6/latest/extensions/explanations/extensions-registry/) listing helps discovery; you still build `xk6` or use release binaries).
+- You need a **production database** or **distributed locks** — claim APIs are local coordination primitives inside one k6 process, not a lock service.
+- You cannot ship a **custom k6 binary** (`xk6 build --with …` or [pre-built releases](https://github.com/oshokin/xk6-kv/releases)).
+
+## Why not Redis?
+
+Use **Redis** (or similar) when VUs across **multiple k6 processes or machines** must share the same pool or queue.
+
+Use **xk6-kv** when you only need **mutable state inside one k6 process** and want fewer moving parts: no extra service, no network hop, claims/pops coordinated in-process.
+
+## Start here (existing scripts)
+
+From the repo root, with a k6 binary that includes this extension:
+
+```bash
+# Lease-based unique allocation (complete on success, release on failure)
+k6 run examples/claim-random-default-ttl.js
+
+# One-time user pool drain (no duplicate allocation)
+k6 run examples/pop-random-unique-users.js
+
+# CSV seed import
+k6 run examples/import-csv.js
+
+# Export a prefix to JSONL after writes
+k6 run examples/export-jsonl.js
+```
+
+Production-style scenarios (metrics, thresholds, disk paths): [`e2e/`](./e2e/) — e.g. [`e2e/import-csv-portable-seed.js`](./e2e/import-csv-portable-seed.js), [`e2e/credential-pool-drain-observability.js`](./e2e/credential-pool-drain-observability.js). Full script index: [`examples/README.md`](./examples/README.md).
+
+## License
+
+This project is **GNU AGPL v3.0** (fork of [oleiade/xk6-kv](https://github.com/oleiade/xk6-kv), extended with claims, batch allocation, CSV/JSONL, metrics, and more). AGPL is acceptable for many test-tooling workflows, but some companies block AGPL dependencies in their supply chain. If you need a permissive license for a specific use case, open an issue with context — relicensing requires rights on the full codebase.
+
+## Core features
+
+- **Unique allocation:** `claimRandom`, `claimKey`, `claimRandomMany`, `renewClaim`, `releaseClaim`, `completeClaim`.
+- **One-shot queues:** `popRandom`, `popRandomMany` (each successful pop removes the key).
+- **Large seed files:** streaming `importCSV` and `importJSONL`.
+- **Response capture & handoff:** `exportJSONL`, `backup` / `restore`, disk backend.
+- **Batch KV:** `setMany`, `getMany`, `deleteMany`.
+- **Prefix workflows:** `scan`, `scanKeys`, `list`, `listKeys`, `deleteByPrefix`, `count`, `randomKey`, `randomKeys`.
+- **CAS-style ops:** `incrementBy`, `getOrSet`, `swap`, `compareAndSwap`, `compareAndDelete`, and related helpers.
+- **Observability:** optional operation metrics, `stats()`, `reportStats()`.
+- **Backends:** memory (sharded, fast) or disk/bbolt (persistent); optional `trackKeys` for faster random/claim paths on large datasets.
+- **TypeScript:** declarations in [`typescript/`](./typescript/) for IntelliSense.
+
+## 60-second example
+
+Unique allocation with `claimRandom` (full script: [`examples/claim-random-default-ttl.js`](./examples/claim-random-default-ttl.js)):
+
+```javascript
+import { openKv } from "k6/x/kv";
+
+const kv = openKv({ backend: "memory", trackKeys: true });
+
+export async function setup() {
+  await kv.setMany({
+    "user:1": { name: "Alice" },
+    "user:2": { name: "Bob" },
+  });
+}
+
+export default async function () {
+  const claim = await kv.claimRandom({ prefix: "user:" });
+  if (claim === null) return;
+
+  try {
+    console.log(claim.entry.value.name);
+    await kv.completeClaim(claim, { deleteKey: false });
+  } catch (err) {
+    await kv.releaseClaim(claim);
+    throw err;
+  }
+}
+```
+
+Build or download a k6 binary with this extension — see [Installation](#installation) below.
 
 ## Installation
 
@@ -40,12 +127,12 @@ Download k6 binaries with xk6-kv from the [Releases page](https://github.com/osh
 
 Release artifacts are named `xk6-kv_<version>_<os>_<arch>.tar.gz` for Linux/macOS and
 `xk6-kv_<version>_<os>_<arch>.zip` for Windows. Set `VERSION` to the release you want
-to install, for example `v1.3.6`.
+to install, for example `v1.4.29` (replace with the [latest release](https://github.com/oshokin/xk6-kv/releases/latest)).
 
 **Linux:**
 
 ```bash
-VERSION=v1.3.6
+VERSION=v1.4.29
 curl -L "https://github.com/oshokin/xk6-kv/releases/download/${VERSION}/xk6-kv_${VERSION}_linux_amd64.tar.gz" -o k6.tar.gz
 tar -xzf k6.tar.gz && chmod +x k6
 ./k6 version
@@ -54,7 +141,7 @@ tar -xzf k6.tar.gz && chmod +x k6
 **macOS:**
 
 ```bash
-VERSION=v1.3.6
+VERSION=v1.4.29
 curl -L "https://github.com/oshokin/xk6-kv/releases/download/${VERSION}/xk6-kv_${VERSION}_darwin_arm64.tar.gz" -o k6.tar.gz
 tar -xzf k6.tar.gz && chmod +x k6
 ./k6 version
@@ -63,7 +150,7 @@ tar -xzf k6.tar.gz && chmod +x k6
 **Windows (PowerShell):**
 
 ```powershell
-$VERSION = "v1.3.6"
+$VERSION = "v1.4.29"
 Invoke-WebRequest -Uri "https://github.com/oshokin/xk6-kv/releases/download/$VERSION/xk6-kv_${VERSION}_windows_amd64.zip" -OutFile k6.zip
 Expand-Archive -Path k6.zip -DestinationPath .
 .\k6.exe version
@@ -84,7 +171,7 @@ go install go.k6.io/xk6/cmd/xk6@latest
 xk6 build --with github.com/oshokin/xk6-kv@latest
 
 # Specific version
-xk6 build --with github.com/oshokin/xk6-kv@v1.3.6
+xk6 build --with github.com/oshokin/xk6-kv@v1.4.29
 ```
 
 1. Verify:
@@ -103,6 +190,10 @@ k6 v2 compatibility is intentionally tracked separately because k6 v2 changed th
 
 ## Quick Start
 
+Allocation flows: [60-second example](#60-second-example) and [Start here](#start-here-existing-scripts).
+
+### Basic KV operations
+
 ```javascript
 import { openKv } from "k6/x/kv";
 
@@ -115,12 +206,12 @@ export async function setup() {
 export default async function () {
     await kv.set("foo", "bar");
     await kv.set("user:1", { name: "Alice" });
-    
+
     const key = await kv.randomKey({ prefix: "user:" });
     if (key) {
         console.log(`Random user: ${key}`);
     }
-    
+
     const entries = await kv.list({ prefix: "user:" });
     console.log(`Found ${entries.length} users`);
 }
@@ -211,6 +302,19 @@ High-level categories:
 Full TypeScript support with IntelliSense and type safety! Copy the [`typescript/`](./typescript/) folder to your project for a ready-to-use starter kit.\
 See [`typescript/README.md`](./typescript/README.md) for complete setup instructions.
 `typescript/` is a local starter example project (template), not a published npm package.
+
+## API overview
+
+| Area | Methods |
+| --- | --- |
+| **Allocation** | `claimRandom`, `claimKey`, `claimRandomMany`, `releaseClaim`, `renewClaim`, `completeClaim`, `popRandom`, `popRandomMany` |
+| **Import / export** | `importCSV`, `importJSONL`, `exportJSONL`, `backup`, `restore`, `rebuildKeyList` |
+| **Batch** | `setMany`, `getMany`, `deleteMany` |
+| **Query** | `get`, `set`, `delete`, `exists`, `list`, `listKeys`, `scan`, `scanKeys`, `count`, `size`, `randomKey`, `randomKeys`, `clear`, `close` |
+| **CAS-style** | `incrementBy`, `getOrSet`, `swap`, `compareAndSwap`, `setIfAbsent`, `deleteIfExists`, `compareAndDelete` |
+| **Observability** | `stats`, `reportStats` (+ optional operation metrics via `openKv({ metrics: … })`) |
+
+Full signatures, options, and error shapes: [**API Reference**](#api-reference) below. Scenario recipes: [Usage Examples](#usage-examples) and [`examples/README.md`](./examples/README.md).
 
 ## API Reference
 
@@ -788,7 +892,7 @@ Treat these as directional numbers for this machine/runtime profile; rerun bench
 
 ## Usage Examples
 
-Complete examples are available in the [`examples/`](./examples) directory, and production-grade k6 scenarios live under [`e2e/`](./e2e).
+Runnable entry points: [Start here](#start-here-existing-scripts). Complete examples are in [`examples/`](./examples); production-style scenarios are in [`e2e/`](./e2e).
 
 Observability-focused scripts:
 
@@ -875,27 +979,36 @@ task build-k6
 
 ### Available Tasks
 
-| Task | Description |
-| ------ | ------------- |
-| `task` | Show common tasks |
-| `task install-githooks` | Configure Git hooks for this repository |
-| `task remove-githooks` | Disable Git hooks for this repository |
-| `task fetch-tags` | Fetch tags from origin |
-| `task version-check` | Check what the next version would be based on commits |
-| `task pin-tool-versions` | Pin CI/local tool versions to current module releases |
-| `task install-lint` | Install golangci-lint into ./bin |
-| `task install-xk6` | Install xk6 into ./bin |
-| `task install-tools` | Install golangci-lint and xk6 |
-| `task lint-fix` | Run golangci-lint with --fix |
-| `task lint` | Run golangci-lint |
-| `task test` | Run unit tests |
-| `task test-race` | Run unit tests with race detector |
-| `task build-k6` | Build k6 with local xk6-kv and xk6-file extensions into ./bin/k6 |
-| `task test-e2e-all` | Run all E2E tests sequentially (all backends + key tracking combinations) |
-| `task test-e2e-single E2E_SCENARIO=tenant-prefix-count-window` | Run single E2E scenario (all backend + key tracking combinations) |
-| `task clean` | Remove ./bin and .k6.kv |
+The Taskfile includes one internal helper (`_ensure-bin`) plus user-facing tasks below.
 
-E2E task overrides: set `VUS` and `ITERATIONS` to change load shape.
+| Command | What it does |
+| --- | --- |
+| `task` | Show common tasks (`task -l`). |
+| `task install-githooks` | Configure local commit hooks (`.githooks`). |
+| `task remove-githooks` | Disable local commit hooks for this repository. |
+| `task fetch-tags` | Fetch tags from origin. |
+| `task version-check` | Predict next semantic version from commits. |
+| `task pin-tool-versions` | Sync pinned tool versions in CI/local files. |
+| `task install-lint` | Install pinned `golangci-lint` into `./bin`. |
+| `task install-xk6` | Install pinned `xk6` into `./bin`. |
+| `task install-govulncheck` | Install pinned `govulncheck` into `./bin`. |
+| `task install-tools` | Install all pinned dev tools (`golangci-lint`, `xk6`, `govulncheck`). |
+| `task lint-fix` | Run `golangci-lint` with autofix. |
+| `task lint` | Run `golangci-lint` checks. |
+| `task vulncheck` | Run `govulncheck` using `GOTOOLCHAIN=go<GO_VERSION>` from `taskfile.yaml` (kept in sync with `go.mod` via `pin-tool-versions`). |
+| `task xk6-lint-community` | Run `xk6 lint --preset community .` with pinned toolchain; auto-installs `gosec` into `./bin` if missing. |
+| `task test` | Run unit tests (`go test -v ./...`). |
+| `task test-race` | Run unit tests with race detector. |
+| `task build-k6` | Build `./bin/k6` with local `xk6-kv` and pinned `xk6-file`. |
+| `task test-e2e-all` | Run all `e2e/*.js` scenarios across backend/key-tracking matrix. |
+| `task test-e2e-single E2E_SCENARIO=tenant-prefix-count-window` | Run one scenario across backend/key-tracking matrix. |
+| `task clean` | Remove generated artifacts (`./bin`, `.k6.kv`). |
+
+#### E2E recipe notes
+
+- `test-e2e-single` requires `E2E_SCENARIO`.
+- `test-e2e-all` and `test-e2e-single` support `VUS` and `ITERATIONS` overrides.
+- Example: `task test-e2e-single E2E_SCENARIO=tenant-prefix-count-window VUS=20 ITERATIONS=200`.
 
 ### Code Quality
 
@@ -952,7 +1065,3 @@ Contributions are welcome! Please:
 6. Push and open a Pull Request
 
 **Note:** Pull requests from forks skip semantic commit validation for easier external contributions.
-
-## License
-
-GNU AGPL v3.0

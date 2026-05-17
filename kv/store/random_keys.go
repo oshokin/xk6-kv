@@ -57,7 +57,8 @@ func sampleUniqueKeys(keys []string, count int64) []string {
 
 		for i := range limit {
 			// Partial Fisher-Yates: only permute the first "limit" positions.
-			//nolint:gosec // math/rand/v2 is enough for non-crypto sampling.
+
+			// #nosec G404 -- math/rand/v2 is intentional for non-cryptographic load-test sampling.
 			j := i + rand.IntN(len(result)-i)
 			result[i], result[j] = result[j], result[i]
 		}
@@ -93,7 +94,8 @@ func sampleKeysWithReplacement(keys []string, count int64) []string {
 	for range count {
 		result = append(
 			result,
-			//nolint:gosec // math/rand/v2 is enough for non-crypto sampling.
+
+			// #nosec G404 -- math/rand/v2 is intentional for non-cryptographic load-test sampling.
 			keys[rand.IntN(len(keys))],
 		)
 	}
@@ -115,7 +117,8 @@ func sampleUniqueOffsets(total, count int) []int {
 
 	for i := 0; i < count; i++ {
 		// Sample index from [i, total).
-		//nolint:gosec // math/rand/v2 is enough for non-crypto sampling.
+
+		// #nosec G404 -- math/rand/v2 is intentional for non-cryptographic load-test sampling.
 		j := i + rand.IntN(total-i)
 
 		valueAtJ, ok := swaps[j]
