@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
+	boltErrors "go.etcd.io/bbolt/errors"
 )
 
 // newTestDiskStore creates a temporary on-disk store bound to a provided path
@@ -831,6 +833,54 @@ func TestDiskStore_Delete(t *testing.T) {
 	require.NoError(t, store.Delete("non-existent"), "Delete on missing key must not error")
 }
 
+func TestDiskStore_Delete_TrackedClaimsMode_DoesNotTouchClaimsBucket(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("test-key", "value"))
+
+	require.NoError(t, store.handle.Update(func(tx *bolt.Tx) error {
+		err := tx.DeleteBucket(diskClaimsBucket)
+		if err != nil && !errors.Is(err, boltErrors.ErrBucketNotFound) {
+			return err
+		}
+
+		return nil
+	}))
+
+	require.NoError(t, store.Delete("test-key"))
+
+	require.NoError(t, store.handle.View(func(tx *bolt.Tx) error {
+		assert.Nil(t, tx.Bucket(diskClaimsBucket))
+
+		return nil
+	}))
+}
+
+func TestDiskStore_Delete_BoltClaimsMode_CreatesClaimsBucket(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, false, "", true)
+	require.NoError(t, store.Set("test-key", "value"))
+
+	require.NoError(t, store.handle.Update(func(tx *bolt.Tx) error {
+		err := tx.DeleteBucket(diskClaimsBucket)
+		if err != nil && !errors.Is(err, boltErrors.ErrBucketNotFound) {
+			return err
+		}
+
+		return nil
+	}))
+
+	require.NoError(t, store.Delete("test-key"))
+
+	require.NoError(t, store.handle.View(func(tx *bolt.Tx) error {
+		assert.NotNil(t, tx.Bucket(diskClaimsBucket))
+
+		return nil
+	}))
+}
+
 // TestDiskStore_Exists checks Exists returns false for missing keys and true for present keys.
 func TestDiskStore_Exists(t *testing.T) {
 	t.Parallel()
@@ -1218,9 +1268,24 @@ func TestDiskStore_Close(t *testing.T) {
 
 	store := newTestDiskStore(t, true, "", true)
 	require.NoError(t, store.Set("key", "value"))
+	claim, err := store.ClaimKey("key", &ClaimOptions{TTLMs: 60_000})
+	require.NoError(t, err)
+	require.NotNil(t, claim)
 
 	require.NoError(t, store.Close())
 	assert.False(t, store.opened.Load(), "store must be marked closed")
+	assert.Nil(t, store.handle, "Close must release bbolt handle reference")
+
+	store.keysLock.RLock()
+	assert.Empty(t, store.keysList, "Close must release tracked key slice")
+	assert.Empty(t, store.keysMap, "Close must reset tracked key map")
+	assert.Empty(t, store.claimExpiry, "Close must clear tracked claim heap")
+
+	if assert.NotNil(t, store.ost) {
+		assert.Equal(t, 0, store.ost.Len(), "Close must reset tracked OST index")
+	}
+
+	store.keysLock.RUnlock()
 }
 
 // TestDiskStore_Close_ManyConcurrentClosersFromSingleOpen verifies that multiple concurrent closers

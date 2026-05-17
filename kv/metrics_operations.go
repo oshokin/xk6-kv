@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -55,13 +56,18 @@ const (
 	opRandomKeys               = "random_keys"
 	opPopRandom                = "pop_random"
 	opClaimRandom              = "claim_random"
+	opClaimKey                 = "claim_key"
+	opClaimRandomMany          = "claim_random_many"
+	opPopRandomMany            = "pop_random_many"
 	opReleaseClaim             = "release_claim"
 	opCompleteClaim            = "complete_claim"
+	opRenewClaim               = "renew_claim"
 	opRebuildKeyList           = "rebuild_key_list"
 	opBackup                   = "backup"
 	opRestore                  = "restore"
 	opExportJSONL              = "export_jsonl"
 	opImportJSONL              = "import_jsonl"
+	opImportCSV                = "import_csv"
 	opStats                    = "stats"
 	opReportStats              = "report_stats"
 )
@@ -256,7 +262,7 @@ func (s kvOperationSample) shouldEmitEmptyResult() bool {
 	}
 
 	switch s.operation {
-	case opRandomKey, opRandomKeys, opPopRandom, opClaimRandom:
+	case opRandomKey, opRandomKeys, opPopRandom, opClaimRandom, opClaimKey, opClaimRandomMany, opPopRandomMany:
 		return true
 	default:
 		return false
@@ -271,8 +277,16 @@ func isEmptyAllocationResult(op string, result any) bool {
 	case opRandomKeys:
 		keys, ok := result.([]string)
 		return ok && len(keys) == 0
-	case opPopRandom, opClaimRandom:
+	case opPopRandom, opClaimRandom, opClaimKey:
 		return result == nil
+	case opClaimRandomMany, opPopRandomMany:
+		if result == nil {
+			return true
+		}
+
+		value := reflect.ValueOf(result)
+
+		return value.Kind() == reflect.Slice && value.Len() == 0
 	default:
 		return false
 	}

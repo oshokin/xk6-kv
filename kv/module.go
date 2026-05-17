@@ -114,6 +114,13 @@ func (mi *ModuleInstance) NewKV(_ sobek.ConstructorCall) *sobek.Object {
 //   - Later calls must provide equivalent options; conflicting options fail with
 //     KVOptionsConflictError.
 func (mi *ModuleInstance) OpenKv(opts sobek.Value) *sobek.Object {
+	if mi.vu.InitEnv() == nil {
+		rt := mi.vu.Runtime()
+		common.Throw(rt, NewError(InvalidOptionsError, "openKv must be called in init context"))
+
+		return nil
+	}
+
 	options, err := NewOptionsFrom(mi.vu, opts)
 	if err != nil {
 		common.Throw(mi.vu.Runtime(), err)

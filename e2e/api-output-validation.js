@@ -1,4 +1,4 @@
-import { check } from 'k6';
+import { check, sleep } from 'k6';
 import file from 'k6/x/file';
 import { getSnapshotPath, createKv, createSetup, createTeardown } from './common.js';
 
@@ -40,9 +40,22 @@ const EXPORT_JSONL_PATH = './tmp/api-output-validation-export.jsonl';
 
 // JSONL file path for importJSONL validation.
 const IMPORT_JSONL_PATH = './tmp/api-output-validation-import.jsonl';
+// CSV file path for importCSV validation.
+const IMPORT_CSV_PATH = './examples/fixtures/users.csv';
+// CSV file path for missing-file validation.
+const MISSING_CSV_PATH = './tmp/api-output-validation-missing.csv';
 
 // kv is the shared store client used throughout the scenario.
 const kv = createKv(TEST_NAME);
+
+async function expectErrorName(action, expectedName) {
+  try {
+    await action();
+    return false;
+  } catch (err) {
+    return err !== null && err !== undefined && err.name === expectedName;
+  }
+}
 
 // options configures the load profile and pass/fail thresholds.
 export const options = {
@@ -182,7 +195,11 @@ export const options = {
     'checks{api:restore-boolean-false-preservation}': ['rate>0.999'],
     'checks{api:restore-float-preservation}': ['rate>0.999'],
     'checks{api:restore-empty-array-preservation}': ['rate>0.999'],
-    'checks{api:restore-empty-object-preservation}': ['rate>0.999']
+    'checks{api:restore-empty-object-preservation}': ['rate>0.999'],
+    'checks{api:claim-batch-methods}': ['rate>0.999'],
+    'checks{api:importCSV-contract}': ['rate>0.999'],
+    'checks{api:input-validation-matrix}': ['rate>0.999'],
+    'checks{api:post-close-rejects}': ['rate>0.999']
   }
 };
 
@@ -448,6 +465,49 @@ export default async function apiOutputValidationTest() {
       popped && poppedExistsAfterRemoval === false
   });
 
+  const poppedEmpty = await kv.popRandom({ prefix: 'missing:pop:key:' });
+  check(true, {
+    'api:popRandom-empty-null': () => poppedEmpty === null
+  });
+
+  await kv.setMany({
+    'pop:many:key:1': { id: 1, queue: 'batch' },
+    'pop:many:key:2': { id: 2, queue: 'batch' },
+    'pop:many:key:3': { id: 3, queue: 'batch' }
+  });
+  const poppedMany = await kv.popRandomMany({
+    prefix: 'pop:many:key:',
+    count: 2
+  });
+  let popManyShape = Array.isArray(poppedMany) && poppedMany.length <= 2;
+  let popManyRemoved = true;
+  const poppedManySeen = new Set();
+  for (const entry of poppedMany) {
+    if (
+      !entry ||
+      typeof entry.key !== 'string' ||
+      !entry.key.startsWith('pop:many:key:') ||
+      !Object.prototype.hasOwnProperty.call(entry, 'value')
+    ) {
+      popManyShape = false;
+    }
+
+    if (poppedManySeen.has(entry.key)) {
+      popManyShape = false;
+    }
+    poppedManySeen.add(entry.key);
+
+    const stillExists = await kv.exists(entry.key);
+    if (stillExists) {
+      popManyRemoved = false;
+    }
+  }
+  const poppedManyEmpty = await kv.popRandomMany({
+    prefix: 'missing:pop:many:key:',
+    count: 2
+  });
+  const popManyEmptyArray = Array.isArray(poppedManyEmpty) && poppedManyEmpty.length === 0;
+
   // claimRandom()/releaseClaim()/completeClaim(): Validate claim lifecycle payloads.
   await kv.setMany({
     'claim:key:1': { id: 1, status: 'queued' },
@@ -487,6 +547,115 @@ export default async function apiOutputValidationTest() {
     'api:completeClaim-success': () => claimTwo && completedClaim === true,
     'api:completeClaim-deleteKey-false': () =>
       claimTwo && completedKeyExists === true
+  });
+
+  await kv.set('claim:key:exact', { id: 1, queue: 'claim-key' });
+  const claimKeyResult = await kv.claimKey('claim:key:exact', {
+    owner: 'api-output-validation',
+    ttl: 30000
+  });
+  const claimKeyLiveNull = (await kv.claimKey('claim:key:exact', { ttl: 30000 })) === null;
+  const claimKeyMissingNull = (await kv.claimKey('claim:key:missing', { ttl: 30000 })) === null;
+  let claimKeyStructure = false;
+  if (claimKeyResult !== null) {
+    claimKeyStructure =
+      typeof claimKeyResult.id === 'string' &&
+      claimKeyResult.key === 'claim:key:exact' &&
+      typeof claimKeyResult.token === 'number' &&
+      typeof claimKeyResult.expiresAt === 'number' &&
+      claimKeyResult.entry?.key === 'claim:key:exact';
+    await kv.releaseClaim(claimKeyResult);
+  }
+
+  await kv.setMany({
+    'claim:many:key:1': { id: 1, batch: true },
+    'claim:many:key:2': { id: 2, batch: true },
+    'claim:many:key:3': { id: 3, batch: true },
+    'claim:many:key:4': { id: 4, batch: true }
+  });
+  const heldClaim = await kv.claimKey('claim:many:key:1', { ttl: 30000 });
+  const claimMany = await kv.claimRandomMany({
+    prefix: 'claim:many:key:',
+    count: 3,
+    owner: 'api-output-validation',
+    ttl: 30000
+  });
+  let claimManyShape = Array.isArray(claimMany) && claimMany.length <= 3;
+  const claimManySeen = new Set();
+  for (const claim of claimMany) {
+    if (
+      !claim ||
+      typeof claim.id !== 'string' ||
+      typeof claim.key !== 'string' ||
+      typeof claim.token !== 'number' ||
+      typeof claim.expiresAt !== 'number' ||
+      claim.entry?.key !== claim.key
+    ) {
+      claimManyShape = false;
+    }
+    if (claimManySeen.has(claim.key)) {
+      claimManyShape = false;
+    }
+    if (heldClaim !== null && claim.key === heldClaim.key) {
+      claimManyShape = false;
+    }
+    claimManySeen.add(claim.key);
+    await kv.releaseClaim(claim);
+  }
+  if (heldClaim !== null) {
+    await kv.releaseClaim(heldClaim);
+  }
+  const claimManyEmpty = await kv.claimRandomMany({
+    prefix: 'missing:claim:many:key:',
+    count: 2,
+    ttl: 30000
+  });
+  const claimManyEmptyArray = Array.isArray(claimManyEmpty) && claimManyEmpty.length === 0;
+
+  await kv.set('renew:key:1', { id: 1, queue: 'renew' });
+  const renewClaimRef = await kv.claimKey('renew:key:1', { ttl: 200 });
+  let renewSuccess = false;
+  let renewTokenStable = false;
+  let renewStaleFalse = false;
+  let renewMissingFalse = false;
+  if (renewClaimRef !== null) {
+    renewSuccess = await kv.renewClaim(renewClaimRef, { ttl: 30000 });
+    renewStaleFalse =
+      (await kv.renewClaim(
+        { id: renewClaimRef.id, key: renewClaimRef.key, token: renewClaimRef.token + 1 },
+        { ttl: 30000 }
+      )) === false;
+    renewMissingFalse =
+      (await kv.renewClaim(
+        { id: 'missing', key: 'missing:renew:key', token: 1 },
+        { ttl: 30000 }
+      )) === false;
+    renewTokenStable = await kv.releaseClaim(renewClaimRef);
+  }
+
+  await kv.set('renew:key:expired', { id: 2, queue: 'renew' });
+  const expiringClaim = await kv.claimKey('renew:key:expired', { ttl: 5 });
+  let renewExpiredFalse = false;
+  if (expiringClaim !== null) {
+    sleep(0.02);
+    renewExpiredFalse = (await kv.renewClaim(expiringClaim, { ttl: 30000 })) === false;
+  }
+
+  check(true, {
+    'api:claim-batch-methods': () =>
+      claimKeyStructure &&
+      claimKeyLiveNull &&
+      claimKeyMissingNull &&
+      claimManyShape &&
+      claimManyEmptyArray &&
+      renewSuccess &&
+      renewStaleFalse &&
+      renewMissingFalse &&
+      renewExpiredFalse &&
+      renewTokenStable &&
+      popManyShape &&
+      popManyRemoved &&
+      popManyEmptyArray
   });
 
   // rebuildKeyList(), stats(), reportStats(): Validate observability/lifecycle helpers.
@@ -966,6 +1135,55 @@ export default async function apiOutputValidationTest() {
       items[1].exists === true && items[1].value.value === 2
   });
 
+  const importCSVResult = await kv.importCSV({
+    fileName: IMPORT_CSV_PATH,
+    keyColumn: 'id',
+    hasHeader: true,
+    batchSize: 1
+  });
+  const importCSVItems = await kv.getMany(['user:1', 'user:2']);
+
+  await kv.deleteMany(['user:1', 'user:2']);
+  const importCSVLimitedResult = await kv.importCSV({
+    fileName: IMPORT_CSV_PATH,
+    keyColumn: 'id',
+    hasHeader: true,
+    limit: 1,
+    batchSize: 1000
+  });
+  const importCSVLimitedItems = await kv.getMany(['user:1', 'user:2']);
+
+  const importCSVMissingFileError = await expectErrorName(
+    () =>
+      kv.importCSV({
+        fileName: MISSING_CSV_PATH,
+        keyColumn: 'id',
+        hasHeader: true
+      }),
+    'SnapshotNotFoundError'
+  );
+
+  check(true, {
+    'api:importCSV-contract': () =>
+      importCSVResult !== null &&
+      typeof importCSVResult === 'object' &&
+      typeof importCSVResult.imported === 'number' &&
+      importCSVResult.imported === 2 &&
+      typeof importCSVResult.fileName === 'string' &&
+      (importCSVResult.fileName === IMPORT_CSV_PATH || importCSVResult.fileName === 'examples/fixtures/users.csv') &&
+      typeof importCSVResult.bytesRead === 'number' &&
+      importCSVResult.bytesRead > 0 &&
+      importCSVItems[0]?.exists === true &&
+      importCSVItems[1]?.exists === true &&
+      importCSVItems[0]?.value?.name === 'Alice' &&
+      importCSVItems[1]?.value?.name === 'Bob' &&
+      typeof importCSVItems[0]?.value?.email === 'string' &&
+      importCSVLimitedResult.imported === 1 &&
+      importCSVLimitedItems[0]?.exists === true &&
+      importCSVLimitedItems[1]?.exists === false &&
+      importCSVMissingFileError
+  });
+
   // list(): Validate that results are returned as an array of entry objects.
   // Each entry must have camelCase field names (key, value) and preserve all value types.
   const entries = await kv.list({});
@@ -1401,6 +1619,237 @@ export default async function apiOutputValidationTest() {
       Object.keys(restoredEmptyObject).length === 0
   });
 
+  const getMissingKeyError = await expectErrorName(
+    () => kv.get('missing:key:error'),
+    'KeyNotFoundError'
+  );
+
+  const validationGetEmptyKey = await expectErrorName(
+    () => kv.get(''),
+    'InvalidOptionsError'
+  );
+  const validationGetManyNonArray = await expectErrorName(
+    () => kv.getMany('bad'),
+    'InvalidOptionsError'
+  );
+  const validationGetManyNonStringItem = await expectErrorName(
+    () => kv.getMany(['ok', 42]),
+    'InvalidOptionsError'
+  );
+  const validationSetEmptyKey = await expectErrorName(
+    () => kv.set('', 'x'),
+    'InvalidOptionsError'
+  );
+  const validationSetManyNonObject = await expectErrorName(
+    () => kv.setMany('bad'),
+    'InvalidOptionsError'
+  );
+  const validationDeleteManyNonArray = await expectErrorName(
+    () => kv.deleteMany('bad'),
+    'InvalidOptionsError'
+  );
+  const validationDeleteManyEmptyKey = await expectErrorName(
+    () => kv.deleteMany(['ok', '']),
+    'InvalidOptionsError'
+  );
+  const validationDeleteByPrefixEmptyPrefix = await expectErrorName(
+    () => kv.deleteByPrefix({ prefix: '', limit: 1 }),
+    'InvalidOptionsError'
+  );
+  const validationDeleteByPrefixNonPositiveLimit = await expectErrorName(
+    () => kv.deleteByPrefix({ prefix: 'x', limit: 0 }),
+    'InvalidOptionsError'
+  );
+  const validationDeleteEmptyKey = await expectErrorName(
+    () => kv.delete(''),
+    'InvalidOptionsError'
+  );
+  const validationExistsEmptyKey = await expectErrorName(
+    () => kv.exists(''),
+    'InvalidOptionsError'
+  );
+  const validationIncrementByNonNumber = await expectErrorName(
+    () => kv.incrementBy('counter:validated', 1.5),
+    'ValueNumberRequiredError'
+  );
+  const validationGetOrSetEmptyKey = await expectErrorName(
+    () => kv.getOrSet('', 1),
+    'InvalidOptionsError'
+  );
+  const validationSwapEmptyKey = await expectErrorName(
+    () => kv.swap('', 1),
+    'InvalidOptionsError'
+  );
+  const validationCompareAndSwapEmptyKey = await expectErrorName(
+    () => kv.compareAndSwap('', 1, 2),
+    'InvalidOptionsError'
+  );
+  const validationCompareAndSwapDetailedBadOptions = await expectErrorName(
+    () => kv.compareAndSwapDetailed('foo', 1, 2, 'bad'),
+    'InvalidOptionsError'
+  );
+  const validationSetIfAbsentEmptyKey = await expectErrorName(
+    () => kv.setIfAbsent('', 1),
+    'InvalidOptionsError'
+  );
+  const validationDeleteIfExistsEmptyKey = await expectErrorName(
+    () => kv.deleteIfExists(''),
+    'InvalidOptionsError'
+  );
+  const validationCompareAndDeleteEmptyKey = await expectErrorName(
+    () => kv.compareAndDelete('', 1),
+    'InvalidOptionsError'
+  );
+  const validationCompareAndDeleteDetailedBadOptions = await expectErrorName(
+    () => kv.compareAndDeleteDetailed('foo', 1, 'bad'),
+    'InvalidOptionsError'
+  );
+  const validationScanBadOptions = await expectErrorName(
+    () => kv.scan('bad'),
+    'InvalidOptionsError'
+  );
+  const validationScanKeysBadOptions = await expectErrorName(
+    () => kv.scanKeys('bad'),
+    'InvalidOptionsError'
+  );
+  const validationListBadOptions = await expectErrorName(
+    () => kv.list('bad'),
+    'InvalidOptionsError'
+  );
+  const validationListKeysBadOptions = await expectErrorName(
+    () => kv.listKeys('bad'),
+    'InvalidOptionsError'
+  );
+  const validationCountBadOptions = await expectErrorName(
+    () => kv.count('bad'),
+    'InvalidOptionsError'
+  );
+  const validationRandomKeyBadOptions = await expectErrorName(
+    () => kv.randomKey('bad'),
+    'InvalidOptionsError'
+  );
+  const validationRandomKeysMissingCount = await expectErrorName(
+    () => kv.randomKeys({ prefix: 'x' }),
+    'InvalidOptionsError'
+  );
+  const validationRandomKeysBadCount = await expectErrorName(
+    () => kv.randomKeys({ count: 0 }),
+    'InvalidOptionsError'
+  );
+  const validationPopRandomBadOptions = await expectErrorName(
+    () => kv.popRandom('bad'),
+    'InvalidOptionsError'
+  );
+  const validationPopRandomManyBadOptions = await expectErrorName(
+    () => kv.popRandomMany({ count: 0 }),
+    'InvalidOptionsError'
+  );
+  const validationClaimRandomBadTTL = await expectErrorName(
+    () => kv.claimRandom({ ttl: 0 }),
+    'InvalidOptionsError'
+  );
+  const validationClaimKeyEmptyKey = await expectErrorName(
+    () => kv.claimKey('', { ttl: 30000 }),
+    'InvalidOptionsError'
+  );
+  const validationClaimRandomManyMissingCount = await expectErrorName(
+    () => kv.claimRandomMany({ ttl: 30000 }),
+    'InvalidOptionsError'
+  );
+  const validationReleaseClaimBadClaim = await expectErrorName(
+    () => kv.releaseClaim('bad'),
+    'InvalidOptionsError'
+  );
+  const validationCompleteClaimBadClaim = await expectErrorName(
+    () => kv.completeClaim('bad'),
+    'InvalidOptionsError'
+  );
+  const validationCompleteClaimBadOptions = await expectErrorName(
+    () => kv.completeClaim({ id: 'x', key: 'k', token: 1 }, 'bad'),
+    'InvalidOptionsError'
+  );
+  const validationRenewClaimBadOptions = await expectErrorName(
+    () => kv.renewClaim({ id: 'x', key: 'k', token: 1 }, { ttl: 0 }),
+    'InvalidOptionsError'
+  );
+  const validationBackupBadOptions = await expectErrorName(
+    () => kv.backup('bad'),
+    'InvalidOptionsError'
+  );
+  const validationRestoreBadOptions = await expectErrorName(
+    () => kv.restore('bad'),
+    'InvalidOptionsError'
+  );
+  const validationExportJSONLMissingFile = await expectErrorName(
+    () => kv.exportJSONL({ prefix: 'x' }),
+    'InvalidOptionsError'
+  );
+  const validationImportJSONLMissingFile = await expectErrorName(
+    () => kv.importJSONL({}),
+    'InvalidOptionsError'
+  );
+  const validationImportCSVMissingKeyColumn = await expectErrorName(
+    () => kv.importCSV({ fileName: IMPORT_CSV_PATH }),
+    'InvalidOptionsError'
+  );
+  const validationImportCSVBadDelimiter = await expectErrorName(
+    () =>
+      kv.importCSV({
+        fileName: IMPORT_CSV_PATH,
+        keyColumn: 'id',
+        delimiter: ';;'
+      }),
+    'InvalidOptionsError'
+  );
+
+  check(true, {
+    'api:input-validation-matrix': () =>
+      getMissingKeyError &&
+      validationGetEmptyKey &&
+      validationGetManyNonArray &&
+      validationGetManyNonStringItem &&
+      validationSetEmptyKey &&
+      validationSetManyNonObject &&
+      validationDeleteManyNonArray &&
+      validationDeleteManyEmptyKey &&
+      validationDeleteByPrefixEmptyPrefix &&
+      validationDeleteByPrefixNonPositiveLimit &&
+      validationDeleteEmptyKey &&
+      validationExistsEmptyKey &&
+      validationIncrementByNonNumber &&
+      validationGetOrSetEmptyKey &&
+      validationSwapEmptyKey &&
+      validationCompareAndSwapEmptyKey &&
+      validationCompareAndSwapDetailedBadOptions &&
+      validationSetIfAbsentEmptyKey &&
+      validationDeleteIfExistsEmptyKey &&
+      validationCompareAndDeleteEmptyKey &&
+      validationCompareAndDeleteDetailedBadOptions &&
+      validationScanBadOptions &&
+      validationScanKeysBadOptions &&
+      validationListBadOptions &&
+      validationListKeysBadOptions &&
+      validationCountBadOptions &&
+      validationRandomKeyBadOptions &&
+      validationRandomKeysMissingCount &&
+      validationRandomKeysBadCount &&
+      validationPopRandomBadOptions &&
+      validationPopRandomManyBadOptions &&
+      validationClaimRandomBadTTL &&
+      validationClaimKeyEmptyKey &&
+      validationClaimRandomManyMissingCount &&
+      validationReleaseClaimBadClaim &&
+      validationCompleteClaimBadClaim &&
+      validationCompleteClaimBadOptions &&
+      validationRenewClaimBadOptions &&
+      validationBackupBadOptions &&
+      validationRestoreBadOptions &&
+      validationExportJSONLMissingFile &&
+      validationImportJSONLMissingFile &&
+      validationImportCSVMissingKeyColumn &&
+      validationImportCSVBadDelimiter
+  });
+
   // close(): Validate synchronous idempotent lifecycle close behavior.
   let closeIdempotent = true;
   try {
@@ -1412,5 +1861,18 @@ export default async function apiOutputValidationTest() {
 
   check(closeIdempotent, {
     'api:close-idempotent': () => closeIdempotent
+  });
+
+  const postCloseRejects =
+    (await expectErrorName(() => kv.get('foo'), 'StoreClosedError')) &&
+    (await expectErrorName(() => kv.set('post:close:key', 'value'), 'StoreClosedError')) &&
+    (await expectErrorName(() => kv.claimRandom({ prefix: 'claim:key:' }), 'StoreClosedError')) &&
+    (await expectErrorName(
+      () => kv.popRandomMany({ prefix: 'pop:many:key:', count: 1 }),
+      'StoreClosedError'
+    ));
+
+  check(true, {
+    'api:post-close-rejects': () => closeIdempotent && postCloseRejects
   });
 }

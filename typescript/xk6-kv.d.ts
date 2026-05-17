@@ -460,6 +460,49 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Options for importing key/value entries from CSV.
+   */
+  export interface ImportCSVOptions {
+    /** Required input CSV file path. */
+    fileName: string;
+    /**
+     * Required key column name (when hasHeader=true) or zero-based column index as string
+     * (when hasHeader=false).
+     */
+    keyColumn: string;
+    /** Optional one-character delimiter. Defaults to ",". */
+    delimiter?: string;
+    /** Whether the first row is a header row. @default true */
+    hasHeader?: boolean;
+    /**
+     * Optional maximum number of rows to import.
+     * If omitted or 0, all rows are imported.
+     * Negative values are rejected.
+     * Positive values must be <= 1,000,000.
+     */
+    limit?: number;
+    /**
+     * Optional number of rows per SetMany batch.
+     * If omitted or 0, the default batch size is used.
+     * Negative values are rejected.
+     * Positive values must be <= 10,000.
+     */
+    batchSize?: number;
+  }
+
+  /**
+   * Summary returned by importCSV().
+   */
+  export interface ImportCSVResult {
+    /** Number of rows imported into KV. */
+    imported: number;
+    /** Input CSV file path. */
+    fileName: string;
+    /** Number of input bytes consumed by importer. */
+    bytesRead: number;
+  }
+
+  /**
    * Diagnostic snapshot returned by stats().
    */
   export interface KVStats {
@@ -513,9 +556,24 @@ declare module 'k6/x/kv' {
   }
 
   /**
-   * Options for claimRandom().
+   * Options for popRandomMany().
    */
-  export interface ClaimRandomOptions {
+  export interface PopRandomManyOptions {
+    /**
+     * Filter by key prefix. Only keys starting with this string are considered.
+     */
+    prefix?: string;
+    /**
+     * Number of entries to return.
+     * Must be a positive integer less than or equal to 1,000,000.
+     */
+    count: number;
+  }
+
+  /**
+   * Common options for claim allocation APIs.
+   */
+  export interface ClaimOptions {
     /**
      * Filter by key prefix. Only keys starting with this string are considered.
      */
@@ -531,6 +589,22 @@ declare module 'k6/x/kv' {
      * @default 30000
      */
     ttl?: number;
+  }
+
+  /**
+   * Options for claimRandom().
+   */
+  export interface ClaimRandomOptions extends ClaimOptions {}
+
+  /**
+   * Options for claimRandomMany().
+   */
+  export interface ClaimManyOptions extends ClaimOptions {
+    /**
+     * Number of entries to claim.
+     * Must be a positive integer less than or equal to 1,000,000.
+     */
+    count: number;
   }
 
   /**
@@ -571,6 +645,17 @@ declare module 'k6/x/kv' {
      * @default true
      */
     deleteKey?: boolean;
+  }
+
+  /**
+   * Options for renewClaim().
+   */
+  export interface RenewClaimOptions {
+    /**
+     * New lease duration in milliseconds.
+     * Must be a positive integer less than or equal to 86,400,000 (24 hours).
+     */
+    ttl: number;
   }
 
   /**
@@ -1367,18 +1452,42 @@ declare module 'k6/x/kv' {
     randomKeys(options: RandomKeysOptions): Promise<string[]>;
 
     /**
-     * Atomically selects and removes a random matching entry.
+     * Claims one random free matching entry and removes it.
      * Resolves to null when no matching entry exists.
      */
     popRandom<T = any>(options?: PopRandomOptions): Promise<(Entry & { value: T }) | null>;
 
     /**
-     * Atomically leases a random matching entry.
+     * Claims up to count random free matching entries, decodes them, and
+     * completes each claim with deleteKey=true.
+     *
+     * If completion fails after some entries were already deleted,
+     * completed deletes are not rolled back.
+     * Remaining live claims are released best-effort.
+     *
+     * Resolves to [] when no matching entry exists.
+     */
+    popRandomMany<T = any>(options: PopRandomManyOptions): Promise<Array<Entry & { value: T }>>;
+
+    /**
+     * Leases a random matching free entry.
      * Resolves to null when no free entry exists.
      * If options.ttl is omitted, lease duration defaults to 30000ms (30 seconds).
      * The maximum lease duration is 86,400,000ms (24 hours).
      */
     claimRandom<T = any>(options?: ClaimRandomOptions): Promise<Claim<T> | null>;
+
+    /**
+     * Leases a specific key.
+     * Resolves to null when the key is missing or already live-claimed.
+     */
+    claimKey<T = any>(key: string, options?: ClaimOptions): Promise<Claim<T> | null>;
+
+    /**
+     * Leases up to count unique random free matching entries from one store call.
+     * Resolves to [] when no free entry exists.
+     */
+    claimRandomMany<T = any>(options: ClaimManyOptions): Promise<Array<Claim<T>>>;
 
     /**
      * Releases a live claim.
@@ -1391,6 +1500,12 @@ declare module 'k6/x/kv' {
      * By default, completion also removes the underlying key.
      */
     completeClaim(claim: ClaimRef, options?: CompleteClaimOptions): Promise<boolean>;
+
+    /**
+     * Extends a live claim lease without changing the claim token.
+     * Returns false for stale, expired, missing claims, or claims that no longer own the key.
+     */
+    renewClaim(claim: ClaimRef, options: RenewClaimOptions): Promise<boolean>;
 
     /**
      * Rebuilds in-memory key indexes from the underlying store.
@@ -1472,6 +1587,15 @@ declare module 'k6/x/kv' {
      * @returns Promise that resolves to import summary metadata.
      */
     importJSONL(options: ImportJSONLOptions): Promise<ImportJSONLResult>;
+
+    /**
+     * Imports key/value entries from a CSV file.
+     *
+     * Each row is imported as a value object. The key is taken from keyColumn.
+     * When hasHeader=true, keyColumn is a header name; when hasHeader=false,
+     * keyColumn must be a zero-based column index encoded as a string.
+     */
+    importCSV(options: ImportCSVOptions): Promise<ImportCSVResult>;
 
     // ==================== Lifecycle ====================
 

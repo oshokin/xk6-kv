@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	bolt "go.etcd.io/bbolt"
 )
 
 func TestMemoryStore_Stats(t *testing.T) {
@@ -95,30 +94,13 @@ func TestDiskStore_Stats(t *testing.T) {
 		require.NoError(t, store.Set("user:1", "a"))
 		require.NoError(t, store.Set("user:2", "b"))
 
-		now := time.Now().UnixMilli()
-		err := store.handle.Update(func(tx *bolt.Tx) error {
-			claimsBucket, err := ensureClaimsBucket(tx)
-			if err != nil {
-				return err
-			}
-
-			if err := putDiskClaimTx(claimsBucket, &EntryClaim{
-				ID:        "claim-live",
-				Key:       "user:1",
-				Token:     1,
-				ExpiresAt: now + 30_000,
-			}); err != nil {
-				return err
-			}
-
-			return putDiskClaimTx(claimsBucket, &EntryClaim{
-				ID:        "claim-expired",
-				Key:       "user:2",
-				Token:     2,
-				ExpiresAt: now - 30_000,
-			})
-		})
+		_, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 30_000})
 		require.NoError(t, err)
+
+		_, err = store.ClaimKey("user:2", &ClaimOptions{TTLMs: 5})
+		require.NoError(t, err)
+
+		time.Sleep(10 * time.Millisecond)
 
 		snapshot, err := store.Stats()
 		require.NoError(t, err)

@@ -23,6 +23,9 @@ const SUBSCRIPTION_POOL_SIZE = parseInt(__ENV.SUBSCRIPTION_POOL_SIZE || '300', 1
 // Lease duration for each claim attempt, in milliseconds.
 const CLAIM_TTL_MS = parseInt(__ENV.CLAIM_TTL_MS || '15000', 10);
 
+// Renewal duration applied to active leases during processing.
+const RENEW_TTL_MS = parseInt(__ENV.RENEW_TTL_MS || '30000', 10);
+
 // Maximum claim attempts per iteration before treating the queue as empty.
 const CLAIM_ATTEMPTS = parseInt(__ENV.CLAIM_ATTEMPTS || '5', 10);
 
@@ -42,6 +45,7 @@ export const options = {
   iterations: ITERATIONS,
   thresholds: {
     'checks{renewal:claimed}': ['rate>0.99'],
+    'checks{renewal:renewed}': ['rate>0.99'],
     'checks{renewal:released}': ['rate>0.99']
   }
 };
@@ -73,6 +77,11 @@ export default async function subscriptionRenewalLeaseObservability() {
   });
 
   if (claim) {
+    const renewed = await kv.renewClaim(claim, { ttl: RENEW_TTL_MS });
+    check(renewed, {
+      'renewal:renewed': () => renewed
+    });
+
     const released = await kv.releaseClaim(claim);
     check(released, {
       'renewal:released': () => released

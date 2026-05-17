@@ -190,7 +190,7 @@ func (s *DiskStore) addKeyIndexLocked(key string) {
 
 	// Update prefix index.
 	if s.ost != nil {
-		s.ost.Insert(key)
+		s.ost.InsertWithMeta(key, nil)
 	}
 }
 
@@ -263,14 +263,32 @@ func (s *DiskStore) rebuildKeyListLocked() error {
 	s.keysMap = newMap
 
 	if s.ost != nil {
-		s.ost = NewOSTree()
+		s.ost = NewOSTreeOf[*trackedDiskClaimRecord]()
 
 		for _, k := range newKeys {
-			s.ost.Insert(k)
+			s.ost.InsertWithMeta(k, nil)
 		}
 	}
 
+	s.claimExpiry = s.claimExpiry[:0]
+
 	return nil
+}
+
+// randomSelectableKeyWithTrackingLocked picks a random selectable key from the tracked index.
+func (s *DiskStore) randomSelectableKeyWithTrackingLocked(prefix string) (string, bool) {
+	if s.ost == nil || s.ost.SelectableLen() == 0 {
+		return "", false
+	}
+
+	left, right := s.ost.SelectableRangeBounds(prefix)
+	if right <= left {
+		return "", false
+	}
+
+	idx := left + rand.IntN(right-left) //nolint:gosec // math/rand/v2 is enough for non-crypto sampling.
+
+	return s.ost.KthSelectable(idx)
 }
 
 // randomKeyWithTracking picks a random key using in-memory structures.
@@ -325,7 +343,7 @@ func (s *DiskStore) randomKeyWithoutTracking(prefix string) (string, error) {
 		}
 
 		// Pass 1: count matches in this snapshot.
-		count := countKeysInBucket(bucket, prefix)
+		count := s.countKeysInBucket(bucket, prefix)
 		if count == 0 {
 			return nil
 		}
@@ -333,7 +351,7 @@ func (s *DiskStore) randomKeyWithoutTracking(prefix string) (string, error) {
 		// Pass 2: pick and return the r-th key from the same snapshot.
 		target := rand.Int64N(count) //nolint:gosec // math/rand/v2 is safe
 
-		key, found := keyByIndexInBucket(bucket, prefix, target)
+		key, found := s.keyByIndexInBucket(bucket, prefix, target)
 		if found {
 			selected = key
 		}
@@ -349,7 +367,7 @@ func (s *DiskStore) randomKeyWithoutTracking(prefix string) (string, error) {
 
 // countKeysInBucket counts how many keys match prefix using the provided bucket.
 // When prefix == "", it returns KeyN from bucket stats.
-func countKeysInBucket(bucket *bolt.Bucket, prefix string) int64 {
+func (s *DiskStore) countKeysInBucket(bucket *bolt.Bucket, prefix string) int64 {
 	if prefix == "" {
 		return int64(bucket.Stats().KeyN)
 	}
@@ -375,7 +393,7 @@ func countKeysInBucket(bucket *bolt.Bucket, prefix string) int64 {
 
 // keyByIndexInBucket returns the key at the zero-based index among keys that
 // match prefix in the provided bucket snapshot.
-func keyByIndexInBucket(bucket *bolt.Bucket, prefix string, index int64) (string, bool) {
+func (s *DiskStore) keyByIndexInBucket(bucket *bolt.Bucket, prefix string, index int64) (string, bool) {
 	var (
 		current     int64
 		cursor      = bucket.Cursor()

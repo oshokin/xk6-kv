@@ -59,6 +59,7 @@ func (s *DiskStore) Stats() (*StatsSnapshot, error) {
 	}, nil
 }
 
+// lockStatsIndexReader locks the index reader.
 func (s *DiskStore) lockStatsIndexReader() func() {
 	if !s.trackKeys {
 		return func() {}
@@ -79,6 +80,7 @@ func (s *DiskStore) lockStatsIndexReader() func() {
 	}
 }
 
+// readStatsCounts reads the stats counts.
 func (s *DiskStore) readStatsCounts(now int64) (*diskStatsCounts, error) {
 	counts := &diskStatsCounts{}
 
@@ -89,6 +91,10 @@ func (s *DiskStore) readStatsCounts(now int64) (*diskStatsCounts, error) {
 		}
 
 		counts.KeyCount = int64(bucket.Stats().KeyN)
+
+		if s.trackedClaimsEnabled() {
+			return nil
+		}
 
 		claimsBucket := tx.Bucket(diskClaimsBucket)
 
@@ -105,9 +111,14 @@ func (s *DiskStore) readStatsCounts(now int64) (*diskStatsCounts, error) {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreReadFailed, err)
 	}
 
+	if s.trackedClaimsEnabled() {
+		counts.Claims = s.countTrackedClaimsLocked(now)
+	}
+
 	return counts, nil
 }
 
+// buildIndexStats builds the index stats.
 func (s *DiskStore) buildIndexStats(keyCount int64) *IndexStats {
 	if !s.trackKeys {
 		return nil
@@ -131,10 +142,12 @@ func (s *DiskStore) buildIndexStats(keyCount int64) *IndexStats {
 	return indexStats
 }
 
+// diskReadOnly returns whether the disk is read-only.
 func (s *DiskStore) diskReadOnly() bool {
 	return s.boltOptions != nil && s.boltOptions.ReadOnly
 }
 
+// countDiskClaimsStats counts the disk claims stats.
 func (s *DiskStore) countDiskClaimsStats(claims *bolt.Bucket, now int64) (*ClaimStats, error) {
 	stats := &ClaimStats{}
 
@@ -145,7 +158,7 @@ func (s *DiskStore) countDiskClaimsStats(claims *bolt.Bucket, now int64) (*Claim
 	cursor := claims.Cursor()
 
 	for k, v := cursor.Seek(claimIDPrefix); k != nil && bytes.HasPrefix(k, claimIDPrefix); k, v = cursor.Next() {
-		record, decodeErr := decodeDiskClaim(v)
+		record, decodeErr := s.decodeDiskClaim(v)
 		if decodeErr != nil {
 			return nil, decodeErr
 		}
@@ -158,4 +171,28 @@ func (s *DiskStore) countDiskClaimsStats(claims *bolt.Bucket, now int64) (*Claim
 	}
 
 	return stats, nil
+}
+
+// countTrackedClaimsLocked counts the tracked claims.
+func (s *DiskStore) countTrackedClaimsLocked(now int64) ClaimStats {
+	var stats ClaimStats
+
+	if s.ost == nil {
+		return stats
+	}
+
+	s.ost.WalkMeta(func(_ string, record *trackedDiskClaimRecord) {
+		if record == nil {
+			return
+		}
+
+		if record.ExpiresAt <= now {
+			stats.Expired++
+			return
+		}
+
+		stats.Live++
+	})
+
+	return stats
 }

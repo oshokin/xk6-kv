@@ -283,7 +283,7 @@ func (s *DiskStore) countByCursor(prefix string) (int64, error) {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
-		total = countKeysInBucket(bucket, prefix)
+		total = s.countKeysInBucket(bucket, prefix)
 
 		return nil
 	})

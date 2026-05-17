@@ -39,7 +39,9 @@ type DiskStore struct {
 	// keysLock is a mutex to protect concurrent access to keysList/keysMap/ost.
 	keysLock sync.RWMutex
 	// ost is an order-statistics index (lexicographic; used for prefix random).
-	ost *OSTree
+	ost *OSTreeOf[*trackedDiskClaimRecord]
+	// claimExpiry is a min-heap of tracked claim expirations.
+	claimExpiry diskClaimExpiryHeap
 	// opened is a flag to track whether the store is open.
 	// Checked under lifecycleMu by beginOperation().
 	opened atomic.Bool
@@ -81,9 +83,9 @@ var defaultBBoltBucketBytes = []byte(DefaultBBoltBucket)
 // When path is empty, DefaultDiskStorePath is used to preserve backwards compatibility.
 // If trackKeys is true, an in-memory index is initialized to accelerate RandomKey().
 func NewDiskStore(trackKeys bool, path string, cfg *DiskConfig) (*DiskStore, error) {
-	var idx *OSTree
+	var idx *OSTreeOf[*trackedDiskClaimRecord]
 	if trackKeys {
-		idx = NewOSTree()
+		idx = NewOSTreeOf[*trackedDiskClaimRecord]()
 	}
 
 	diskPath, err := ResolveDiskPath(path)
@@ -168,7 +170,7 @@ func (s *DiskStore) Open() error {
 
 			// Claims are process-local leases: drop stale persisted claim metadata
 			// whenever a writable process opens the store.
-			if clearErr := clearClaimsBucket(tx); clearErr != nil {
+			if clearErr := s.clearClaimsBucket(tx); clearErr != nil {
 				return clearErr
 			}
 
@@ -190,7 +192,11 @@ func (s *DiskStore) Open() error {
 	// Rebuild the key list if tracking is enabled.
 	if s.trackKeys {
 		s.keysLock.Lock()
+
 		rebuildErr := s.rebuildKeyListLocked()
+		if rebuildErr == nil && !isReadOnly {
+			s.resetTrackedClaimsLocked()
+		}
 		s.keysLock.Unlock()
 
 		if rebuildErr != nil {
@@ -550,12 +556,18 @@ func (s *DiskStore) Delete(key string) error {
 			return err
 		}
 
-		claimsBucket, err := ensureClaimsBucket(tx)
-		if err != nil {
-			return err
+		if !s.trackedClaimsEnabled() {
+			claimsBucket, claimsErr := s.ensureClaimsBucket(tx)
+			if claimsErr != nil {
+				return claimsErr
+			}
+
+			if claimsErr := s.deleteClaimForKeyTx(claimsBucket, key); claimsErr != nil {
+				return claimsErr
+			}
 		}
 
-		return deleteClaimForKeyTx(claimsBucket, key)
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDiskStoreDeleteFailed, err)
@@ -632,16 +644,24 @@ func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
 		}
 
-		claimsBucket, err := ensureClaimsBucket(tx)
-		if err != nil {
-			return err
+		var claimsBucket *bolt.Bucket
+
+		if !s.trackedClaimsEnabled() {
+			var claimsErr error
+
+			claimsBucket, claimsErr = s.ensureClaimsBucket(tx)
+			if claimsErr != nil {
+				return claimsErr
+			}
 		}
 
 		// Check if key exists.
 		if bucket.Get([]byte(key)) == nil {
-			// Defensive cleanup: remove stale claim metadata if present.
-			if err := deleteClaimForKeyTx(claimsBucket, key); err != nil {
-				return err
+			// Defensive cleanup for fallback claim metadata mode.
+			if claimsBucket != nil {
+				if err := s.deleteClaimForKeyTx(claimsBucket, key); err != nil {
+					return err
+				}
 			}
 
 			return nil
@@ -652,8 +672,10 @@ func (s *DiskStore) DeleteIfExists(key string) (bool, error) {
 			return err
 		}
 
-		if err := deleteClaimForKeyTx(claimsBucket, key); err != nil {
-			return err
+		if claimsBucket != nil {
+			if err := s.deleteClaimForKeyTx(claimsBucket, key); err != nil {
+				return err
+			}
 		}
 
 		deleted = true
@@ -705,7 +727,7 @@ func (s *DiskStore) Clear() error {
 			return fmt.Errorf("%w: bucket %s: %w", ErrDiskStoreWriteFailed, s.bucket, err)
 		}
 
-		if clearErr := clearClaimsBucket(tx); clearErr != nil {
+		if clearErr := s.clearClaimsBucket(tx); clearErr != nil {
 			return clearErr
 		}
 
@@ -721,8 +743,10 @@ func (s *DiskStore) Clear() error {
 		s.keysMap = make(map[string]int)
 
 		if s.ost != nil {
-			s.ost = NewOSTree()
+			s.ost = NewOSTreeOf[*trackedDiskClaimRecord]()
 		}
+
+		s.resetTrackedClaimsLocked()
 	}
 
 	return nil
@@ -821,6 +845,22 @@ func (s *DiskStore) Close() error {
 	}
 
 	// Reset the store to its initial state.
+	s.keysLock.Lock()
+	s.keysList = nil
+	s.keysMap = make(map[string]int)
+
+	s.claimExpiry = nil
+	if s.trackKeys {
+		s.resetTrackedClaimsLocked()
+		s.ost = NewOSTreeOf[*trackedDiskClaimRecord]()
+	} else {
+		s.ost = nil
+	}
+	s.keysLock.Unlock()
+
+	s.handle = nil
+	s.bucket = nil
+
 	s.opened.Store(false)
 	s.refCount.Store(0)
 
@@ -857,4 +897,18 @@ func (s *DiskStore) beginOperation() (func(), error) {
 	}
 
 	return s.lifecycleMu.RUnlock, nil
+}
+
+// trackedClaimsEnabled returns whether tracked claims are enabled.
+func (s *DiskStore) trackedClaimsEnabled() bool {
+	return s.trackKeys && s.ost != nil
+}
+
+// resetsTrackedClaimsLocked resets the tracked claims.
+func (s *DiskStore) resetTrackedClaimsLocked() {
+	s.claimExpiry = s.claimExpiry[:0]
+
+	if s.ost != nil {
+		s.ost.ClearMeta(nil)
+	}
 }

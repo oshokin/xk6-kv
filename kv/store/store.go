@@ -217,13 +217,29 @@ type (
 		// RandomKeys is key-only and MUST NOT clone, serialize, deserialize, or return values.
 		RandomKeys(prefix string, count int64, unique bool) ([]string, error)
 
-		// PopRandom atomically selects and removes a random free matching entry.
+		// PopRandom claims one random free matching entry and removes it.
 		// If there are no free matching entries, it returns nil, nil.
 		PopRandom(prefix string) (*Entry, error)
 
-		// ClaimRandom atomically leases a random matching entry.
+		// PopRandomMany claims up to count random free matching entries, then
+		// completes each claim with DeleteKey=true.
+		// Completed deletes are not rolled back if a later completion fails.
+		// Remaining live claims are released best-effort.
+		// Returns an empty slice when no free matching entries exist.
+		PopRandomMany(prefix string, count int64) ([]*Entry, error)
+
+		// ClaimRandom leases a random matching free entry.
 		// If no free (unclaimed or expired-claim) entry exists, it returns nil, nil.
 		ClaimRandom(opts *ClaimOptions) (*EntryClaim, error)
+
+		// ClaimKey leases a specific key.
+		// Returns nil, nil when the key is missing or already live-claimed.
+		ClaimKey(key string, opts *ClaimOptions) (*EntryClaim, error)
+
+		// ClaimRandomMany leases up to Count unique random free matching entries
+		// from one store call.
+		// Returns an empty slice when no free entries exist.
+		ClaimRandomMany(opts *ClaimManyOptions) ([]*EntryClaim, error)
 
 		// ReleaseClaim releases a live claim.
 		// It returns true only when id/key/token match a non-expired live claim.
@@ -232,6 +248,10 @@ type (
 		// CompleteClaim completes a live claim.
 		// When opts.DeleteKey is true, the underlying key is removed.
 		CompleteClaim(ref *ClaimRef, opts *CompleteClaimOptions) (bool, error)
+
+		// RenewClaim extends a live claim lease without changing its token.
+		// Returns false for stale, expired, or missing claims.
+		RenewClaim(ref *ClaimRef, opts *RenewClaimOptions) (bool, error)
 
 		// RebuildKeyList rebuilds any in-memory key indexes maintained by the
 		// implementation (e.g., after a crash or when optional indexing is enabled).

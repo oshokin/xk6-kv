@@ -550,3 +550,147 @@ func TestMemoryStore_ClearAndRestore_ClearClaims(t *testing.T) {
 		})
 	}
 }
+
+func TestMemoryStore_ClaimKey_Behavior(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+			require.NoError(t, store.Set("user:1", "alpha"))
+
+			claim, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 30_000})
+			require.NoError(t, err)
+			require.NotNil(t, claim)
+
+			again, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 30_000})
+			require.NoError(t, err)
+			require.Nil(t, again)
+
+			missing, err := store.ClaimKey("missing", &ClaimOptions{TTLMs: 30_000})
+			require.NoError(t, err)
+			require.Nil(t, missing)
+
+			released, err := store.ReleaseClaim(claim.Ref())
+			require.NoError(t, err)
+			require.True(t, released)
+		})
+	}
+}
+
+func TestMemoryStore_RenewClaim_TokenStableAndExpiryExtended(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+			require.NoError(t, store.Set("user:1", "alpha"))
+
+			claim, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 200})
+			require.NoError(t, err)
+			require.NotNil(t, claim)
+
+			oldExpiresAt := claim.ExpiresAt
+
+			time.Sleep(2 * time.Millisecond)
+
+			renewed, err := store.RenewClaim(claim.Ref(), &RenewClaimOptions{TTLMs: 60_000})
+			require.NoError(t, err)
+			require.True(t, renewed)
+
+			released, err := store.ReleaseClaim(claim.Ref())
+			require.NoError(t, err)
+			require.True(t, released, "release with original token must still work after renewal")
+
+			nextClaim, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 30_000})
+			require.NoError(t, err)
+			require.NotNil(t, nextClaim)
+			assert.Greater(t, nextClaim.ExpiresAt, oldExpiresAt)
+		})
+	}
+}
+
+func TestMemoryStore_ClaimRandomMany_ReturnsUniqueFreeClaims(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+			requirePopulateStore(
+				t,
+				store,
+				"user:1", "alpha",
+				"user:2", "beta",
+				"user:3", "gamma",
+			)
+
+			liveClaim, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 60_000})
+			require.NoError(t, err)
+			require.NotNil(t, liveClaim)
+
+			claims, err := store.ClaimRandomMany(&ClaimManyOptions{
+				Prefix: "user:",
+				Count:  10,
+				TTLMs:  60_000,
+			})
+			require.NoError(t, err)
+			require.Len(t, claims, 2)
+
+			seen := make(map[string]struct{}, len(claims))
+			for _, claim := range claims {
+				_, exists := seen[claim.Key]
+				require.False(t, exists, "claimRandomMany must not return duplicate keys")
+
+				seen[claim.Key] = struct{}{}
+				require.NotEqual(t, "user:1", claim.Key, "claimRandomMany must skip live claims")
+			}
+		})
+	}
+}
+
+func TestMemoryStore_PopRandomMany_DeletesOnlyFreeMatchingKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := NewMemoryStore(&MemoryConfig{TrackKeys: trackKeys})
+			requirePopulateStore(
+				t,
+				store,
+				"user:1", "alpha",
+				"user:2", "beta",
+				"user:3", "gamma",
+				"order:1", "order",
+			)
+
+			liveClaim, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 60_000})
+			require.NoError(t, err)
+			require.NotNil(t, liveClaim)
+
+			entries, err := store.PopRandomMany("user:", 10)
+			require.NoError(t, err)
+			require.Len(t, entries, 2)
+
+			seen := make(map[string]struct{}, len(entries))
+			for _, entry := range entries {
+				_, exists := seen[entry.Key]
+				require.False(t, exists, "popRandomMany must not return duplicate keys")
+
+				seen[entry.Key] = struct{}{}
+				require.NotEqual(t, "user:1", entry.Key, "popRandomMany must skip live claims")
+			}
+
+			exists, err := store.Exists("user:1")
+			require.NoError(t, err)
+			require.True(t, exists, "live claimed key must remain after popRandomMany")
+		})
+	}
+}

@@ -507,15 +507,23 @@ Backend note:
   `randomKeys()` returns keys only. It does not clone, deserialize, or return values.
   `count` is capped at `1000000` to protect the k6 process from unbounded allocations.
   When `unique` is `true` and fewer matching keys exist than requested, all available matching keys are returned in random order.
-  Use `claimRandom()` or `popRandom()` when you need exclusive allocation.
+  Use `claimRandom()`, `claimKey()`, `claimRandomMany()`, `popRandom()`, or `popRandomMany()` when you need exclusive allocation.
 
-- **`popRandom(options?: { prefix?: string }): Promise<{ key: string, value: any } | null>`** - Atomically picks and removes one random matching entry. Resolves to `null` when no match exists.
+- **`popRandom(options?: { prefix?: string }): Promise<{ key: string, value: any } | null>`** - Claims one random free matching entry and removes it. Resolves to `null` when no match exists.
 
-- **`claimRandom(options?: { prefix?: string, owner?: string, ttl?: number }): Promise<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } } | null>`** - Atomically leases one random matching entry. Live claims are excluded from later `claimRandom()` and `popRandom()` calls until released/completed or expired. If `ttl` is omitted, the default lease is **30000ms (30 seconds)**. `ttl` must be a positive integer and is capped at **86400000ms (24 hours)**. `owner` is optional diagnostic metadata capped at **256 bytes** and is not emitted as a metrics label.
+- **`claimRandom(options?: { prefix?: string, owner?: string, ttl?: number }): Promise<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } } | null>`** - Leases one random matching free entry. Live claims are excluded from later `claimRandom()` and `popRandom()` calls until released/completed or expired. If `ttl` is omitted, the default lease is **30000ms (30 seconds)**. `ttl` must be a positive integer and is capped at **86400000ms (24 hours)**. `owner` is optional diagnostic metadata capped at **256 bytes** and is not emitted as a metrics label.
+
+- **`claimKey(key: string, options?: { owner?: string, ttl?: number }): Promise<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } } | null>`** - Leases one specific key. Resolves to `null` when the key is missing or already live-claimed.
+
+- **`claimRandomMany(options: { prefix?: string, count: number, owner?: string, ttl?: number }): Promise<Array<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } }>>`** - Leases up to `count` unique random free matching entries from one store call. Resolves to `[]` when no free matches exist.
+
+- **`popRandomMany(options: { prefix?: string, count: number }): Promise<Array<{ key: string, value: any }>>`** - Claims up to `count` random free matching entries, decodes them, and completes each claim with `deleteKey=true`. Resolves to `[]` when no free matches exist. Completed deletes are not rolled back if a later completion fails. Remaining live claims are released best-effort.
 
 - **`releaseClaim(claim: { id: string, key: string, token: number }): Promise<boolean>`** - Releases a live claim back to the pool. Returns `false` for stale/expired/missing claims.
 
 - **`completeClaim(claim, options?: { deleteKey?: boolean }): Promise<boolean>`** - Completes a live claim. By default it also deletes the underlying key (`deleteKey: true`).
+
+- **`renewClaim(claim: { id: string, key: string, token: number }, options: { ttl: number }): Promise<boolean>`** - Extends a live claim lease without changing the claim token. Returns `false` for stale/expired/missing claims or when the claim no longer owns the key.
 
   Claim lifecycle guidance:
 
@@ -535,7 +543,7 @@ Backend note:
   }
   ```
 
-> ⚠️ `claimRandom()` is a local coordination primitive for VUs sharing the same `xk6-kv` process/store. It is not a distributed lock service.
+> ⚠️ Claim APIs (`claimRandom`, `claimKey`, `claimRandomMany`, `popRandom`, `popRandomMany`) are local coordination primitives for VUs sharing the same `xk6-kv` process/store. They are not distributed lock services.
 > `claimRandom()` and `popRandom()` are random allocation helpers optimized for low/moderate live-claim occupancy. Under very high live-claim occupancy, fallback selection can be biased toward scan order, but exclusivity is still preserved.
 > `claim.token` is exposed as a JavaScript number. It should not approach `Number.MAX_SAFE_INTEGER` in practical k6 runs; if that ever becomes realistic, a future major API should expose it as a string.
 
@@ -591,7 +599,7 @@ Backend note:
   - `xk6_kv_operation_duration` (Trend in milliseconds, tags: `op`, `backend`, `status`, `track_keys`, `serialization`)
   - `xk6_kv_operation_failed` (Rate, tags: `op`, `backend`, `track_keys`, `serialization`)
   - `xk6_kv_errors_total` (Counter, tags: `op`, `backend`, `error_type`, `track_keys`, `serialization`)
-  - `xk6_kv_empty_result` (Rate for `random_key`/`random_keys`/`pop_random`/`claim_random`, tags: `op`, `backend`, `track_keys`, `serialization`)
+  - `xk6_kv_empty_result` (Rate for `random_key`/`random_keys`/`pop_random`/`claim_random`/`claim_key`/`claim_random_many`/`pop_random_many`, tags: `op`, `backend`, `track_keys`, `serialization`)
   - `xk6_kv_async_in_flight` (Gauge for async store operations currently running, tags: `backend`, `track_keys`, `serialization`)
 
   `xk6_kv_async_in_flight` is the current saturation signal for background store operations in the async bridge. It is decremented when the store goroutine queues its event-loop completion callback, so it is not a count of unresolved JavaScript promises. There is no `waiting` metric because xk6-kv does not currently have an async limiter or queue; if one is added later, a low-cardinality waiting gauge can be added alongside it.
@@ -654,6 +662,9 @@ Backend note:
   Imports key/value entries from a JSON Lines file. Each line must be:
   `{"key":"...","value":...}`.
 
+- **`importCSV(options: { fileName: string, keyColumn: string, delimiter?: string, hasHeader?: boolean, limit?: number, batchSize?: number }): Promise<{ imported: number, fileName: string, bytesRead: number }>`**  
+  Imports key/value rows from a CSV file. Each row becomes one object value; `keyColumn` selects the key field.
+
 ```typescript
 await kv.backup({
   fileName: "./backups/kv-latest.kv",
@@ -715,6 +726,19 @@ Each line must be a JSON object with:
 `importJSONL()` rejects blank lines and malformed JSON records. Errors include the source line number.
 The import is batch-atomic, not file-atomic: if a later line is invalid, already committed batches remain imported, while the currently failed batch is not partially written. Failure messages include committed progress (`records`, `bytes`, and line context) so callers can locate the bad record and decide whether a retry is safe.
 
+`importCSV()` streams rows and writes them in `setMany()` batches. Existing keys are overwritten.
+`keyColumn` is required; with `hasHeader: true` it is a header name, with `hasHeader: false` it must be a zero-based column index encoded as string.
+Rows with missing/empty keys are rejected with row-numbered parse errors.
+
+`importCSV()` options:
+
+- `fileName` is required and must be a non-empty string.
+- `keyColumn` is required (column name when `hasHeader: true`, zero-based index string when `hasHeader: false`).
+- `delimiter` is optional and must be exactly one character.
+- `hasHeader` is optional and defaults to `true`.
+- `limit` is optional; if omitted or `0`, all rows are imported. Negative values are rejected. Positive values are capped at `1000000`.
+- `batchSize` is optional; if omitted or `0`, the default batch size is used. Negative values are rejected. Positive values are capped at `10000`.
+
 - **`close(): void`** - Synchronously closes this KV handle. Call once in `teardown()`.
   After `close()`, this handle rejects async operations with `StoreClosedError` on both backends.
   Closing one handle does not affect other open handles until the shared store refcount reaches zero.
@@ -733,7 +757,21 @@ The import is batch-atomic, not file-atomic: if a later line is invalid, already
 - **`randomKeys()` complexity by backend:** With `trackKeys: true`, both backends use key indexes for small samples; memory first builds shard ranges (O(shards * log n)) and then selects sampled keys by rank, while disk may fall back to cursor scan for near-full unique samples. With `trackKeys: false`, it collects candidates via `scanKeys()` and samples in memory (linear in matching keys).
 - **Memory `trackKeys: false` scan/list costs:** `scan()`, `scanKeys()`, `list()`, and `listKeys()` use untracked shard-map iteration. On large keyspaces, repeated pagination can become expensive; if these operations are hot, prefer `trackKeys: true`.
 - **Disk backend and `trackKeys`:** bbolt is the persistent source of truth. With `trackKeys: true`, the disk backend maintains an exact derived in-memory key index rebuilt from bbolt on open/restore and updated after successful mutations. That index accelerates `randomKey()`, `randomKeys()`, and `count()`, while cursor-style key reads (`scanKeys()` and `listKeys()`) still read from bbolt.
-- **Disk claim allocation:** `claimRandom()` and `popRandom()` allocate inside a bbolt write transaction so lease metadata and key deletion stay consistent; they do not use the derived key index for candidate selection.
+- **Disk claim allocation:** with `trackKeys: true`, claim metadata is stored in process-local in-memory OST metadata (not bbolt). `claimRandom()`, `claimKey()`, `claimRandomMany()`, `releaseClaim()`, `renewClaim()`, and `completeClaim({ deleteKey: false })` stay on the in-memory path; only durable key deletes (`popRandom()`, `popRandomMany()`, `completeClaim({ deleteKey: true })`) require bbolt `Update()`. With `trackKeys: false`, claim metadata remains in the bbolt claims-bucket fallback path, and batch random claim allocation may scan/materialize a large candidate set. For high-throughput disk random allocation, prefer `trackKeys: true`.
+
+#### Disk Allocation Benchmark Snapshot
+
+On the current benchmark machine (`linux/amd64`, `AMD Ryzen 9 9950X`, short benchmark windows), disk random allocation favors `trackKeys: true` for claim operations:
+
+| Operation | `trackKeys=true` | `trackKeys=false` | Note |
+| --- | ---: | ---: | --- |
+| `claimRandom` | ~`1.5-1.6 us/op` | ~`0.48-1.28 ms/op` | tracked path avoids bbolt claim writes |
+| `claimRandomMany` (`count=100`) | ~`58-64 us/op` | fallback path substantially slower under load | near-linear scaling with count |
+| `renewClaim` (tracked) | ~`170-180 ns/op` | N/A | in-memory claim metadata update |
+| `popRandom` | ~`0.6-2.6 ms/op` | ~`0.6-2.6 ms/op` | durable delete path dominates |
+
+Treat these as directional numbers for this machine/runtime profile; rerun benchmarks in your environment for release gating.
+
 - **Bound large reads and writes:** For large keyspaces, prefer `scan()` / `scanKeys()` with bounded positive `limit` values instead of `list()` / `listKeys()` or unlimited `limit <= 0` calls. Oversized positive limits are rejected to avoid unbounded allocations and long transactions.
 - **`count()` / `count({ prefix })` complexity:**
   - `count()` (same as `size()`):
@@ -759,6 +797,16 @@ Observability-focused scripts:
 - Example batch random key sampling + hydration: [`examples/random-keys.js`](./examples/random-keys.js)
 - E2E lease-worker observability scenario: [`e2e/subscription-renewal-lease-observability.js`](./e2e/subscription-renewal-lease-observability.js)
 - E2E credential pool drain scenario: [`e2e/credential-pool-drain-observability.js`](./e2e/credential-pool-drain-observability.js)
+- Batch claim allocation example: [`examples/claim-random-many.js`](./examples/claim-random-many.js)
+- Batch pop allocation example: [`examples/pop-random-many.js`](./examples/pop-random-many.js)
+- CSV import example: [`examples/import-csv.js`](./examples/import-csv.js)
+
+### Allocation Recipes
+
+- **Unique users:** import a user pool (`importCSV()` or `setMany()`), allocate with `claimRandom()` / `claimRandomMany()`, then `completeClaim()` on success or `releaseClaim()` on failure.
+- **Credential pool:** fetch exact credentials with `claimKey()`, extend long-running work with `renewClaim()`, and always release stale/failed attempts.
+- **Response capture:** write response envelopes with `kv.set("responses:<id>", payload)` during the run, then `exportJSONL()` in teardown/summary.
+- **Cross-run handoff:** use disk backend + `backup()`/`restore()` or `exportJSONL()`/`importJSONL()`; claim leases are process-local and are cleared on writable open/clear/restore/rebuild/close.
 
 ### Producer / Consumer
 

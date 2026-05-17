@@ -4968,6 +4968,105 @@ func TestKVAsync_CompleteClaim_ReturnsTrue(t *testing.T) {
 	`)
 }
 
+func TestKVAsync_ClaimKey_ResolvesClaim(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", "Oleg")
+			.then(() => __kv.claimKey("user:1", { owner: "vu:1", ttl: 30000 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing claim");
+				}
+				if (claim.key !== "user:1") {
+					throw new Error("wrong key");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_ClaimRandomMany_ResolvesClaims(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:1": "Alice",
+			"user:2": "Bob",
+			"user:3": "Carol"
+		})
+			.then(() => __kv.claimRandomMany({ prefix: "user:", count: 2, ttl: 30000 }))
+			.then((claims) => {
+				if (!Array.isArray(claims)) {
+					throw new Error("claims must be an array");
+				}
+				if (claims.length !== 2) {
+					throw new Error("wrong claims count");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_PopRandomMany_ResolvesEntries(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"user:1": "Alice",
+			"user:2": "Bob",
+			"user:3": "Carol"
+		})
+			.then(() => __kv.popRandomMany({ prefix: "user:", count: 2 }))
+			.then((entries) => {
+				if (!Array.isArray(entries)) {
+					throw new Error("entries must be an array");
+				}
+				if (entries.length !== 2) {
+					throw new Error("wrong entries count");
+				}
+			});
+	`)
+}
+
+func TestKVAsync_RenewClaim_ReturnsTrue(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		let initialClaim;
+		__kv.set("user:1", "Oleg")
+			.then(() => __kv.claimRandom({ prefix: "user:", ttl: 200 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing claim");
+				}
+				initialClaim = claim;
+				return __kv.renewClaim(claim, { ttl: 30000 });
+			})
+			.then((renewed) => {
+				if (renewed !== true) {
+					throw new Error("expected true");
+				}
+				return __kv.releaseClaim(initialClaim);
+			})
+			.then((released) => {
+				if (released !== true) {
+					throw new Error("expected release=true");
+				}
+			});
+	`)
+}
+
 func TestKVAsync_Claim_InvalidOptions_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4989,17 +5088,27 @@ func TestKVAsync_Claim_InvalidOptions_RejectsPromise(t *testing.T) {
 
 		Promise.all([
 			expectInvalidOptions(__kv.popRandom("bad"), "popRandom.options"),
+			expectInvalidOptions(__kv.popRandomMany("bad"), "popRandomMany.options"),
+			expectInvalidOptions(__kv.popRandomMany({ count: 0 }), "popRandomMany.count.positive"),
 			expectInvalidOptions(__kv.claimRandom({ ttl: 0 }), "claimRandom.ttl.positive"),
 			expectInvalidOptions(__kv.claimRandom({ ttl: 1.5 }), "claimRandom.ttl.integer"),
 			expectInvalidOptions(__kv.claimRandom({ ttl: Number.MAX_SAFE_INTEGER }), "claimRandom.ttl.max"),
 			expectInvalidOptions(__kv.claimRandom({ owner: "o".repeat(257) }), "claimRandom.owner.max"),
+			expectInvalidOptions(__kv.claimKey("", { ttl: 1000 }), "claimKey.key.empty"),
+			expectInvalidOptions(__kv.claimKey("user:1", { ttl: 0 }), "claimKey.ttl.positive"),
+			expectInvalidOptions(__kv.claimRandomMany(), "claimRandomMany.count.required"),
+			expectInvalidOptions(__kv.claimRandomMany({ count: 0 }), "claimRandomMany.count.positive"),
+			expectInvalidOptions(__kv.claimRandomMany({ count: 1, ttl: 0 }), "claimRandomMany.ttl.positive"),
 			expectInvalidOptions(__kv.releaseClaim("bad"), "releaseClaim.claim"),
 			expectInvalidOptions(__kv.releaseClaim({ id: "", key: "k", token: 1 }), "releaseClaim.claim.id.empty"),
 			expectInvalidOptions(__kv.releaseClaim({ id: "c", key: "", token: 1 }), "releaseClaim.claim.key.empty"),
 			expectInvalidOptions(__kv.completeClaim("bad"), "completeClaim.claim"),
 			expectInvalidOptions(__kv.completeClaim({ id: "", key: "k", token: 1 }), "completeClaim.claim.id.empty"),
 			expectInvalidOptions(__kv.completeClaim({ id: "c", key: "", token: 1 }), "completeClaim.claim.key.empty"),
-			expectInvalidOptions(__kv.completeClaim({ id: "x", key: "k", token: 1 }, "bad"), "completeClaim.options")
+			expectInvalidOptions(__kv.completeClaim({ id: "x", key: "k", token: 1 }, "bad"), "completeClaim.options"),
+			expectInvalidOptions(__kv.renewClaim("bad", { ttl: 1000 }), "renewClaim.claim"),
+			expectInvalidOptions(__kv.renewClaim({ id: "x", key: "k", token: 1 }), "renewClaim.options.required"),
+			expectInvalidOptions(__kv.renewClaim({ id: "x", key: "k", token: 1 }, { ttl: 0 }), "renewClaim.ttl.positive")
 		]);
 	`)
 }

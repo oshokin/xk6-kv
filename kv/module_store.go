@@ -128,8 +128,7 @@ func (rm *RootModule) ensureStateMetrics(vu modules.VU) error {
 
 	initEnv := vu.InitEnv()
 	if initEnv == nil || initEnv.Registry == nil {
-		// openKv() is expected in init context; keep behavior non-breaking and
-		// let reportStats() return a clear runtime error when metrics are unavailable.
+		// Defensive guard for non-standard module test wiring.
 		return nil
 	}
 

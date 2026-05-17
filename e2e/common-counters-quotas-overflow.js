@@ -73,12 +73,12 @@ export const overflowOptions = {
 // serialization backends to ensure overflow guards work consistently.
 export function createOverflowScenario(serialization = 'json') {
   const scenarioName = `${OVERFLOW_TEST_NAME}-${serialization}`;
+  // openKv must run in init context; createKv() is evaluated while building the scenario.
+  const kv = createKv(scenarioName, { serialization });
+  const setup = createSetup(kv);
+  const teardown = createTeardown(kv, scenarioName);
 
   return async function runOverflowScenario() {
-    const kv = createKv(scenarioName, { serialization });
-    const setup = createSetup(kv);
-    const teardown = createTeardown(kv, scenarioName);
-
     await setup();
     try {
       await overflowGuardTest(kv, serialization);

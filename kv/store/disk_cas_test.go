@@ -1,11 +1,14 @@
 package store
 
 import (
+	"errors"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	bolt "go.etcd.io/bbolt"
+	boltErrors "go.etcd.io/bbolt/errors"
 )
 
 // TestDiskStore_CompareAndSwap_Basic verifies CAS fails on wrong old value
@@ -172,6 +175,58 @@ func TestDiskStore_CompareAndDelete_Basic(t *testing.T) {
 
 	exists, _ = store.Exists("k")
 	assert.False(t, exists, "key must be removed")
+}
+
+func TestDiskStore_CompareAndDelete_TrackedClaimsMode_DoesNotTouchClaimsBucket(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("k", "v"))
+
+	require.NoError(t, store.handle.Update(func(tx *bolt.Tx) error {
+		err := tx.DeleteBucket(diskClaimsBucket)
+		if err != nil && !errors.Is(err, boltErrors.ErrBucketNotFound) {
+			return err
+		}
+
+		return nil
+	}))
+
+	ok, err := store.CompareAndDelete("k", "v")
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.NoError(t, store.handle.View(func(tx *bolt.Tx) error {
+		assert.Nil(t, tx.Bucket(diskClaimsBucket))
+
+		return nil
+	}))
+}
+
+func TestDiskStore_CompareAndDelete_BoltClaimsMode_CreatesClaimsBucket(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, false, "", true)
+	require.NoError(t, store.Set("k", "v"))
+
+	require.NoError(t, store.handle.Update(func(tx *bolt.Tx) error {
+		err := tx.DeleteBucket(diskClaimsBucket)
+		if err != nil && !errors.Is(err, boltErrors.ErrBucketNotFound) {
+			return err
+		}
+
+		return nil
+	}))
+
+	ok, err := store.CompareAndDelete("k", "v")
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	require.NoError(t, store.handle.View(func(tx *bolt.Tx) error {
+		assert.NotNil(t, tx.Bucket(diskClaimsBucket))
+
+		return nil
+	}))
 }
 
 // TestDiskStore_CompareAndDelete_ConcurrentSingleWinner ensures exactly

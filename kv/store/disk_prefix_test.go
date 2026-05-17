@@ -1,11 +1,14 @@
 package store
 
 import (
+	"errors"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	bolt "go.etcd.io/bbolt"
+	boltErrors "go.etcd.io/bbolt/errors"
 )
 
 func TestDiskStore_DeleteByPrefix_RejectsEmptyPrefix(t *testing.T) {
@@ -164,6 +167,60 @@ func TestDiskStore_DeleteByPrefix_CleansClaims(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.False(t, released)
+}
+
+func TestDiskStore_DeleteByPrefix_TrackedClaimsMode_DoesNotTouchClaimsBucket(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("tmp:1", []byte("value")))
+
+	require.NoError(t, store.handle.Update(func(tx *bolt.Tx) error {
+		err := tx.DeleteBucket(diskClaimsBucket)
+		if err != nil && !errors.Is(err, boltErrors.ErrBucketNotFound) {
+			return err
+		}
+
+		return nil
+	}))
+
+	result, err := store.DeleteByPrefix("tmp:", 10)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.EqualValues(t, 1, result.Deleted)
+
+	require.NoError(t, store.handle.View(func(tx *bolt.Tx) error {
+		assert.Nil(t, tx.Bucket(diskClaimsBucket))
+
+		return nil
+	}))
+}
+
+func TestDiskStore_DeleteByPrefix_BoltClaimsMode_CreatesClaimsBucket(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, false, "", true)
+	require.NoError(t, store.Set("tmp:1", []byte("value")))
+
+	require.NoError(t, store.handle.Update(func(tx *bolt.Tx) error {
+		err := tx.DeleteBucket(diskClaimsBucket)
+		if err != nil && !errors.Is(err, boltErrors.ErrBucketNotFound) {
+			return err
+		}
+
+		return nil
+	}))
+
+	result, err := store.DeleteByPrefix("tmp:", 10)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.EqualValues(t, 1, result.Deleted)
+
+	require.NoError(t, store.handle.View(func(tx *bolt.Tx) error {
+		assert.NotNil(t, tx.Bucket(diskClaimsBucket))
+
+		return nil
+	}))
 }
 
 func TestDiskStore_DeleteByPrefix_UpdatesTracking(t *testing.T) {

@@ -157,6 +157,175 @@ func TestNextPrefix(t *testing.T) {
 	}
 }
 
+// TestOSTree_BackwardCompatibleAlias verifies that the OSTree API is backward compatible
+// with the original implementation.
+func TestOSTree_BackwardCompatibleAlias(t *testing.T) {
+	t.Parallel()
+
+	tree := NewOSTree()
+	tree.Insert("b")
+	tree.Insert("a")
+	tree.Insert("c")
+
+	require.Equal(t, 3, tree.Len())
+
+	key, ok := tree.Kth(0)
+	require.True(t, ok)
+	assert.Equal(t, "a", key)
+
+	key, ok = tree.Kth(1)
+	require.True(t, ok)
+	assert.Equal(t, "b", key)
+
+	key, ok = tree.Kth(2)
+	require.True(t, ok)
+	assert.Equal(t, "c", key)
+
+	assert.Equal(t, 0, tree.Rank("a"))
+	assert.Equal(t, 1, tree.Rank("b"))
+	assert.Equal(t, 2, tree.Rank("c"))
+
+	left, right := tree.RangeBounds("b")
+	assert.Equal(t, 1, left)
+	assert.Equal(t, 2, right)
+
+	left, right = tree.RangeBounds("z")
+	assert.Equal(t, 3, left)
+	assert.Equal(t, 3, right)
+}
+
+// TestOSTreeOf_Metadata verifies that the OSTreeOf API can store metadata for each key.
+func TestOSTreeOf_Metadata(t *testing.T) {
+	t.Parallel()
+
+	tree := NewOSTreeOf[*trackedDiskClaimRecord]()
+	tree.InsertWithMeta("a", nil)
+	tree.InsertWithMeta("b", nil)
+
+	record := &trackedDiskClaimRecord{
+		ID:  "claim-1",
+		Key: "a",
+	}
+
+	updated := tree.UpdateMeta("a", func(_ *trackedDiskClaimRecord) (*trackedDiskClaimRecord, bool) {
+		return record, false
+	})
+	require.True(t, updated)
+
+	meta, ok := tree.Meta("a")
+	require.True(t, ok)
+	require.NotNil(t, meta)
+	assert.Equal(t, "claim-1", meta.ID)
+	assert.Equal(t, 2, tree.Len())
+	assert.Equal(t, 1, tree.SelectableLen())
+}
+
+// TestOSTreeOf_KthSelectableDoesNotAffectKth verifies that the KthSelectable API does not affect the Kth API.
+func TestOSTreeOf_KthSelectableDoesNotAffectKth(t *testing.T) {
+	t.Parallel()
+
+	tree := NewOSTreeOf[emptyOSTMeta]()
+	tree.Insert("a")
+	tree.Insert("b")
+	tree.Insert("c")
+
+	require.True(t, tree.SetSelectable("b", false))
+
+	key, ok := tree.Kth(0)
+	require.True(t, ok)
+	assert.Equal(t, "a", key)
+	key, ok = tree.Kth(1)
+	require.True(t, ok)
+	assert.Equal(t, "b", key)
+	key, ok = tree.Kth(2)
+	require.True(t, ok)
+	assert.Equal(t, "c", key)
+
+	key, ok = tree.KthSelectable(0)
+	require.True(t, ok)
+	assert.Equal(t, "a", key)
+	key, ok = tree.KthSelectable(1)
+	require.True(t, ok)
+	assert.Equal(t, "c", key)
+
+	_, ok = tree.KthSelectable(2)
+	assert.False(t, ok)
+}
+
+// TestOSTreeOf_SelectableRangeBounds verifies that the SelectableRangeBounds API returns
+// the correct range of selectable keys.
+func TestOSTreeOf_SelectableRangeBounds(t *testing.T) {
+	t.Parallel()
+
+	tree := NewOSTreeOf[emptyOSTMeta]()
+	tree.Insert("user:1")
+	tree.Insert("user:2")
+	tree.Insert("user:3")
+	tree.Insert("order:1")
+
+	require.True(t, tree.SetSelectable("user:2", false))
+
+	left, right := tree.SelectableRangeBounds("user:")
+	require.Equal(t, 2, right-left)
+
+	key, ok := tree.KthSelectable(left)
+	require.True(t, ok)
+	assert.Equal(t, "user:1", key)
+
+	key, ok = tree.KthSelectable(left + 1)
+	require.True(t, ok)
+	assert.Equal(t, "user:3", key)
+}
+
+// TestOSTreeOf_ClearMeta verifies that the ClearMeta API removes all metadata from the tree.
+func TestOSTreeOf_ClearMeta(t *testing.T) {
+	t.Parallel()
+
+	tree := NewOSTreeOf[*trackedDiskClaimRecord]()
+	tree.InsertWithMeta("a", nil)
+	tree.InsertWithMeta("b", nil)
+	tree.InsertWithMeta("c", nil)
+
+	require.True(t, tree.UpdateMeta("a", func(_ *trackedDiskClaimRecord) (*trackedDiskClaimRecord, bool) {
+		return &trackedDiskClaimRecord{ID: "claim-a"}, false
+	}))
+	require.True(t, tree.UpdateMeta("b", func(_ *trackedDiskClaimRecord) (*trackedDiskClaimRecord, bool) {
+		return &trackedDiskClaimRecord{ID: "claim-b"}, false
+	}))
+
+	require.Equal(t, 1, tree.SelectableLen())
+
+	tree.ClearMeta(nil)
+	assert.Equal(t, tree.Len(), tree.SelectableLen())
+
+	metaA, ok := tree.Meta("a")
+	require.True(t, ok)
+	assert.Nil(t, metaA)
+
+	metaB, ok := tree.Meta("b")
+	require.True(t, ok)
+	assert.Nil(t, metaB)
+}
+
+// TestOSTreeOf_DeleteRemovesMetadata verifies that the Delete API removes metadata for a key.
+func TestOSTreeOf_DeleteRemovesMetadata(t *testing.T) {
+	t.Parallel()
+
+	tree := NewOSTreeOf[*trackedDiskClaimRecord]()
+	tree.InsertWithMeta("user:1", nil)
+
+	require.True(t, tree.UpdateMeta("user:1", func(_ *trackedDiskClaimRecord) (*trackedDiskClaimRecord, bool) {
+		return &trackedDiskClaimRecord{ID: "claim-1"}, false
+	}))
+
+	tree.Delete("user:1")
+
+	_, ok := tree.Meta("user:1")
+	assert.False(t, ok)
+	assert.Equal(t, 0, tree.Len())
+	assert.Equal(t, 0, tree.SelectableLen())
+}
+
 // getUniqueValues returns a new slice that contains only the first occurrence
 // of each distinct value from inputSlice, preserving the original encounter order.
 func getUniqueValues[T comparable](inputSlice []T) []T {

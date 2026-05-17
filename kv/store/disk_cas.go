@@ -248,13 +248,15 @@ func (s *DiskStore) compareAndDeleteDetailedInTx(
 		return nil, err
 	}
 
-	claimsBucket, err := ensureClaimsBucket(tx)
-	if err != nil {
-		return nil, err
-	}
+	if !s.trackedClaimsEnabled() {
+		claimsBucket, err := s.ensureClaimsBucket(tx)
+		if err != nil {
+			return nil, err
+		}
 
-	if err := deleteClaimForKeyTx(claimsBucket, key); err != nil {
-		return nil, err
+		if err := s.deleteClaimForKeyTx(claimsBucket, key); err != nil {
+			return nil, err
+		}
 	}
 
 	return &CompareAndDeleteDetailedResult{

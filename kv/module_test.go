@@ -1,15 +1,26 @@
 package kv
 
 import (
+	"fmt"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	k6common "go.k6.io/k6/js/common"
+	"go.k6.io/k6/js/modules"
 	"go.k6.io/k6/js/modulestest"
 	k6metrics "go.k6.io/k6/metrics"
 )
+
+type initlessVU struct {
+	modules.VU
+}
+
+func (v initlessVU) InitEnv() *k6common.InitEnvironment {
+	return nil
+}
 
 // TestOpenKV_ConcurrentInitializationSharesStore tests that
 // concurrent openKv calls share the same store.
@@ -104,6 +115,33 @@ func TestOpenKV_ConcurrentInitializationSharesStore(t *testing.T) {
 			_ = firstStore.Close()
 		}
 	})
+}
+
+func TestOpenKV_RejectsOutsideInitContext(t *testing.T) {
+	t.Parallel()
+
+	rootModule := newTestRootModule(t)
+	runtime := modulestest.NewRuntime(t)
+	moduleInstance := rootModule.NewModuleInstance(initlessVU{VU: runtime.VU}).(*ModuleInstance)
+
+	options := runtime.VU.Runtime().ToValue(map[string]any{
+		"backend":       BackendMemory,
+		"serialization": SerializationJSON,
+	})
+
+	var recovered any
+
+	func() {
+		defer func() {
+			recovered = recover()
+		}()
+
+		moduleInstance.OpenKv(options)
+	}()
+
+	require.NotNil(t, recovered)
+	require.Contains(t, fmt.Sprint(recovered), InvalidOptionsError)
+	require.Nil(t, rootModule.store)
 }
 
 // TestOpenKV_RejectsConflictingOptions tests that openKv

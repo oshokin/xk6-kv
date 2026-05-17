@@ -3,229 +3,171 @@ package store
 import (
 	"fmt"
 	"math/rand/v2"
-	"sync/atomic"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
-// BenchmarkOSTree_Insert measures the end-to-end build cost of inserting N prefixed keys
-// into a fresh OSTree. The timed region includes creating a new tree and inserting all keys.
-// We also set a bytes-per-iteration heuristic with b.SetBytes() based on total key bytes.
-func BenchmarkOSTree_Insert(b *testing.B) {
-	for _, totalKeyCount := range []int{1_000, 10_000, 100_000} {
-		b.Run(fmt.Sprintf("N=%d", totalKeyCount), func(b *testing.B) {
-			benchmarkKeys := makeBenchmarkTestKeys(totalKeyCount)
+const (
+	// ostreeBenchmarkKeyCount is the number of keys to benchmark the OSTree.
+	ostreeBenchmarkKeyCount = 100_000
+	// ostreeClaimedPercentNinety is the percentage of keys that are claimed.
+	ostreeClaimedPercentNinety = 90
+)
 
-			// Precondition: constructor must succeed (outside timed region).
-			require.NotNil(b, NewOSTree())
-
-			// SetBytes heuristic: sum of key byte lengths inserted per iteration.
-			var totalKeyBytes int
-			for _, key := range benchmarkKeys {
-				totalKeyBytes += len(key)
-			}
-
-			b.SetBytes(int64(totalKeyBytes))
-			b.ReportAllocs()
-			b.ResetTimer()
-
-			for b.Loop() {
-				tree := NewOSTree()
-
-				// No require inside timed loop to avoid timing overhead.
-				for _, key := range benchmarkKeys {
-					tree.Insert(key)
-				}
-			}
-		})
-	}
+// ostreeBenchmarkMeta is a benchmark metadata type for the OSTree.
+type ostreeBenchmarkMeta struct {
+	// version is the version of the metadata.
+	version int
 }
 
-// BenchmarkOSTree_Rank measures key -> rank lookups against a prebuilt tree of 100k keys.
-// The timed region executes only Rank calls; the tree build and query set are outside the timer.
-func BenchmarkOSTree_Rank(b *testing.B) {
-	tree := NewOSTree()
-
-	benchmarkKeys := makeBenchmarkTestKeys(100_000)
-	for _, key := range benchmarkKeys {
-		tree.Insert(key)
-	}
-
-	// Prepare a query key set (~50% of the corpus); any distribution works as long as we reuse it.
-	queryKeysForRank := makeBenchmarkTestKeys(50_000)
-
-	// Preconditions (outside timed region).
-	require.NotNil(b, tree)
-	require.Positive(b, tree.Len())
-	require.NotEmpty(b, queryKeysForRank)
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for i := range b.N {
-		key := queryKeysForRank[i%len(queryKeysForRank)]
-
-		_ = tree.Rank(key)
-	}
-}
-
-// BenchmarkOSTree_Rank_Parallel measures Rank lookups using b.RunParallel. The tree is read-only
-// during the benchmark and shared across goroutines. The work distribution uses an atomic counter
-// to avoid contention on a RNG and to keep things deterministic.
-func BenchmarkOSTree_Rank_Parallel(b *testing.B) {
-	tree := NewOSTree()
-
-	benchmarkKeys := makeBenchmarkTestKeys(100_000)
-	for _, key := range benchmarkKeys {
-		tree.Insert(key)
-	}
-
-	queryKeysForRank := makeBenchmarkTestKeys(50_000)
-
-	// Preconditions (outside timed region).
-	require.NotNil(b, tree)
-	require.Positive(b, tree.Len())
-	require.NotEmpty(b, queryKeysForRank)
-
-	var atomicQueryIndex uint64
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	b.RunParallel(func(parallelBench *testing.PB) {
-		for parallelBench.Next() {
-			index := nextAtomicModuloIndex(&atomicQueryIndex, len(queryKeysForRank))
-
-			key := queryKeysForRank[index]
-			_ = tree.Rank(key)
-		}
-	})
-}
-
-// BenchmarkOSTree_Kth measures random Kth(index) lookups against a prebuilt tree of 100k keys.
-// The timed region executes only Kth calls; the tree build is outside the timer.
-func BenchmarkOSTree_Kth(b *testing.B) {
-	tree := NewOSTree()
-
-	benchmarkKeys := makeBenchmarkTestKeys(100_000)
-	for _, key := range benchmarkKeys {
-		tree.Insert(key)
-	}
-
-	totalElementCount := tree.Len()
-
-	// Preconditions (outside timed region).
-	require.NotNil(b, tree)
-	require.Positive(b, totalElementCount)
+// BenchmarkOSTree_Kth_100k benchmarks the Kth API of the OSTree.
+func BenchmarkOSTree_Kth_100k(b *testing.B) {
+	keys := buildOSTreeBenchmarkKeys()
+	tree := buildOSTreeBenchmarkTree(keys)
+	total := tree.Len()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for b.Loop() {
-		randomIndex := rand.IntN(totalElementCount)
-
-		_, _ = tree.Kth(randomIndex)
+		idx := rand.IntN(total)
+		_, _ = tree.Kth(idx)
 	}
 }
 
-// BenchmarkOSTree_Kth_Parallel measures Kth lookups using b.RunParallel. We avoid RNG contention
-// by using an atomic counter modulo the element count.
-func BenchmarkOSTree_Kth_Parallel(b *testing.B) {
-	tree := NewOSTree()
+// BenchmarkOSTree_KthSelectable_100k_90PercentClaimed benchmarks the KthSelectable API of the OSTree.
+func BenchmarkOSTree_KthSelectable_100k_90PercentClaimed(b *testing.B) {
+	keys := buildOSTreeBenchmarkKeys()
+	tree := buildOSTreeBenchmarkTree(keys)
+	applyClaimDensity(tree, keys, ostreeClaimedPercentNinety)
 
-	benchmarkKeys := makeBenchmarkTestKeys(100_000)
-	for _, key := range benchmarkKeys {
-		tree.Insert(key)
+	total := tree.SelectableLen()
+	if total == 0 {
+		b.Fatal("expected selectable keys")
 	}
-
-	totalElementCount := tree.Len()
-
-	// Preconditions (outside timed region).
-	require.NotNil(b, tree)
-	require.Positive(b, totalElementCount)
-
-	var atomicKIndex uint64
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	b.RunParallel(func(parallelBench *testing.PB) {
-		for parallelBench.Next() {
-			index := nextAtomicModuloIndex(&atomicKIndex, totalElementCount)
-
-			_, _ = tree.Kth(index)
-		}
-	})
+	for b.Loop() {
+		idx := rand.IntN(total)
+		_, _ = tree.KthSelectable(idx)
+	}
 }
 
-// BenchmarkOSTree_RangeBounds measures prefix range bound computation (low/high indices) over
-// a prebuilt tree of 100k keys. The timed region executes only RangeBounds calls.
-func BenchmarkOSTree_RangeBounds(b *testing.B) {
-	tree := NewOSTree()
-
-	benchmarkKeys := makeBenchmarkTestKeys(100_000)
-	for _, key := range benchmarkKeys {
-		tree.Insert(key)
-	}
-
-	prefixQueries := []string{"a", "ab", "user:", "zzz", ""}
-
-	// Preconditions (outside timed region).
-	require.NotNil(b, tree)
-	require.Positive(b, tree.Len())
-	require.NotEmpty(b, prefixQueries)
+// BenchmarkOSTree_RangeBounds_100k benchmarks the RangeBounds API of the OSTree.
+func BenchmarkOSTree_RangeBounds_100k(b *testing.B) {
+	keys := buildOSTreeBenchmarkKeys()
+	tree := buildOSTreeBenchmarkTree(keys)
+	prefixes := []string{"user:", "user:000", "user:999", "missing:"}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := range b.N {
-		prefix := prefixQueries[i%len(prefixQueries)]
-
-		_, _ = tree.RangeBounds(prefix)
+		_, _ = tree.RangeBounds(prefixes[i%len(prefixes)])
 	}
 }
 
-// makeBenchmarkTestKeys returns a deterministic slice of keys with clustered prefixes
-// to exercise prefix-sensitive operations (RangeBounds) and varying ranks.
-// Pattern: a:, ab:, user:, z: - evenly distributed across the input size.
-func makeBenchmarkTestKeys(totalKeyCount int) []string {
-	benchmarkKeys := make([]string, totalKeyCount)
+// BenchmarkOSTree_SelectableRangeBounds_100k_90PercentClaimed benchmarks the SelectableRangeBounds API of the OSTree.
+func BenchmarkOSTree_SelectableRangeBounds_100k_90PercentClaimed(b *testing.B) {
+	keys := buildOSTreeBenchmarkKeys()
+	tree := buildOSTreeBenchmarkTree(keys)
+	applyClaimDensity(tree, keys, ostreeClaimedPercentNinety)
 
-	for index := range totalKeyCount {
-		switch index % 4 {
-		case 0:
-			benchmarkKeys[index] = fmt.Sprintf("a:%08d", index)
-		case 1:
-			benchmarkKeys[index] = fmt.Sprintf("ab:%08d", index)
-		case 2:
-			benchmarkKeys[index] = fmt.Sprintf("user:%08d", index)
-		default:
-			benchmarkKeys[index] = fmt.Sprintf("z:%08d", index)
-		}
+	prefixes := []string{"user:", "user:000", "user:999", "missing:"}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := range b.N {
+		_, _ = tree.SelectableRangeBounds(prefixes[i%len(prefixes)])
 	}
-
-	return benchmarkKeys
 }
 
-// nextAtomicModuloIndex atomically increments a uint64 counter and returns a bounded int index in [0, limit).
-//
-// Why this exists (and why it is safe):
-//   - Gosec rule G115 warns about converting from uint64 -> int because it may overflow on 32-bit builds.
-//   - We avoid overflow by FIRST reducing the uint64 value modulo `limit` in uint64 space, then converting the
-//     reduced value to int. Since the reduced value is guaranteed to be in [0, limit), and `limit` is an int,
-//     the conversion to int cannot overflow.
-//   - This helper is intended for benchmarks that need a cheap, contention-free index generator without RNG.
-//
-// Concurrency:
-//   - The function uses sync/atomic to get a unique increasing ticket per call and then folds it into range.
-func nextAtomicModuloIndex(counter *uint64, limit int) int {
-	if limit <= 0 {
-		// Defensive: avoid division by zero, return 0 when there is no valid range.
-		return 0
+// BenchmarkOSTree_UpdateMeta_100k benchmarks the UpdateMeta API of the OSTree.
+func BenchmarkOSTree_UpdateMeta_100k(b *testing.B) {
+	keys := buildOSTreeBenchmarkKeys()
+
+	tree := NewOSTreeOf[*ostreeBenchmarkMeta]()
+	for _, key := range keys {
+		tree.InsertWithMeta(key, nil)
 	}
 
-	ticket := atomic.AddUint64(counter, 1) - 1
+	b.ReportAllocs()
+	b.ResetTimer()
 
-	return int(ticket % uint64(limit))
+	for i := range b.N {
+		key := keys[i%len(keys)]
+		tree.UpdateMeta(key, func(old *ostreeBenchmarkMeta) (*ostreeBenchmarkMeta, bool) {
+			if old == nil {
+				return &ostreeBenchmarkMeta{version: 1}, false
+			}
+
+			old.version++
+
+			return old, false
+		})
+	}
+}
+
+// BenchmarkOSTree_ClearMeta_100k benchmarks the ClearMeta API of the OSTree.
+func BenchmarkOSTree_ClearMeta_100k(b *testing.B) {
+	keys := buildOSTreeBenchmarkKeys()
+
+	tree := NewOSTreeOf[*ostreeBenchmarkMeta]()
+	for _, key := range keys {
+		tree.InsertWithMeta(key, nil)
+	}
+
+	applyMetaClaimDensity(tree, keys, ostreeClaimedPercentNinety)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		tree.ClearMeta(nil)
+
+		b.StopTimer()
+		applyMetaClaimDensity(tree, keys, ostreeClaimedPercentNinety)
+		b.StartTimer()
+	}
+}
+
+// buildOSTreeBenchmarkKeys builds the keys for the OSTree benchmark.
+func buildOSTreeBenchmarkKeys() []string {
+	keys := make([]string, ostreeBenchmarkKeyCount)
+	for i := range ostreeBenchmarkKeyCount {
+		keys[i] = fmt.Sprintf("user:%06d", i)
+	}
+
+	return keys
+}
+
+// buildOSTreeBenchmarkTree builds the OSTree for the benchmark.
+func buildOSTreeBenchmarkTree(keys []string) *OSTreeOf[emptyOSTMeta] {
+	tree := NewOSTreeOf[emptyOSTMeta]()
+	for _, key := range keys {
+		tree.Insert(key)
+	}
+
+	return tree
+}
+
+// applyClaimDensity applies the claim density to the OSTree.
+func applyClaimDensity(tree *OSTreeOf[emptyOSTMeta], keys []string, claimedPercent int) {
+	claimed := (len(keys) * claimedPercent) / 100
+	for i := range claimed {
+		tree.SetSelectable(keys[i], false)
+	}
+}
+
+// applyMetaClaimDensity applies the meta claim density to the OSTree.
+func applyMetaClaimDensity(tree *OSTreeOf[*ostreeBenchmarkMeta], keys []string, claimedPercent int) {
+	claimed := (len(keys) * claimedPercent) / 100
+	for i := range claimed {
+		version := i + 1
+		tree.UpdateMeta(keys[i], func(_ *ostreeBenchmarkMeta) (*ostreeBenchmarkMeta, bool) {
+			return &ostreeBenchmarkMeta{version: version}, false
+		})
+	}
 }

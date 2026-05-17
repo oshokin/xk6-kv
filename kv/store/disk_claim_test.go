@@ -83,6 +83,60 @@ func TestDiskStore_PopRandom_SkipsLiveClaim(t *testing.T) {
 	}
 }
 
+func TestDiskStore_PopRandomTracked_CompleteError_ReleasesClaim(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("user:1", "alpha"))
+
+	claim, err := store.claimRandomTracked(&ClaimOptions{
+		Prefix: "user:",
+		TTLMs:  60_000,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, claim)
+
+	originalBucket := store.bucket
+	store.bucket = []byte("missing-bucket")
+
+	err = store.completeTrackedPopClaim(claim)
+	require.Error(t, err)
+
+	store.bucket = originalBucket
+
+	nextClaim, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 60_000})
+	require.NoError(t, err)
+	require.NotNil(t, nextClaim, "tracked pop completion error must not leave a hidden live claim")
+}
+
+func TestDiskStore_PopRandomTracked_CompleteFalse_ReleasesClaim(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("user:1", "alpha"))
+
+	claim, err := store.claimRandomTracked(&ClaimOptions{
+		Prefix: "user:",
+		TTLMs:  60_000,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, claim)
+
+	store.keysLock.Lock()
+	store.ost.UpdateMeta(claim.Key, func(_ *trackedDiskClaimRecord) (*trackedDiskClaimRecord, bool) {
+		return nil, true
+	})
+	store.keysLock.Unlock()
+
+	err = store.completeTrackedPopClaim(claim)
+	require.ErrorIs(t, err, ErrClaimCompletionFailed)
+	require.ErrorContains(t, err, "releaseClaim")
+
+	nextClaim, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 60_000})
+	require.NoError(t, err)
+	require.NotNil(t, nextClaim, "tracked pop completion=false path must not keep claim hidden until TTL")
+}
+
 func TestDiskStore_PopRandom_AllowsExpiredClaim(t *testing.T) {
 	t.Parallel()
 
@@ -609,6 +663,169 @@ func TestDiskStore_OpenClearRestore_ClearClaims(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.NotNil(t, claimAfterSelfRestore)
+		})
+	}
+}
+
+func TestDiskStore_ClaimKey_Behavior(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			require.NoError(t, store.Set("user:1", "alpha"))
+
+			claim, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 30_000})
+			require.NoError(t, err)
+			require.NotNil(t, claim)
+
+			again, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 30_000})
+			require.NoError(t, err)
+			require.Nil(t, again)
+
+			missing, err := store.ClaimKey("missing", &ClaimOptions{TTLMs: 30_000})
+			require.NoError(t, err)
+			require.Nil(t, missing)
+		})
+	}
+}
+
+func TestDiskStore_RenewClaim_TokenStableAndExpiryExtended(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			require.NoError(t, store.Set("user:1", "alpha"))
+
+			claim, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 200})
+			require.NoError(t, err)
+			require.NotNil(t, claim)
+
+			oldExpiresAt := claim.ExpiresAt
+
+			time.Sleep(2 * time.Millisecond)
+
+			renewed, err := store.RenewClaim(claim.Ref(), &RenewClaimOptions{TTLMs: 60_000})
+			require.NoError(t, err)
+			require.True(t, renewed)
+
+			released, err := store.ReleaseClaim(claim.Ref())
+			require.NoError(t, err)
+			require.True(t, released, "release with original token must still work after renewal")
+
+			nextClaim, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 30_000})
+			require.NoError(t, err)
+			require.NotNil(t, nextClaim)
+			assert.Greater(t, nextClaim.ExpiresAt, oldExpiresAt)
+		})
+	}
+}
+
+func TestDiskStore_ClaimRandomMany_ReturnsUniqueFreeClaims(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			requirePopulateStore(
+				t,
+				store,
+				"user:1", "alpha",
+				"user:2", "beta",
+				"user:3", "gamma",
+			)
+
+			liveClaim, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 60_000})
+			require.NoError(t, err)
+			require.NotNil(t, liveClaim)
+
+			claims, err := store.ClaimRandomMany(&ClaimManyOptions{
+				Prefix: "user:",
+				Count:  10,
+				TTLMs:  60_000,
+			})
+			require.NoError(t, err)
+			require.Len(t, claims, 2)
+
+			seen := make(map[string]struct{}, len(claims))
+			for _, claim := range claims {
+				_, exists := seen[claim.Key]
+				require.False(t, exists, "claimRandomMany must not return duplicate keys")
+
+				seen[claim.Key] = struct{}{}
+				require.NotEqual(t, "user:1", claim.Key, "claimRandomMany must skip live claims")
+			}
+		})
+	}
+}
+
+func TestDiskStore_ApplyTrackedClaimLocked_DoesNotOverwriteLiveClaim(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("user:1", "alpha"))
+
+	expiresAt := time.Now().UnixMilli() + 60_000
+
+	store.keysLock.Lock()
+	first := store.applyTrackedClaimLocked("user:1", []byte("alpha"), "owner-a", expiresAt)
+	second := store.applyTrackedClaimLocked("user:1", []byte("alpha"), "owner-b", expiresAt)
+	record, ok := store.ost.Meta("user:1")
+	store.keysLock.Unlock()
+
+	require.NotNil(t, first)
+	require.Nil(t, second, "tracked claim helper must not overwrite an existing live claim")
+	require.True(t, ok)
+	require.NotNil(t, record)
+	assert.Equal(t, first.ID, record.ID)
+	assert.Equal(t, first.Token, record.Token)
+	assert.Equal(t, "owner-a", record.Owner)
+}
+
+func TestDiskStore_PopRandomMany_DeletesOnlyFreeMatchingKeys(t *testing.T) {
+	t.Parallel()
+
+	for _, trackKeys := range []bool{true, false} {
+		t.Run("trackKeys="+strconv.FormatBool(trackKeys), func(t *testing.T) {
+			t.Parallel()
+
+			store := newTestDiskStore(t, trackKeys, "", true)
+			requirePopulateStore(
+				t,
+				store,
+				"user:1", "alpha",
+				"user:2", "beta",
+				"user:3", "gamma",
+				"order:1", "order",
+			)
+
+			liveClaim, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 60_000})
+			require.NoError(t, err)
+			require.NotNil(t, liveClaim)
+
+			entries, err := store.PopRandomMany("user:", 10)
+			require.NoError(t, err)
+			require.Len(t, entries, 2)
+
+			seen := make(map[string]struct{}, len(entries))
+			for _, entry := range entries {
+				_, exists := seen[entry.Key]
+				require.False(t, exists, "popRandomMany must not return duplicate keys")
+
+				seen[entry.Key] = struct{}{}
+				require.NotEqual(t, "user:1", entry.Key, "popRandomMany must skip live claims")
+			}
+
+			exists, err := store.Exists("user:1")
+			require.NoError(t, err)
+			require.True(t, exists, "live claimed key must remain after popRandomMany")
 		})
 	}
 }

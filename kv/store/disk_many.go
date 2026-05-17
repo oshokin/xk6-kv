@@ -26,7 +26,7 @@ func (s *DiskStore) GetMany(keys []string) ([]*Entry, error) {
 		}
 
 		for i, key := range keys {
-			result[i] = getDiskEntryByKey(bucket, key)
+			result[i] = s.getDiskEntryByKey(bucket, key)
 		}
 
 		return nil
@@ -125,10 +125,8 @@ func (s *DiskStore) DeleteMany(keys []string) (*DeleteManyResult, error) {
 	}
 	defer release()
 
-	for i, key := range keys {
-		if key == "" {
-			return nil, fmt.Errorf("%w: keys[%d]", ErrKeyEmpty, i)
-		}
+	if err := validateDeleteManyKeys(keys); err != nil {
+		return nil, err
 	}
 
 	if len(keys) == 0 {
@@ -148,43 +146,7 @@ func (s *DiskStore) DeleteMany(keys []string) (*DeleteManyResult, error) {
 	result := &DeleteManyResult{}
 
 	err = s.handle.Update(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(s.bucket)
-		if bucket == nil {
-			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
-		}
-
-		claimsBucket, err := ensureClaimsBucket(tx)
-		if err != nil {
-			return err
-		}
-
-		for _, key := range keys {
-			keyBytes := []byte(key)
-
-			if !diskKeyExists(bucket, keyBytes) {
-				// Keep behavior aligned with single-key delete paths: stale claims
-				// should be cleaned even when the user key is already absent.
-				if claimErr := deleteClaimForKeyTx(claimsBucket, key); claimErr != nil {
-					return claimErr
-				}
-
-				result.Missing++
-
-				continue
-			}
-
-			if deleteErr := bucket.Delete(keyBytes); deleteErr != nil {
-				return deleteErr
-			}
-
-			if claimErr := deleteClaimForKeyTx(claimsBucket, key); claimErr != nil {
-				return claimErr
-			}
-
-			result.Deleted++
-		}
-
-		return nil
+		return s.deleteManyTx(tx, keys, result)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreDeleteFailed, err)
@@ -201,14 +163,85 @@ func (s *DiskStore) DeleteMany(keys []string) (*DeleteManyResult, error) {
 	return result, nil
 }
 
-func diskKeyExists(bucket *bolt.Bucket, key []byte) bool {
+func validateDeleteManyKeys(keys []string) error {
+	for i, key := range keys {
+		if key == "" {
+			return fmt.Errorf("%w: keys[%d]", ErrKeyEmpty, i)
+		}
+	}
+
+	return nil
+}
+
+func (s *DiskStore) deleteManyTx(tx *bolt.Tx, keys []string, result *DeleteManyResult) error {
+	bucket := tx.Bucket(s.bucket)
+	if bucket == nil {
+		return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
+	}
+
+	claimsBucket, err := s.claimsBucketForMutatorTx(tx)
+	if err != nil {
+		return err
+	}
+
+	for _, key := range keys {
+		deleted, deleteErr := s.deleteKeyAndClaimInTx(bucket, claimsBucket, key)
+		if deleteErr != nil {
+			return deleteErr
+		}
+
+		if deleted {
+			result.Deleted++
+			continue
+		}
+
+		result.Missing++
+	}
+
+	return nil
+}
+
+func (s *DiskStore) claimsBucketForMutatorTx(tx *bolt.Tx) (*bolt.Bucket, error) {
+	if s.trackedClaimsEnabled() {
+		return nil, nil //nolint:nilnil // tracked mode intentionally skips bbolt claims bucket access.
+	}
+
+	return s.ensureClaimsBucket(tx)
+}
+
+func (s *DiskStore) deleteKeyAndClaimInTx(bucket *bolt.Bucket, claimsBucket *bolt.Bucket, key string) (bool, error) {
+	keyBytes := []byte(key)
+	if !s.diskKeyExists(bucket, keyBytes) {
+		if claimsBucket != nil {
+			if claimErr := s.deleteClaimForKeyTx(claimsBucket, key); claimErr != nil {
+				return false, claimErr
+			}
+		}
+
+		return false, nil
+	}
+
+	if err := bucket.Delete(keyBytes); err != nil {
+		return false, err
+	}
+
+	if claimsBucket != nil {
+		if claimErr := s.deleteClaimForKeyTx(claimsBucket, key); claimErr != nil {
+			return false, claimErr
+		}
+	}
+
+	return true, nil
+}
+
+func (s *DiskStore) diskKeyExists(bucket *bolt.Bucket, key []byte) bool {
 	cursor := bucket.Cursor()
 	foundKey, _ := cursor.Seek(key)
 
 	return foundKey != nil && bytes.Equal(foundKey, key)
 }
 
-func getDiskEntryByKey(bucket *bolt.Bucket, key string) *Entry {
+func (s *DiskStore) getDiskEntryByKey(bucket *bolt.Bucket, key string) *Entry {
 	keyBytes := []byte(key)
 
 	cursor := bucket.Cursor()

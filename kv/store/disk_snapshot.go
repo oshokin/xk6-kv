@@ -218,6 +218,10 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 			return nil, err
 		}
 
+		if s.trackKeys {
+			s.resetTrackedClaimsLocked()
+		}
+
 		return summary, nil
 	}
 
@@ -237,6 +241,8 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 		if err := s.rebuildKeyListLocked(); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrKeyListRebuildFailed, err)
 		}
+
+		s.resetTrackedClaimsLocked()
 	}
 
 	return &RestoreSummary{
@@ -281,7 +287,7 @@ func (s *DiskStore) restoreFromSnapshotDB(snapshotDB *bolt.DB, opts *RestoreOpti
 		}
 
 		// Claims are process-local leases, restore always starts a new lease world.
-		if err := clearClaimsBucket(tx); err != nil {
+		if err := s.clearClaimsBucket(tx); err != nil {
 			return err
 		}
 

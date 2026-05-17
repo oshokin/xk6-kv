@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	bolt "go.etcd.io/bbolt"
+	boltErrors "go.etcd.io/bbolt/errors"
 )
 
 func TestDiskStore_SetMany_Empty(t *testing.T) {
@@ -421,6 +423,60 @@ func TestDiskStore_DeleteMany_DeletesExistingAndCountsMissing(t *testing.T) {
 	}
 }
 
+func TestDiskStore_DeleteMany_TrackedClaimsMode_DoesNotTouchClaimsBucket(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, true, "", true)
+	require.NoError(t, store.Set("user:1", []byte("one")))
+
+	require.NoError(t, store.handle.Update(func(tx *bolt.Tx) error {
+		err := tx.DeleteBucket(diskClaimsBucket)
+		if err != nil && !errors.Is(err, boltErrors.ErrBucketNotFound) {
+			return err
+		}
+
+		return nil
+	}))
+
+	result, err := store.DeleteMany([]string{"user:1"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.EqualValues(t, 1, result.Deleted)
+
+	require.NoError(t, store.handle.View(func(tx *bolt.Tx) error {
+		assert.Nil(t, tx.Bucket(diskClaimsBucket))
+
+		return nil
+	}))
+}
+
+func TestDiskStore_DeleteMany_BoltClaimsMode_CreatesClaimsBucket(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, false, "", true)
+	require.NoError(t, store.Set("user:1", []byte("one")))
+
+	require.NoError(t, store.handle.Update(func(tx *bolt.Tx) error {
+		err := tx.DeleteBucket(diskClaimsBucket)
+		if err != nil && !errors.Is(err, boltErrors.ErrBucketNotFound) {
+			return err
+		}
+
+		return nil
+	}))
+
+	result, err := store.DeleteMany([]string{"user:1"})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.EqualValues(t, 1, result.Deleted)
+
+	require.NoError(t, store.handle.View(func(tx *bolt.Tx) error {
+		assert.NotNil(t, tx.Bucket(diskClaimsBucket))
+
+		return nil
+	}))
+}
+
 func TestDiskStore_DeleteMany_DuplicateKeys(t *testing.T) {
 	t.Parallel()
 
@@ -493,7 +549,7 @@ func TestDiskStore_DeleteMany_CleansClaims(t *testing.T) {
 func TestDiskStore_DeleteMany_CleansClaimsForMissingKey(t *testing.T) {
 	t.Parallel()
 
-	store := newTestDiskStore(t, true, "", true)
+	store := newTestDiskStore(t, false, "", true)
 	require.NoError(t, store.Set("user:stale", []byte("value")))
 
 	claim, err := store.ClaimRandom(&ClaimOptions{
@@ -519,7 +575,7 @@ func TestDiskStore_DeleteMany_CleansClaimsForMissingKey(t *testing.T) {
 		claimsBucket := tx.Bucket(diskClaimsBucket)
 		require.NotNil(t, claimsBucket)
 
-		staleClaimID = slices.Clone(claimsBucket.Get(claimKeyIndexKey(claim.Key)))
+		staleClaimID = slices.Clone(claimsBucket.Get(store.claimKeyIndexKey(claim.Key)))
 		require.NotNil(t, staleClaimID, "test setup requires stale claim metadata")
 
 		return nil
@@ -535,8 +591,8 @@ func TestDiskStore_DeleteMany_CleansClaimsForMissingKey(t *testing.T) {
 	err = store.handle.View(func(tx *bolt.Tx) error {
 		claimsBucket := tx.Bucket(diskClaimsBucket)
 		require.NotNil(t, claimsBucket)
-		assert.Nil(t, claimsBucket.Get(claimKeyIndexKey(claim.Key)))
-		assert.Nil(t, claimsBucket.Get(claimIDKey(string(staleClaimID))))
+		assert.Nil(t, claimsBucket.Get(store.claimKeyIndexKey(claim.Key)))
+		assert.Nil(t, claimsBucket.Get(store.claimIDKey(string(staleClaimID))))
 
 		return nil
 	})
