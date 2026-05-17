@@ -13,6 +13,10 @@ on:
   # Enable manually triggering this workflow via the API or web UI.
   workflow_dispatch:
 
+# CI only needs read access to the repository.
+permissions:
+  contents: read
+
 # Environment variables (constants for configuration).
 env:
   # Tool versions.
