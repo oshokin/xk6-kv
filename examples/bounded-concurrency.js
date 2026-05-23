@@ -55,3 +55,7 @@ export default async function () {
     "bounded writes persisted last key": (result) => result.last.index === RECORDS - 1,
   });
 }
+
+export function teardown() {
+  kv.close();
+}

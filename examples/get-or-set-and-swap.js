@@ -32,3 +32,7 @@ export default async function () {
   expect(secondSwap.loaded).toEqual(true);
   expect(secondSwap.previous).toEqual("initializing");
 }
+
+export function teardown() {
+  kv.close();
+}

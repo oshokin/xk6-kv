@@ -56,3 +56,7 @@ export default async function () {
   await kv.clear();
   expect(await kv.size()).toEqual(0);
 }
+
+export function teardown() {
+  kv.close();
+}

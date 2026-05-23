@@ -11,11 +11,14 @@ This folder is a local starter example project, not a published npm package.
 
 ```bash
 # Copy everything
-cp -r typescript/ my-k6-project/
-cd my-k6-project/
+cp -r typescript/ your-k6-project/
+cd your-k6-project/
 
-# Install dependencies
-npm install
+# Install dependencies from lockfile
+npm ci
+
+# Run declaration smoke tests
+npm test
 
 # Start writing tests!
 # example.ts is already there as a template
@@ -25,11 +28,14 @@ npm install
 
 ```powershell
 # Copy everything
-Copy-Item -Recurse typescript\ my-k6-project\
-cd my-k6-project\
+Copy-Item -Recurse typescript\ your-k6-project\
+cd your-k6-project\
 
-# Install dependencies
-npm install
+# Install dependencies from lockfile
+npm ci
+
+# Run declaration smoke tests
+npm test
 
 # Start writing tests!
 # example.ts is already there as a template
@@ -47,7 +53,7 @@ typescript/
 └── README.md         # Setup instructions
 ```
 
-**Everything is pre-configured!** Just copy the folder and run `npm install`.
+**Everything is pre-configured!** Just copy the folder and run `npm ci`.
 
 ## Usage
 

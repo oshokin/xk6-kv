@@ -27,7 +27,6 @@ export default async function () {
   expect(allEntries).toHaveLength(0);
 }
 
-export async function teardown() {
-  // Always close disk stores in teardown to release resources.
+export function teardown() {
   kv.close();
 }

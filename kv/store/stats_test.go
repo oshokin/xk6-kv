@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMemoryStore_Stats verifies that memory store stats.
 func TestMemoryStore_Stats(t *testing.T) {
 	t.Parallel()
 
@@ -84,6 +85,7 @@ func TestMemoryStore_Stats(t *testing.T) {
 	})
 }
 
+// TestDiskStore_Stats verifies that disk store stats.
 func TestDiskStore_Stats(t *testing.T) {
 	t.Parallel()
 
@@ -97,10 +99,11 @@ func TestDiskStore_Stats(t *testing.T) {
 		_, err := store.ClaimKey("user:1", &ClaimOptions{TTLMs: 30_000})
 		require.NoError(t, err)
 
-		_, err = store.ClaimKey("user:2", &ClaimOptions{TTLMs: 5})
+		expiredClaim, err := store.ClaimKey("user:2", &ClaimOptions{TTLMs: 5})
 		require.NoError(t, err)
+		require.NotNil(t, expiredClaim)
 
-		time.Sleep(10 * time.Millisecond)
+		requireDiskClaimExpired(t, store, expiredClaim.Ref())
 
 		snapshot, err := store.Stats()
 		require.NoError(t, err)
@@ -143,6 +146,7 @@ func TestDiskStore_Stats(t *testing.T) {
 	})
 }
 
+// TestSerializedStore_Stats verifies that serialized store stats.
 func TestSerializedStore_Stats(t *testing.T) {
 	t.Parallel()
 
@@ -209,6 +213,7 @@ func TestSerializedStore_Stats(t *testing.T) {
 	})
 }
 
+// TestMemoryStore_Stats_LifecycleClaimsCleared verifies that memory store stats lifecycle claims cleared.
 func TestMemoryStore_Stats_LifecycleClaimsCleared(t *testing.T) {
 	t.Parallel()
 
@@ -266,6 +271,7 @@ func TestMemoryStore_Stats_LifecycleClaimsCleared(t *testing.T) {
 	}
 }
 
+// TestDiskStore_Stats_LifecycleClaimsCleared verifies that disk store stats lifecycle claims cleared.
 func TestDiskStore_Stats_LifecycleClaimsCleared(t *testing.T) {
 	t.Parallel()
 

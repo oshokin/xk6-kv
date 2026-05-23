@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -26,6 +27,10 @@ type (
 		// When false, writers are blocked for the entire backup to provide
 		// a strictly consistent view.
 		AllowConcurrentWrites bool
+
+		// Context is an optional operation context used to cancel long-running backup work.
+		// When nil, Backup runs with context.Background().
+		Context context.Context
 	}
 
 	// BackupSummary reports metrics about a backup operation.
@@ -58,6 +63,10 @@ type (
 		// MaxBytes limits the aggregate key/value payload hydrated during restore.
 		// Zero disables the cap.
 		MaxBytes int64
+
+		// Context is an optional operation context used to cancel long-running restore work.
+		// When nil, Restore runs with context.Background().
+		Context context.Context
 	}
 
 	// RestoreSummary reports the outcome of a restore operation.
@@ -83,6 +92,15 @@ type (
 		bytesUsed int64
 	}
 )
+
+// operationContextOrBackground returns the provided context or background if nil.
+func operationContextOrBackground(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+
+	return ctx
+}
 
 // normalize applies defaults and validates backup options.
 // When FileName is empty or whitespace-only, defaults to the standard disk path.

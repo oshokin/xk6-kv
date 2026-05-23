@@ -9,6 +9,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// expiredClaimsBenchKeys is a test const used by surrounding tests.
 const expiredClaimsBenchKeys = 100_000
 
 // BenchmarkDiskStore_ClaimRandom_AllocationMatrix measures ClaimRandom

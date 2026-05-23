@@ -11,10 +11,16 @@ var (
 	ErrBackupDirectoryFailed = errors.New("backup directory operation failed")
 	// ErrBackupTempFileFailed indicates a backup temporary file operation failed.
 	ErrBackupTempFileFailed = errors.New("backup temporary file operation failed")
+	// ErrSnapshotDirectoryFailed indicates an export directory operation failed.
+	ErrSnapshotDirectoryFailed = errors.New("snapshot directory operation failed")
+	// ErrSnapshotTempFileFailed indicates an export temporary file operation failed.
+	ErrSnapshotTempFileFailed = errors.New("snapshot temporary file operation failed")
 	// ErrBackupCopyFailed indicates a failure while copying snapshot data.
 	ErrBackupCopyFailed = errors.New("snapshot copy failed")
 	// ErrBackupFinalizeFailed indicates a failure while finalizing snapshot files.
 	ErrBackupFinalizeFailed = errors.New("snapshot finalize failed")
+	// ErrSnapshotFinalizeFailed indicates a failure while finalizing export files.
+	ErrSnapshotFinalizeFailed = errors.New("snapshot finalize failed")
 	// ErrSnapshotExportFailed indicates a failure while exporting snapshot data.
 	ErrSnapshotExportFailed = errors.New("snapshot export failed")
 	// ErrBBoltBucketCreateFailed indicates creating a bbolt bucket failed.

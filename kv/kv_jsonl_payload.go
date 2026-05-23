@@ -7,18 +7,35 @@ import (
 	"go.k6.io/k6/js/common"
 )
 
+// exportJSONLOptions holds parsed options for the corresponding KV method.
 type exportJSONLOptions struct {
+	// FileName is the path of the CSV or JSONL file.
 	FileName string
-	Prefix   string
-	Limit    int64
+	// Prefix selects only keys that start with the given string.
+	Prefix string
+	// Limit caps how many rows or entries are processed.
+	Limit int64
 }
 
+// importJSONLOptions holds parsed options for the corresponding KV method.
 type importJSONLOptions struct {
-	FileName  string
-	Limit     int64
+	// FileName is the path of the CSV or JSONL file.
+	FileName string
+	// Limit caps how many rows or entries are processed.
+	Limit int64
+	// BatchSize is the number of rows written per store batch.
 	BatchSize int64
 }
 
+// validateJSONLOptions holds parsed options for the corresponding KV method.
+type validateJSONLOptions struct {
+	// FileName is the path of the CSV or JSONL file.
+	FileName string
+	// Limit caps how many rows or entries are processed.
+	Limit int64
+}
+
+// importExportJSONLOptions parses Sobek options for the corresponding KV method.
 func importExportJSONLOptions(rt *sobek.Runtime, options sobek.Value) (exportJSONLOptions, error) {
 	parsed := exportJSONLOptions{}
 
@@ -46,6 +63,7 @@ func importExportJSONLOptions(rt *sobek.Runtime, options sobek.Value) (exportJSO
 	return parsed, nil
 }
 
+// importImportJSONLOptions parses Sobek options for the corresponding KV method.
 func importImportJSONLOptions(rt *sobek.Runtime, options sobek.Value) (importJSONLOptions, error) {
 	parsed := importJSONLOptions{}
 
@@ -77,10 +95,46 @@ func importImportJSONLOptions(rt *sobek.Runtime, options sobek.Value) (importJSO
 	return parsed, nil
 }
 
+// importValidateJSONLOptions parses Sobek options for the corresponding KV method.
+func importValidateJSONLOptions(rt *sobek.Runtime, options sobek.Value) (validateJSONLOptions, error) {
+	parsed := validateJSONLOptions{}
+
+	_, fileName, limit, err := parseRequiredJSONLFileNameAndLimitWithMax(
+		rt,
+		"validateJSONL",
+		options,
+		MaxImportJSONLLimit,
+	)
+	if err != nil {
+		return parsed, err
+	}
+
+	parsed.FileName = fileName
+	parsed.Limit = limit
+
+	return parsed, nil
+}
+
+// parseRequiredJSONLFileNameAndLimit parses and validates a single options field.
 func parseRequiredJSONLFileNameAndLimit(
 	rt *sobek.Runtime,
 	method string,
 	options sobek.Value,
+) (*sobek.Object, string, int64, error) {
+	maxLimit := MaxExportJSONLLimit
+	if method == "importJSONL" {
+		maxLimit = MaxImportJSONLLimit
+	}
+
+	return parseRequiredJSONLFileNameAndLimitWithMax(rt, method, options, maxLimit)
+}
+
+// parseRequiredJSONLFileNameAndLimitWithMax parses and validates a single options field.
+func parseRequiredJSONLFileNameAndLimitWithMax(
+	rt *sobek.Runtime,
+	method string,
+	options sobek.Value,
+	maxLimit int64,
 ) (*sobek.Object, string, int64, error) {
 	if common.IsNullish(options) {
 		return nil, "", 0, NewError(
@@ -123,11 +177,6 @@ func parseRequiredJSONLFileNameAndLimit(
 	parsedLimit := int64(0)
 
 	if limitSet {
-		maxLimit := MaxExportJSONLLimit
-		if method == "importJSONL" {
-			maxLimit = MaxImportJSONLLimit
-		}
-
 		if err := rejectIfAbove(method, "limit", limit, maxLimit); err != nil {
 			return nil, "", 0, err
 		}

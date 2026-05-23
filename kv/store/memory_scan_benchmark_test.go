@@ -102,6 +102,7 @@ func BenchmarkMemoryScanKeys_NoTracking(b *testing.B) {
 	})
 }
 
+// BenchmarkMemoryScanKeys_NoTracking_Unlimited_100k measures memory scan keys no tracking unlimited 100k.
 func BenchmarkMemoryScanKeys_NoTracking_Unlimited_100k(b *testing.B) {
 	const totalPerPrefix = 100_000
 
@@ -144,6 +145,7 @@ func BenchmarkMemoryListKeys_NoTracking(b *testing.B) {
 	})
 }
 
+// runScanKeysBenchmark runs scan keys benchmark.
 func runScanKeysBenchmark(b *testing.B, store Store, prefix, initialAfter string, limit int64) {
 	b.Helper()
 	b.ReportAllocs()
@@ -166,6 +168,7 @@ func runScanKeysBenchmark(b *testing.B, store Store, prefix, initialAfter string
 	}
 }
 
+// runListKeysBenchmark runs list keys benchmark.
 func runListKeysBenchmark(b *testing.B, store Store, prefix string, limit int64) {
 	b.Helper()
 	b.ReportAllocs()

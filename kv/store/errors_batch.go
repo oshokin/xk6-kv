@@ -16,17 +16,24 @@ type (
 	// Keep this as a value type to avoid per-item heap objects. See
 	// setmany_slice_shape_benchmark_test.go for allocation benchmarks.
 	EntryError struct {
-		Key     string
-		Name    string
+		// Key is the entry key that failed validation or serialization.
+		Key string
+		// Name is a stable machine-readable error category.
+		Name string
+		// Message is a human-readable failure description.
 		Message string
 	}
 
 	// EntryListError represents a batch operation failure with per-entry details.
 	EntryListError struct {
+		// Operation is the batch API name (for example "setMany").
 		Operation string
-		Kind      EntryListErrorKind
-		Message   string
-		Errors    []EntryError
+		// Kind groups failures by recovery strategy.
+		Kind EntryListErrorKind
+		// Message is the top-level batch failure summary.
+		Message string
+		// Errors lists per-entry failures.
+		Errors []EntryError
 	}
 )
 

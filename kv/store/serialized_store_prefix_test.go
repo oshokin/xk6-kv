@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestSerializedStore_DeleteByPrefix_DelegatesWithoutDeserializingValues verifies that serialized store delete by prefix delegates without deserializing values.
 func TestSerializedStore_DeleteByPrefix_DelegatesWithoutDeserializingValues(t *testing.T) {
 	t.Parallel()
 

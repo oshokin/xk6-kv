@@ -2,6 +2,7 @@ package kv
 
 import "testing"
 
+// TestMemoryOptionsEqual verifies that memory options equal.
 func TestMemoryOptionsEqual(t *testing.T) {
 	t.Parallel()
 

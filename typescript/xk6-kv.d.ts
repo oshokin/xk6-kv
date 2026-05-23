@@ -105,6 +105,7 @@ declare module 'k6/x/kv' {
      * - xk6_kv_operation_failed
      * - xk6_kv_errors_total
      * - xk6_kv_empty_result
+     * - xk6_kv_async_in_flight
      * @default false
      */
     operations?: boolean;
@@ -390,6 +391,9 @@ declare module 'k6/x/kv' {
 
   /**
    * Options for exporting key/value entries to JSON Lines.
+   * Scan-based export, not a point-in-time snapshot.
+   * Concurrent writes/deletes may affect later pages.
+   * Use backup() for snapshot-style capture.
    */
   export interface ExportJSONLOptions {
     /**
@@ -416,6 +420,76 @@ declare module 'k6/x/kv' {
    */
   export interface ExportJSONLResult {
     /** Number of entries written to the JSONL file. */
+    exported: number;
+    /** Final output file path. */
+    fileName: string;
+    /** Final file size in bytes. */
+    bytesWritten: number;
+  }
+
+  /**
+   * Options for exporting tabular object data to CSV.
+   * Scan-based export, not a point-in-time snapshot.
+   * Concurrent writes/deletes may affect later pages.
+   * Use backup() for snapshot-style capture.
+   *
+   * Contract:
+   * - each exported value must decode to a JSON object row;
+   * - only top-level scalar fields are supported;
+   * - missing fields are emitted as empty cells;
+   * - nested objects/arrays and scalar store values are rejected.
+   * - stores opened with serialization: "string" are generally incompatible
+   *   because values decode as strings, not JSON object rows.
+   * - nested path selectors (for example "user.id") are not supported.
+   * - no flattening, transforms, schema inference, or nested JSON stringification.
+   *
+   * CSV is a flat text format and does not preserve JSON value types.
+   * For example, number/boolean cells round-trip through importCSV() as strings.
+   *
+   * Use exportJSONL() for type-preserving roundtrips, scalar/string payloads,
+   * or nested JSON structures.
+   */
+  export interface ExportCSVOptions {
+    /** Required output CSV file path. */
+    fileName: string;
+    /**
+     * Optional key prefix filter.
+     * Empty or omitted prefix means all keys.
+     */
+    prefix?: string;
+    /**
+     * Optional maximum number of entries to export.
+     * If omitted or <= 0, all matching entries are exported.
+     * Positive values must be <= 1,000,000.
+     */
+    limit?: number;
+    /**
+     * Optional CSV delimiter.
+     * Must be exactly one character and must not be "\r", "\n", "\"", or "\uFFFD".
+     * @default ","
+     */
+    delimiter?: string;
+    /**
+     * Required list of top-level object fields to export.
+     * Columns must be non-empty and unique.
+     * Column names are exact; leading/trailing whitespace is significant.
+     * When includeKey=true, columns must not contain "key"
+     * because exportCSV() writes the store key as the first CSV column.
+     */
+    columns: string[];
+    /**
+     * Include the key as the first column.
+     * Set includeKey=false if you need to export a value field named "key".
+     * @default true
+     */
+    includeKey?: boolean;
+  }
+
+  /**
+   * Summary returned by exportCSV().
+   */
+  export interface ExportCSVResult {
+    /** Number of entries written to the CSV file. */
     exported: number;
     /** Final output file path. */
     fileName: string;
@@ -468,9 +542,17 @@ declare module 'k6/x/kv' {
     /**
      * Required key column name (when hasHeader=true) or zero-based column index as string
      * (when hasHeader=false).
+     *
+     * Row-width handling is lenient:
+     * - missing columns are treated as empty strings;
+     * - extra columns are preserved as generated column_N fields.
      */
     keyColumn: string;
-    /** Optional one-character delimiter. Defaults to ",". */
+    /**
+     * Optional CSV delimiter.
+     * Must be exactly one character and must not be "\r", "\n", "\"", or "\uFFFD".
+     * @default ","
+     */
     delimiter?: string;
     /** Whether the first row is a header row. @default true */
     hasHeader?: boolean;
@@ -500,6 +582,112 @@ declare module 'k6/x/kv' {
     fileName: string;
     /** Number of input bytes consumed by importer. */
     bytesRead: number;
+  }
+
+  /**
+   * Options for validating a CSV seed file without importing it.
+   *
+   * Two modes:
+   * - Syntax mode (keyColumn omitted): checks CSV readability/header shape only.
+   * - Import-shape mode (keyColumn provided): also validates importCSV-compatible key extraction.
+   */
+  export interface ValidateCSVOptions {
+    /** Required input CSV file path. */
+    fileName: string;
+    /**
+     * Optional key column name/index validation.
+     * - hasHeader=true: header column name.
+     * - hasHeader=false: zero-based column index encoded as string.
+     */
+    keyColumn?: string;
+    /**
+     * Optional CSV delimiter.
+     * Must be exactly one character and must not be "\r", "\n", "\"", or "\uFFFD".
+     * @default ","
+     */
+    delimiter?: string;
+    /** Whether the first row is a header row. @default true */
+    hasHeader?: boolean;
+    /**
+     * Optional maximum number of rows to validate.
+     * If omitted or <= 0, validates all data rows.
+     * If > 0, only the first N data rows are inspected.
+     */
+    limit?: number;
+  }
+
+  /**
+   * Summary returned by validateCSV().
+   */
+  export interface ValidateCSVResult {
+    /**
+     * True when inspected rows satisfy the selected validation mode.
+     * Treat this as full-file validity only when checkedAll=true.
+     */
+    valid: boolean;
+    /** Number of rows validated before stop/error (0 is valid for empty files). */
+    rows: number;
+    /**
+     * Diagnostic count of bytes read from the file while validating.
+     * This is not a stable resume/cursor offset.
+     */
+    bytesRead: number;
+    /**
+     * True when validation reached EOF without being stopped by limit.
+     * False when validation stopped because limit was reached.
+     * When false, valid=true applies only to the inspected prefix.
+     */
+    checkedAll: boolean;
+    /** First parse/validation error when valid=false. */
+    firstError?: {
+      row: number;
+      name: string;
+      message: string;
+    };
+  }
+
+  /**
+   * Options for validating a JSONL seed file without importing it.
+   */
+  export interface ValidateJSONLOptions {
+    /** Required input JSONL file path. */
+    fileName: string;
+    /**
+     * Optional maximum number of records to validate.
+     * If omitted or <= 0, validates all records.
+     * If > 0, only the first N records are inspected.
+     */
+    limit?: number;
+  }
+
+  /**
+   * Summary returned by validateJSONL().
+   */
+  export interface ValidateJSONLResult {
+    /**
+     * True when inspected records are valid JSONL import payloads.
+     * Treat this as full-file validity only when checkedAll=true.
+     */
+    valid: boolean;
+    /** Number of records validated before stop/error (0 is valid for empty files). */
+    records: number;
+    /**
+     * Diagnostic count of bytes read from the file while validating.
+     * This is not a stable resume/cursor offset.
+     */
+    bytesRead: number;
+    /**
+     * True when validation reached EOF without being stopped by limit.
+     * False when validation stopped because limit was reached.
+     * When false, valid=true applies only to the inspected prefix.
+     */
+    checkedAll: boolean;
+    /** First parse/validation error when valid=false. */
+    firstError?: {
+      line: number;
+      name: string;
+      message: string;
+    };
   }
 
   /**
@@ -533,6 +721,57 @@ declare module 'k6/x/kv' {
       sizeBytes: number;
       readOnly?: boolean;
     } | null;
+  }
+
+  /**
+   * Options for allocationStats() prefix-scoped diagnostics.
+   */
+  export interface AllocationStatsOptions {
+    /** Optional key prefix filter. Empty or omitted means all keys. */
+    prefix?: string;
+  }
+
+  /**
+   * Prefix-scoped allocation snapshot returned by allocationStats().
+   * This is an on-demand diagnostic helper, not a hot-path control-plane API.
+   * It is a pool-availability diagnostic, not a low-level bbolt consistency checker.
+   * Use stats()/reportStats() for global store health; use allocationStats({ prefix })
+   * for prefix pool health.
+   *
+   * Disk backend note:
+   * - with trackKeys=false, this scans durable bbolt keys matching prefix;
+   * - with trackKeys=true, this reports the process-local tracked allocation
+   *   index view used by claim APIs (operational claimability view);
+   * - it does not rescan bbolt on every call;
+   * - use stats().index.consistent and rebuildKeyList() for index
+   *   consistency diagnostics/repair after out-of-band durable mutations
+   *   before trusting prefix totals.
+   * This is not a forensic rescan of durable bbolt truth.
+   */
+  export interface AllocationStats {
+    /** Prefix used for this snapshot. */
+    prefix: string;
+    /**
+     * Number of keys matching prefix.
+     *
+     * For disk + trackKeys=true this is the operational allocation-index view
+     * used by claim APIs, not a forensic durable bbolt rescan after out-of-band
+     * database mutations.
+     */
+    total: number;
+    /**
+     * Number of matching keys claimable now.
+     * Includes keys blocked only by expired claims.
+     */
+    claimable: number;
+    /** Number of matching keys blocked by live claims. */
+    claimedLive: number;
+    /** Number of matching keys with expired claims (also counted as claimable). */
+    claimedExpired: number;
+    /** Active backend implementation. */
+    backend: Backend;
+    /** Whether key tracking indexes are enabled. */
+    trackKeys: boolean;
   }
 
   /**
@@ -656,6 +895,107 @@ declare module 'k6/x/kv' {
      * Must be a positive integer less than or equal to 86,400,000 (24 hours).
      */
     ttl: number;
+  }
+
+  /**
+   * Stable per-item batch claim lifecycle failure names.
+   * "ClaimNotUpdated" means stale/missing/expired/not-owner claim state.
+   */
+  export type ClaimBatchFailureName = 'ClaimNotUpdated' | string;
+
+  /**
+   * Per-claim failure details returned by batch claim lifecycle helpers.
+   */
+  export interface ClaimBatchFailure {
+    /** Zero-based position from the input claims array. */
+    index: number;
+    /** Claim identifier. */
+    id: string;
+    /** Claimed key. */
+    key: string;
+    /** Stable failure name ("ClaimNotUpdated" for stale/missing claim state). */
+    name: ClaimBatchFailureName;
+    /** Human-readable failure detail. */
+    message: string;
+  }
+
+  /**
+   * Summary returned by releaseClaims().
+   * Stale/missing claim items are returned in failed[] with name "ClaimNotUpdated".
+   * failed[].index points to the original input position.
+   */
+  export interface ReleaseClaimsResult {
+    attempted: number;
+    released: number;
+    failed: ClaimBatchFailure[];
+  }
+
+  /**
+   * Summary returned by completeClaims().
+   * Stale/missing claim items are returned in failed[] with name "ClaimNotUpdated".
+   * failed[].index points to the original input position.
+   */
+  export interface CompleteClaimsResult {
+    attempted: number;
+    completed: number;
+    failed: ClaimBatchFailure[];
+  }
+
+  /**
+   * Summary returned by renewClaims().
+   * Stale/missing claim items are returned in failed[] with name "ClaimNotUpdated".
+   * failed[].index points to the original input position.
+   */
+  export interface RenewClaimsResult {
+    attempted: number;
+    renewed: number;
+    failed: ClaimBatchFailure[];
+  }
+
+  /**
+   * Options for claimKeys().
+   */
+  export interface ClaimKeysOptions {
+    /**
+     * Optional claim owner for diagnostics (for example VU/scenario labels).
+     * Must be less than or equal to 256 bytes.
+     */
+    owner?: string;
+    /**
+     * Lease duration in milliseconds.
+     * Must be a positive integer less than or equal to 86,400,000 (24 hours).
+     * @default 30000
+     */
+    ttl?: number;
+    /**
+     * When true, stop on first missing/busy key and attempt to rollback claims
+     * acquired earlier in this call.
+     *
+     * This does not make claimKeys() transactional.
+     * It only performs best-effort rollback for claims acquired by this call
+     * when a later key is missing or busy.
+     * Treat this as a best-effort cleanup helper, not a transaction.
+     * Expired/missing rollback races do not reject by themselves.
+     * Only technical store errors reject the promise.
+     * @default false
+     */
+    allOrNothing?: boolean;
+  }
+
+  /**
+   * Summary returned by claimKeys().
+   * claimKeys() first attempts claimKey() and only when that returns null
+   * runs a fallback exists() check to classify missing vs busy.
+   * Under concurrent mutation this is not a transaction-level guarantee.
+   * It is intended for deterministic fixture reservation in k6 scripts.
+   */
+  export interface ClaimKeysResult<T = any> {
+    /** Successfully claimed entries. */
+    claimed: Array<Claim<T>>;
+    /** Requested keys that currently have live claims. */
+    busy: string[];
+    /** Requested keys that were not found. */
+    missing: string[];
   }
 
   /**
@@ -832,6 +1172,7 @@ declare module 'k6/x/kv' {
     | 'UnknownError'
     | 'BackupInProgressError'
     | 'RestoreInProgressError'
+    | 'OperationCanceledError'
     | 'StoreReadOnlyError'
     | 'StoreClosedError'
     | 'DatabaseNotOpenError'
@@ -1496,16 +1837,65 @@ declare module 'k6/x/kv' {
     releaseClaim(claim: ClaimRef): Promise<boolean>;
 
     /**
+     * Releases many claims in one call.
+     * Sequential convenience helper over releaseClaim().
+     * Returns partial success details and is not a cross-claim transaction.
+     * Stale/missing claims are reported in failed[] with name "ClaimNotUpdated".
+     * Technical storage errors reject the whole promise and may happen after
+     * earlier items in the same batch were already applied. Rejection messages
+     * include applied-progress context ("after releasing X of Y").
+     */
+    releaseClaims(claims: ClaimRef[]): Promise<ReleaseClaimsResult>;
+
+    /**
      * Completes a live claim.
      * By default, completion also removes the underlying key.
      */
     completeClaim(claim: ClaimRef, options?: CompleteClaimOptions): Promise<boolean>;
 
     /**
+     * Completes many claims in one call.
+     * Sequential convenience helper over completeClaim().
+     * Returns partial success details and is not a cross-claim transaction.
+     * Stale/missing claims are reported in failed[] with name "ClaimNotUpdated".
+     * Technical storage errors reject the whole promise and may happen after
+     * earlier items in the same batch were already applied. Rejection messages
+     * include applied-progress context ("after completing X of Y").
+     */
+    completeClaims(claims: ClaimRef[], options?: CompleteClaimOptions): Promise<CompleteClaimsResult>;
+
+    /**
      * Extends a live claim lease without changing the claim token.
      * Returns false for stale, expired, missing claims, or claims that no longer own the key.
      */
     renewClaim(claim: ClaimRef, options: RenewClaimOptions): Promise<boolean>;
+
+    /**
+     * Extends many live claim leases in one call.
+     * Sequential convenience helper over renewClaim().
+     * Returns partial success details and is not a cross-claim transaction.
+     * Stale/missing claims are reported in failed[] with name "ClaimNotUpdated".
+     * Technical storage errors reject the whole promise and may happen after
+     * earlier items in the same batch were already applied. Rejection messages
+     * include applied-progress context ("after renewing X of Y").
+     */
+    renewClaims(claims: ClaimRef[], options: RenewClaimOptions): Promise<RenewClaimsResult>;
+
+    /**
+     * Leases explicit keys and reports claimed, busy, and missing sets.
+     * With allOrNothing=true, this call stops on first missing/busy key and
+     * only attempts best-effort rollback for claims acquired in this call
+     * when a later key is missing or busy.
+     * allOrNothing does not make claimKeys() transactional.
+     * Use allOrNothing=false when you need a full diagnostic partition for all
+     * requested keys.
+     * Missing/busy classification is best-effort: claimKeys() first attempts
+     * ClaimKey(), then uses fallback Exists() only for null-claim classification.
+     * This is not a transaction-level guarantee under concurrent mutation.
+     * A key can be reclassified if another operation mutates it between
+     * claim attempt and fallback existence check.
+     */
+    claimKeys<T = any>(keys: string[], options?: ClaimKeysOptions): Promise<ClaimKeysResult<T>>;
 
     /**
      * Rebuilds in-memory key indexes from the underlying store.
@@ -1535,6 +1925,18 @@ declare module 'k6/x/kv' {
      * This call is intended for explicit observability/debugging checks.
      */
     stats(): Promise<KVStats>;
+
+    /**
+     * Returns prefix-scoped on-demand allocation diagnostics.
+     * Intended for explicit pool-health checks, not per-iteration hot paths.
+     * It is a pool-availability diagnostic, not a low-level bbolt consistency checker.
+     * Disk backend with trackKeys=true uses the tracked allocation index view on
+     * writable handles, and falls back to durable bbolt scan on read-only handles.
+     * trackKeys=false uses bbolt prefix scan.
+     * Expired claims are reported separately and are also claimable.
+     * Prefix is intentionally excluded from metrics labels to avoid high cardinality.
+     */
+    allocationStats(options?: AllocationStatsOptions): Promise<AllocationStats>;
 
     /**
      * Emits current state gauges into k6 custom metrics.
@@ -1569,11 +1971,30 @@ declare module 'k6/x/kv' {
      *
      * Each line is a JSON object: { "key": string, "value": any }.
      * Values are exported after normal KV deserialization, not as raw backend bytes.
+     * This is scan-based export, not a point-in-time snapshot.
+     * Concurrent writes/deletes may affect later pages.
+     * Use backup() for snapshot-style capture.
      *
      * @param options - Required export options.
      * @returns Promise that resolves to export summary metadata.
      */
     exportJSONL(options: ExportJSONLOptions): Promise<ExportJSONLResult>;
+
+    /**
+     * Exports key/value entries to a CSV file.
+     *
+     * CSV export is intentionally a flat object table:
+     * - each value must decode to a JSON object;
+     * - only requested top-level scalar fields are supported;
+     * - missing fields become empty cells;
+     * - nested object/array fields and scalar store values reject.
+     * This is scan-based export, not a point-in-time snapshot.
+     * Concurrent writes/deletes may affect later pages.
+     * Use backup() for snapshot-style capture.
+     *
+     * Use exportJSONL() for scalar/string payloads or nested JSON structures.
+     */
+    exportCSV(options: ExportCSVOptions): Promise<ExportCSVResult>;
 
     /**
      * Imports key/value entries from a JSON Lines file.
@@ -1594,8 +2015,49 @@ declare module 'k6/x/kv' {
      * Each row is imported as a value object. The key is taken from keyColumn.
      * When hasHeader=true, keyColumn is a header name; when hasHeader=false,
      * keyColumn must be a zero-based column index encoded as a string.
+     * Row-width handling is lenient: missing cells are imported as empty strings,
+     * and extra cells are preserved as generated column_N fields.
      */
     importCSV(options: ImportCSVOptions): Promise<ImportCSVResult>;
+
+    /**
+     * Validates CSV file content without writing to the store.
+     *
+     * Two modes:
+     * - Syntax mode (keyColumn omitted): CSV readability/header shape checks.
+     * - Import-shape mode (keyColumn provided): syntax checks + importCSV-style key extraction checks.
+     *
+     * Content errors resolve with { valid:false, firstError }.
+     * Invalid options and file I/O errors reject.
+     * Uses encoding/csv parsing compatible with importCSV().
+     * Row-width handling is lenient (same as importCSV()):
+     * missing cells are treated as empty strings, and extra cells are accepted.
+     * If options.limit <= 0 or omitted, all data rows are inspected.
+     * If options.limit > 0, only the first N data rows are inspected.
+     * checkedAll=true means EOF was reached; checkedAll=false means limit stopped validation.
+     * Contract: valid=true implies whole-file validity only when checkedAll=true.
+     * Empty files are valid and return { valid:true, rows:0 }.
+     * Validation APIs are KV-instance methods for API consistency and metrics collection.
+     * They require an open KV handle (StoreClosedError after close()) but do not
+     * read or write KV store contents.
+     */
+    validateCSV(options: ValidateCSVOptions): Promise<ValidateCSVResult>;
+
+    /**
+     * Validates JSONL file structure/import-shape without writing to the store.
+     *
+     * Content errors resolve with { valid:false, firstError }.
+     * Invalid options and file I/O errors reject.
+     * If options.limit <= 0 or omitted, all records are inspected.
+     * If options.limit > 0, only the first N records are inspected.
+     * checkedAll=true means EOF was reached; checkedAll=false means limit stopped validation.
+     * Contract: valid=true implies whole-file validity only when checkedAll=true.
+     * Empty files are valid and return { valid:true, records:0 }.
+     * Validation APIs are KV-instance methods for API consistency and metrics collection.
+     * They require an open KV handle (StoreClosedError after close()) but do not
+     * read or write KV store contents.
+     */
+    validateJSONL(options: ValidateJSONLOptions): Promise<ValidateJSONLResult>;
 
     // ==================== Lifecycle ====================
 

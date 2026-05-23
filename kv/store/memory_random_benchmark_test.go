@@ -122,14 +122,17 @@ func BenchmarkMemoryStore_RandomKeys_WithPrefix(b *testing.B) {
 	}
 }
 
+// BenchmarkMemoryStore_RandomKeys_Untracked_FullPrefix_10k measures memory store random keys untracked full prefix 10k.
 func BenchmarkMemoryStore_RandomKeys_Untracked_FullPrefix_10k(b *testing.B) {
 	benchmarkMemoryStoreRandomKeysUntrackedFullPrefix(b, 10_000)
 }
 
+// BenchmarkMemoryStore_RandomKeys_Untracked_FullPrefix_100k measures memory store random keys untracked full prefix 100k.
 func BenchmarkMemoryStore_RandomKeys_Untracked_FullPrefix_100k(b *testing.B) {
 	benchmarkMemoryStoreRandomKeysUntrackedFullPrefix(b, 100_000)
 }
 
+// benchmarkMemoryStoreRandomKeysUntrackedFullPrefix is a test helper for benchmark memory store random keys untracked full prefix.
 func benchmarkMemoryStoreRandomKeysUntrackedFullPrefix(b *testing.B, keyCount int) {
 	b.Helper()
 	b.ReportAllocs()
@@ -269,6 +272,7 @@ func BenchmarkMemoryStore_KeyFromShardRanges_LookupStrategies(b *testing.B) {
 	}
 }
 
+// keyFromShardRangesLinearForBenchmark is a test helper for key from shard ranges linear for benchmark.
 func keyFromShardRangesLinearForBenchmark(ranges []shardRandomRange, globalOffset int) (string, bool) {
 	if globalOffset < 0 || len(ranges) == 0 {
 		return "", false
@@ -291,6 +295,7 @@ func keyFromShardRangesLinearForBenchmark(ranges []shardRandomRange, globalOffse
 	return "", false
 }
 
+// keyFromShardRangesBinaryForBenchmark is a test helper for key from shard ranges binary for benchmark.
 func keyFromShardRangesBinaryForBenchmark(ranges []shardRandomRange, globalOffset int) (string, bool) {
 	if globalOffset < 0 || len(ranges) == 0 {
 		return "", false

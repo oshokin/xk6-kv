@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMemoryStore_SetMany_Empty verifies that memory store set many empty.
 func TestMemoryStore_SetMany_Empty(t *testing.T) {
 	t.Parallel()
 
@@ -33,6 +34,7 @@ func TestMemoryStore_SetMany_Empty(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_SetMany_WritesAndOverwrites verifies that memory store set many writes and overwrites.
 func TestMemoryStore_SetMany_WritesAndOverwrites(t *testing.T) {
 	t.Parallel()
 
@@ -71,6 +73,7 @@ func TestMemoryStore_SetMany_WritesAndOverwrites(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_SetMany_UnsupportedValueTypeDoesNotWrite verifies that memory store set many unsupported value type does not write.
 func TestMemoryStore_SetMany_UnsupportedValueTypeDoesNotWrite(t *testing.T) {
 	t.Parallel()
 
@@ -87,6 +90,7 @@ func TestMemoryStore_SetMany_UnsupportedValueTypeDoesNotWrite(t *testing.T) {
 	assert.False(t, exists, "batch must be all-or-nothing")
 }
 
+// TestMemoryStore_SetMany_EmptyKeyDoesNotWrite verifies that memory store set many empty key does not write.
 func TestMemoryStore_SetMany_EmptyKeyDoesNotWrite(t *testing.T) {
 	t.Parallel()
 
@@ -103,6 +107,7 @@ func TestMemoryStore_SetMany_EmptyKeyDoesNotWrite(t *testing.T) {
 	assert.False(t, exists, "batch must be all-or-nothing")
 }
 
+// TestMemoryStore_SetMany_DoesNotClearLiveClaim verifies that memory store set many does not clear live claim.
 func TestMemoryStore_SetMany_DoesNotClearLiveClaim(t *testing.T) {
 	t.Parallel()
 
@@ -130,6 +135,7 @@ func TestMemoryStore_SetMany_DoesNotClearLiveClaim(t *testing.T) {
 	assert.Nil(t, secondClaim, "overwriting value must not release live claim")
 }
 
+// TestMemoryStore_SetMany_Concurrent_TrackKeysConsistency verifies that memory store set many concurrent track keys consistency.
 func TestMemoryStore_SetMany_Concurrent_TrackKeysConsistency(t *testing.T) {
 	t.Parallel()
 
@@ -202,6 +208,7 @@ func TestMemoryStore_SetMany_Concurrent_TrackKeysConsistency(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_GetMany_EmptyKeys verifies that memory store get many empty keys.
 func TestMemoryStore_GetMany_EmptyKeys(t *testing.T) {
 	t.Parallel()
 
@@ -217,6 +224,7 @@ func TestMemoryStore_GetMany_EmptyKeys(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_GetMany_PreservesOrderAndMissing verifies that memory store get many preserves order and missing.
 func TestMemoryStore_GetMany_PreservesOrderAndMissing(t *testing.T) {
 	t.Parallel()
 
@@ -245,6 +253,7 @@ func TestMemoryStore_GetMany_PreservesOrderAndMissing(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_GetMany_DuplicateKeys verifies that memory store get many duplicate keys.
 func TestMemoryStore_GetMany_DuplicateKeys(t *testing.T) {
 	t.Parallel()
 
@@ -260,6 +269,7 @@ func TestMemoryStore_GetMany_DuplicateKeys(t *testing.T) {
 	assert.Equal(t, []byte("one"), entries[1].Value)
 }
 
+// TestMemoryStore_GetMany_ReturnsDefensiveCopies verifies that memory store get many returns defensive copies.
 func TestMemoryStore_GetMany_ReturnsDefensiveCopies(t *testing.T) {
 	t.Parallel()
 
@@ -278,6 +288,7 @@ func TestMemoryStore_GetMany_ReturnsDefensiveCopies(t *testing.T) {
 	assert.Equal(t, []byte("one"), actual)
 }
 
+// TestMemoryStore_GetMany_EmptyKeyReturnsMissingEntry verifies that memory store get many empty key returns missing entry.
 func TestMemoryStore_GetMany_EmptyKeyReturnsMissingEntry(t *testing.T) {
 	t.Parallel()
 
@@ -289,6 +300,7 @@ func TestMemoryStore_GetMany_EmptyKeyReturnsMissingEntry(t *testing.T) {
 	assert.Nil(t, entries[0])
 }
 
+// TestMemoryStore_GetMany_ConcurrentWithSetMany verifies that memory store get many concurrent with set many.
 func TestMemoryStore_GetMany_ConcurrentWithSetMany(t *testing.T) {
 	t.Parallel()
 
@@ -360,6 +372,7 @@ func TestMemoryStore_GetMany_ConcurrentWithSetMany(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_DeleteMany_EmptyKeys verifies that memory store delete many empty keys.
 func TestMemoryStore_DeleteMany_EmptyKeys(t *testing.T) {
 	t.Parallel()
 
@@ -378,6 +391,7 @@ func TestMemoryStore_DeleteMany_EmptyKeys(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_DeleteMany_EmptyKeyRejectsWithoutPartialDelete verifies that memory store delete many empty key rejects without partial delete.
 func TestMemoryStore_DeleteMany_EmptyKeyRejectsWithoutPartialDelete(t *testing.T) {
 	t.Parallel()
 
@@ -393,6 +407,7 @@ func TestMemoryStore_DeleteMany_EmptyKeyRejectsWithoutPartialDelete(t *testing.T
 	assert.True(t, exists, "DeleteMany must validate first and avoid partial delete")
 }
 
+// TestMemoryStore_DeleteMany_DeletesExistingAndCountsMissing verifies that memory store delete many deletes existing and counts missing.
 func TestMemoryStore_DeleteMany_DeletesExistingAndCountsMissing(t *testing.T) {
 	t.Parallel()
 
@@ -419,6 +434,7 @@ func TestMemoryStore_DeleteMany_DeletesExistingAndCountsMissing(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_DeleteMany_DuplicateKeys verifies that memory store delete many duplicate keys.
 func TestMemoryStore_DeleteMany_DuplicateKeys(t *testing.T) {
 	t.Parallel()
 
@@ -432,6 +448,7 @@ func TestMemoryStore_DeleteMany_DuplicateKeys(t *testing.T) {
 	assert.EqualValues(t, 1, result.Missing)
 }
 
+// TestMemoryStore_DeleteMany_UpdatesCountAndTracking verifies that memory store delete many updates count and tracking.
 func TestMemoryStore_DeleteMany_UpdatesCountAndTracking(t *testing.T) {
 	t.Parallel()
 
@@ -460,6 +477,7 @@ func TestMemoryStore_DeleteMany_UpdatesCountAndTracking(t *testing.T) {
 	requireMemoryTrackingMatchesStore(t, store)
 }
 
+// TestMemoryStore_DeleteMany_CleansClaims verifies that memory store delete many cleans claims.
 func TestMemoryStore_DeleteMany_CleansClaims(t *testing.T) {
 	t.Parallel()
 
@@ -488,6 +506,7 @@ func TestMemoryStore_DeleteMany_CleansClaims(t *testing.T) {
 	assert.False(t, released, "claim metadata for deleted key must be removed")
 }
 
+// TestMemoryStore_DeleteMany_ConcurrentWithSetAndGet verifies that memory store delete many concurrent with set and get.
 func TestMemoryStore_DeleteMany_ConcurrentWithSetAndGet(t *testing.T) {
 	t.Parallel()
 

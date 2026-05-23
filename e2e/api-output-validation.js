@@ -38,16 +38,49 @@ const SNAPSHOT_PATH = getSnapshotPath(TEST_NAME);
 // JSONL file path for exportJSONL validation.
 const EXPORT_JSONL_PATH = './tmp/api-output-validation-export.jsonl';
 
+// CSV file path for exportCSV validation.
+const EXPORT_CSV_PATH = './tmp/api-output-validation-export.csv';
+
+// CSV file path for exportCSV limit validation.
+const EXPORT_CSV_LIMIT_PATH = './tmp/api-output-validation-export-limited.csv';
+
+// CSV file path for exportCSV missing column validation.
+const EXPORT_CSV_MISSING_COLUMN_PATH = './tmp/api-output-validation-export-missing-column.csv';
+
 // JSONL file path for importJSONL validation.
 const IMPORT_JSONL_PATH = './tmp/api-output-validation-import.jsonl';
+
 // CSV file path for importCSV validation.
 const IMPORT_CSV_PATH = './examples/fixtures/users.csv';
+
 // CSV file path for missing-file validation.
 const MISSING_CSV_PATH = './tmp/api-output-validation-missing.csv';
+
+// CSV fixture for validateCSV duplicate-header validation.
+const INVALID_CSV_DUPLICATE_HEADER_PATH = './examples/fixtures/invalid-users-duplicate-header.csv';
+
+// CSV fixture for validateCSV empty-key validation.
+const INVALID_CSV_EMPTY_KEY_PATH = './examples/fixtures/invalid-users-empty-key.csv';
+
+// CSV fixture for validateCSV syntax validation.
+const INVALID_CSV_SYNTAX_PATH = './examples/fixtures/invalid-users-syntax.csv';
+
+// JSONL fixture for validateJSONL malformed validation.
+const INVALID_JSONL_MALFORMED_PATH = './examples/fixtures/invalid-users-malformed.jsonl';
+
+// JSONL fixture for validateJSONL blank-line validation.
+const INVALID_JSONL_BLANK_LINE_PATH = './examples/fixtures/invalid-users-blank-line.jsonl';
+
+// JSONL fixture for validateJSONL missing-key validation.
+const INVALID_JSONL_MISSING_KEY_PATH = './examples/fixtures/invalid-users-missing-key.jsonl';
+
+// JSONL file path for missing-file validation.
+const MISSING_JSONL_PATH = './tmp/api-output-validation-missing.jsonl';
 
 // kv is the shared store client used throughout the scenario.
 const kv = createKv(TEST_NAME);
 
+// expectErrorName validates that an action throws an error with the expected name.
 async function expectErrorName(action, expectedName) {
   try {
     await action();
@@ -55,6 +88,23 @@ async function expectErrorName(action, expectedName) {
   } catch (err) {
     return err !== null && err !== undefined && err.name === expectedName;
   }
+}
+
+// getOptionalFirstError extracts the first error from a validation result.
+function getOptionalFirstError(result) {
+  if (!result || typeof result !== 'object') {
+    return null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(result, 'firstError')) {
+    return result.firstError ?? null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(result, 'firstError,omitempty')) {
+    return result['firstError,omitempty'] ?? null;
+  }
+
+  return null;
 }
 
 // options configures the load profile and pass/fail thresholds.
@@ -197,7 +247,41 @@ export const options = {
     'checks{api:restore-empty-array-preservation}': ['rate>0.999'],
     'checks{api:restore-empty-object-preservation}': ['rate>0.999'],
     'checks{api:claim-batch-methods}': ['rate>0.999'],
+    'checks{api:claimKeys-structure}': ['rate>0.999'],
+    'checks{api:claimKeys-busy-missing}': ['rate>0.999'],
+    'checks{api:claimKeys-all-or-nothing-rollback}': ['rate>0.999'],
+    'checks{api:claimKeys-empty-array}': ['rate>0.999'],
+    'checks{api:releaseClaims-partial}': ['rate>0.999'],
+    'checks{api:releaseClaims-failure-shape}': ['rate>0.999'],
+    'checks{api:releaseClaims-empty-array}': ['rate>0.999'],
+    'checks{api:completeClaims-partial}': ['rate>0.999'],
+    'checks{api:completeClaims-default-delete}': ['rate>0.999'],
+    'checks{api:completeClaims-empty-array}': ['rate>0.999'],
+    'checks{api:renewClaims-partial}': ['rate>0.999'],
+    'checks{api:renewClaims-failure-shape}': ['rate>0.999'],
+    'checks{api:renewClaims-empty-array}': ['rate>0.999'],
+    'checks{api:allocationStats-structure}': ['rate>0.999'],
+    'checks{api:allocationStats-prefix-counts}': ['rate>0.999'],
+    'checks{api:allocationStats-all-snapshot}': ['rate>0.999'],
     'checks{api:importCSV-contract}': ['rate>0.999'],
+    'checks{api:exportCSV-structure}': ['rate>0.999'],
+    'checks{api:exportCSV-prefix-count}': ['rate>0.999'],
+    'checks{api:exportCSV-limit}': ['rate>0.999'],
+    'checks{api:exportCSV-missing-column-allowed}': ['rate>0.999'],
+    'checks{api:exportCSV-non-object-rejects}': ['rate>0.999'],
+    'checks{api:exportCSV-nested-rejects}': ['rate>0.999'],
+    'checks{api:validateCSV-valid}': ['rate>0.999'],
+    'checks{api:validateCSV-without-keyColumn}': ['rate>0.999'],
+    'checks{api:validateCSV-limit}': ['rate>0.999'],
+    'checks{api:validateCSV-duplicate-header-invalid}': ['rate>0.999'],
+    'checks{api:validateCSV-empty-key-invalid}': ['rate>0.999'],
+    'checks{api:validateCSV-syntax-invalid}': ['rate>0.999'],
+    'checks{api:validateJSONL-valid}': ['rate>0.999'],
+    'checks{api:validateJSONL-limit}': ['rate>0.999'],
+    'checks{api:validateJSONL-invalid-json}': ['rate>0.999'],
+    'checks{api:validateJSONL-blank-line}': ['rate>0.999'],
+    'checks{api:validateJSONL-missing-key}': ['rate>0.999'],
+    'checks{api:input-validation-new-methods}': ['rate>0.999'],
     'checks{api:input-validation-matrix}': ['rate>0.999'],
     'checks{api:post-close-rejects}': ['rate>0.999']
   }
@@ -222,6 +306,24 @@ export async function teardown() {
 
   try {
     file.deleteFile(IMPORT_JSONL_PATH);
+  } catch (err) {
+    // Ignore cleanup errors if the file doesn't exist or is already deleted.
+  }
+
+  try {
+    file.deleteFile(EXPORT_CSV_PATH);
+  } catch (err) {
+    // Ignore cleanup errors if the file doesn't exist or is already deleted.
+  }
+
+  try {
+    file.deleteFile(EXPORT_CSV_LIMIT_PATH);
+  } catch (err) {
+    // Ignore cleanup errors if the file doesn't exist or is already deleted.
+  }
+
+  try {
+    file.deleteFile(EXPORT_CSV_MISSING_COLUMN_PATH);
   } catch (err) {
     // Ignore cleanup errors if the file doesn't exist or is already deleted.
   }
@@ -657,6 +759,235 @@ export default async function apiOutputValidationTest() {
       popManyRemoved &&
       popManyEmptyArray
   });
+
+  // claimKeys(), releaseClaims(), completeClaims(), renewClaims(): validate batch lifecycle contracts.
+  await kv.setMany({
+    'api:claimKeys:free:1': { id: 1, role: 'free' },
+    'api:claimKeys:free:2': { id: 2, role: 'free' },
+    'api:claimKeys:busy': { id: 3, role: 'busy' }
+  });
+
+  const claimKeysBusyClaim = await kv.claimKey('api:claimKeys:busy', { ttl: 30000 });
+  const claimKeysResult = await kv.claimKeys(
+    ['api:claimKeys:free:1', 'api:claimKeys:busy', 'api:claimKeys:missing:1'],
+    { owner: 'api-output-validation:claimKeys', ttl: 30000, allOrNothing: false }
+  );
+  const claimKeysResultFields = Object.keys(claimKeysResult);
+
+  const claimKeysAllOrNothing = await kv.claimKeys(
+    ['api:claimKeys:free:2', 'api:claimKeys:missing:2'],
+    { ttl: 30000, allOrNothing: true }
+  );
+  let claimKeysRollbackReleased = false;
+  const claimKeysRollbackProbe = await kv.claimKey('api:claimKeys:free:2', { ttl: 30000 });
+  if (claimKeysRollbackProbe !== null) {
+    claimKeysRollbackReleased = await kv.releaseClaim(claimKeysRollbackProbe);
+  }
+
+  const claimKeysEmptyResult = await kv.claimKeys([], { ttl: 30000 });
+
+  for (const claim of claimKeysResult.claimed) {
+    await kv.releaseClaim(claim);
+  }
+  if (claimKeysBusyClaim !== null) {
+    await kv.releaseClaim(claimKeysBusyClaim);
+  }
+
+  await kv.set('api:releaseClaims:key:1', { id: 1 });
+  const releaseClaimsClaim = await kv.claimKey('api:releaseClaims:key:1', { ttl: 30000 });
+  let releaseClaimsResult = { attempted: 0, released: 0, failed: [] };
+  if (releaseClaimsClaim !== null) {
+    releaseClaimsResult = await kv.releaseClaims([releaseClaimsClaim, releaseClaimsClaim]);
+  }
+  const releaseClaimsEmptyResult = await kv.releaseClaims([]);
+
+  await kv.set('api:completeClaims:keep', { id: 1 });
+  const completeKeepClaim = await kv.claimKey('api:completeClaims:keep', { ttl: 30000 });
+  let completeClaimsResult = { attempted: 0, completed: 0, failed: [] };
+  let completeKeepExists = false;
+  if (completeKeepClaim !== null) {
+    completeClaimsResult = await kv.completeClaims([completeKeepClaim, completeKeepClaim], { deleteKey: false });
+    completeKeepExists = await kv.exists('api:completeClaims:keep');
+  }
+  const completeClaimsEmptyResult = await kv.completeClaims([]);
+
+  await kv.set('api:completeClaims:delete', { id: 2 });
+  const completeDeleteClaim = await kv.claimKey('api:completeClaims:delete', { ttl: 30000 });
+  let completeClaimsDefaultDelete = { attempted: 0, completed: 0, failed: [] };
+  let completeDeleteExists = true;
+  if (completeDeleteClaim !== null) {
+    completeClaimsDefaultDelete = await kv.completeClaims([completeDeleteClaim]);
+    completeDeleteExists = await kv.exists('api:completeClaims:delete');
+  }
+
+  await kv.set('api:renewClaims:key:1', { id: 1 });
+  const renewClaimsClaim = await kv.claimKey('api:renewClaims:key:1', { ttl: 30000 });
+  let renewClaimsResult = { attempted: 0, renewed: 0, failed: [] };
+  if (renewClaimsClaim !== null) {
+    renewClaimsResult = await kv.renewClaims(
+      [
+        renewClaimsClaim,
+        { id: renewClaimsClaim.id, key: renewClaimsClaim.key, token: renewClaimsClaim.token + 1 }
+      ],
+      { ttl: 30000 }
+    );
+    await kv.releaseClaim(renewClaimsClaim);
+  }
+  const renewClaimsEmptyResult = await kv.renewClaims([], { ttl: 1000 });
+
+  check(
+    {
+      claimKeysResult,
+      claimKeysResultFields,
+      claimKeysAllOrNothing,
+      claimKeysEmptyResult,
+      releaseClaimsResult,
+      releaseClaimsEmptyResult,
+      completeClaimsResult,
+      completeClaimsDefaultDelete,
+      completeClaimsEmptyResult,
+      renewClaimsResult,
+      renewClaimsEmptyResult
+    },
+    {
+      'api:claimKeys-structure': (ctx) =>
+        ctx.claimKeysResultFields.includes('claimed') &&
+        ctx.claimKeysResultFields.includes('busy') &&
+        ctx.claimKeysResultFields.includes('missing') &&
+        ctx.claimKeysResultFields.length === 3 &&
+        Array.isArray(ctx.claimKeysResult.claimed) &&
+        Array.isArray(ctx.claimKeysResult.busy) &&
+        Array.isArray(ctx.claimKeysResult.missing),
+      'api:claimKeys-busy-missing': (ctx) =>
+        ctx.claimKeysResult.claimed.length === 1 &&
+        ctx.claimKeysResult.busy.length === 1 &&
+        ctx.claimKeysResult.busy[0] === 'api:claimKeys:busy' &&
+        ctx.claimKeysResult.missing.length === 1 &&
+        ctx.claimKeysResult.missing[0] === 'api:claimKeys:missing:1',
+      'api:claimKeys-all-or-nothing-rollback': (ctx) =>
+        ctx.claimKeysAllOrNothing.claimed.length === 0 &&
+        ctx.claimKeysAllOrNothing.busy.length === 0 &&
+        ctx.claimKeysAllOrNothing.missing.length === 1 &&
+        ctx.claimKeysAllOrNothing.missing[0] === 'api:claimKeys:missing:2' &&
+        claimKeysRollbackReleased === true,
+      'api:claimKeys-empty-array': (ctx) =>
+        Array.isArray(ctx.claimKeysEmptyResult.claimed) &&
+        ctx.claimKeysEmptyResult.claimed.length === 0 &&
+        Array.isArray(ctx.claimKeysEmptyResult.busy) &&
+        ctx.claimKeysEmptyResult.busy.length === 0 &&
+        Array.isArray(ctx.claimKeysEmptyResult.missing) &&
+        ctx.claimKeysEmptyResult.missing.length === 0,
+      'api:releaseClaims-partial': (ctx) =>
+        typeof ctx.releaseClaimsResult.attempted === 'number' &&
+        ctx.releaseClaimsResult.attempted === 2 &&
+        typeof ctx.releaseClaimsResult.released === 'number' &&
+        ctx.releaseClaimsResult.released === 1 &&
+        Array.isArray(ctx.releaseClaimsResult.failed) &&
+        ctx.releaseClaimsResult.failed.length === 1,
+      'api:releaseClaims-failure-shape': (ctx) => {
+        const failure = ctx.releaseClaimsResult.failed[0];
+        return (
+          failure &&
+          typeof failure.id === 'string' &&
+          typeof failure.key === 'string' &&
+          failure.name === 'ClaimNotUpdated' &&
+          typeof failure.message === 'string' &&
+          failure.message.length > 0
+        );
+      },
+      'api:releaseClaims-empty-array': (ctx) =>
+        ctx.releaseClaimsEmptyResult.attempted === 0 &&
+        ctx.releaseClaimsEmptyResult.released === 0 &&
+        Array.isArray(ctx.releaseClaimsEmptyResult.failed) &&
+        ctx.releaseClaimsEmptyResult.failed.length === 0,
+      'api:completeClaims-partial': (ctx) =>
+        ctx.completeClaimsResult.attempted === 2 &&
+        ctx.completeClaimsResult.completed === 1 &&
+        Array.isArray(ctx.completeClaimsResult.failed) &&
+        ctx.completeClaimsResult.failed.length === 1 &&
+        ctx.completeClaimsResult.failed[0].name === 'ClaimNotUpdated' &&
+        completeKeepExists === true,
+      'api:completeClaims-default-delete': (ctx) =>
+        ctx.completeClaimsDefaultDelete.attempted === 1 &&
+        ctx.completeClaimsDefaultDelete.completed === 1 &&
+        Array.isArray(ctx.completeClaimsDefaultDelete.failed) &&
+        ctx.completeClaimsDefaultDelete.failed.length === 0 &&
+        completeDeleteExists === false,
+      'api:completeClaims-empty-array': (ctx) =>
+        ctx.completeClaimsEmptyResult.attempted === 0 &&
+        ctx.completeClaimsEmptyResult.completed === 0 &&
+        Array.isArray(ctx.completeClaimsEmptyResult.failed) &&
+        ctx.completeClaimsEmptyResult.failed.length === 0,
+      'api:renewClaims-partial': (ctx) =>
+        ctx.renewClaimsResult.attempted === 2 &&
+        ctx.renewClaimsResult.renewed === 1 &&
+        Array.isArray(ctx.renewClaimsResult.failed) &&
+        ctx.renewClaimsResult.failed.length === 1,
+      'api:renewClaims-failure-shape': (ctx) => {
+        const failure = ctx.renewClaimsResult.failed[0];
+        return (
+          failure &&
+          typeof failure.id === 'string' &&
+          typeof failure.key === 'string' &&
+          failure.name === 'ClaimNotUpdated' &&
+          typeof failure.message === 'string' &&
+          failure.message.length > 0
+        );
+      },
+      'api:renewClaims-empty-array': (ctx) =>
+        ctx.renewClaimsEmptyResult.attempted === 0 &&
+        ctx.renewClaimsEmptyResult.renewed === 0 &&
+        Array.isArray(ctx.renewClaimsEmptyResult.failed) &&
+        ctx.renewClaimsEmptyResult.failed.length === 0
+    }
+  );
+
+  // allocationStats(): validate prefix-scoped and full snapshot contracts.
+  await kv.setMany({
+    'api:allocation:user:1': { id: 1 },
+    'api:allocation:user:2': { id: 2 },
+    'api:allocation:user:3': { id: 3 }
+  });
+  const allocationLiveClaimA = await kv.claimKey('api:allocation:user:1', { ttl: 30000 });
+  const allocationLiveClaimB = await kv.claimKey('api:allocation:user:2', { ttl: 30000 });
+
+  const allocationStatsPrefix = await kv.allocationStats({ prefix: 'api:allocation:user:' });
+  if (allocationLiveClaimA !== null) {
+    await kv.releaseClaim(allocationLiveClaimA);
+  }
+  const allocationStatsAfterRelease = await kv.allocationStats({ prefix: 'api:allocation:user:' });
+  const allocationStatsAll = await kv.allocationStats();
+
+  if (allocationLiveClaimB !== null) {
+    await kv.releaseClaim(allocationLiveClaimB);
+  }
+
+  check(
+    { allocationStatsPrefix, allocationStatsAfterRelease, allocationStatsAll },
+    {
+      'api:allocationStats-structure': (ctx) =>
+        typeof ctx.allocationStatsPrefix.prefix === 'string' &&
+        typeof ctx.allocationStatsPrefix.total === 'number' &&
+        typeof ctx.allocationStatsPrefix.claimable === 'number' &&
+        typeof ctx.allocationStatsPrefix.claimedLive === 'number' &&
+        typeof ctx.allocationStatsPrefix.claimedExpired === 'number' &&
+        typeof ctx.allocationStatsPrefix.backend === 'string' &&
+        typeof ctx.allocationStatsPrefix.trackKeys === 'boolean',
+      'api:allocationStats-prefix-counts': (ctx) =>
+        ctx.allocationStatsPrefix.prefix === 'api:allocation:user:' &&
+        ctx.allocationStatsPrefix.total === 3 &&
+        ctx.allocationStatsPrefix.claimable === 1 &&
+        ctx.allocationStatsPrefix.claimedLive === 2 &&
+        ctx.allocationStatsPrefix.claimedExpired === 0 &&
+        ctx.allocationStatsAfterRelease.claimable === 2 &&
+        ctx.allocationStatsAfterRelease.claimedLive === 1 &&
+        ctx.allocationStatsAfterRelease.claimedExpired === 0,
+      'api:allocationStats-all-snapshot': (ctx) =>
+        ctx.allocationStatsAll.prefix === '' &&
+        ctx.allocationStatsAll.total >= ctx.allocationStatsPrefix.total &&
+        (ctx.allocationStatsAll.backend === 'memory' || ctx.allocationStatsAll.backend === 'disk')
+    }
+  );
 
   // rebuildKeyList(), stats(), reportStats(): Validate observability/lifecycle helpers.
   const rebuiltBeforeFlow = await kv.rebuildKeyList();
@@ -1183,6 +1514,234 @@ export default async function apiOutputValidationTest() {
       importCSVLimitedItems[1]?.exists === false &&
       importCSVMissingFileError
   });
+
+  // exportCSV(): validate summary shape, prefix/limit behavior, and malformed-value rejections.
+  await kv.setMany({
+    'api:exportCSV:response:1': { status: 200, requestId: 'r1', userId: 'u1', bodyHash: 'a' },
+    'api:exportCSV:response:2': { status: 201, requestId: 'r2', userId: 'u2', bodyHash: 'b' },
+    'api:exportCSV:other:1': { status: 500, requestId: 'r3', userId: 'u3', bodyHash: 'c' }
+  });
+
+  const exportCSVResult = await kv.exportCSV({
+    fileName: EXPORT_CSV_PATH,
+    prefix: 'api:exportCSV:response:',
+    columns: ['status', 'requestId', 'userId', 'bodyHash'],
+    includeKey: true
+  });
+
+  const exportCSVLimitedResult = await kv.exportCSV({
+    fileName: EXPORT_CSV_LIMIT_PATH,
+    prefix: 'api:exportCSV:response:',
+    columns: ['status', 'requestId', 'userId', 'bodyHash'],
+    includeKey: false,
+    delimiter: ';',
+    limit: 1
+  });
+
+  const exportCSVMissingColumnResult = await kv.exportCSV({
+    fileName: EXPORT_CSV_MISSING_COLUMN_PATH,
+    prefix: 'api:exportCSV:response:',
+    columns: ['status', 'missingColumn']
+  });
+
+  await kv.set('api:exportCSV:bad:scalar', 'raw-string');
+  const exportCSVNonObjectError = await expectErrorName(
+    () =>
+      kv.exportCSV({
+        fileName: EXPORT_CSV_PATH,
+        prefix: 'api:exportCSV:bad:',
+        columns: ['status']
+      }),
+    'ValueParseError'
+  );
+
+  await kv.set('api:exportCSV:bad:nested', {
+    status: 200,
+    nested: { detail: 'not-flat' }
+  });
+  const exportCSVNestedError = await expectErrorName(
+    () =>
+      kv.exportCSV({
+        fileName: EXPORT_CSV_PATH,
+        prefix: 'api:exportCSV:bad:nested',
+        columns: ['status', 'nested']
+      }),
+    'ValueParseError'
+  );
+
+  check(
+    { exportCSVResult, exportCSVLimitedResult, exportCSVMissingColumnResult },
+    {
+      'api:exportCSV-structure': (ctx) =>
+        ctx.exportCSVResult !== null &&
+        typeof ctx.exportCSVResult === 'object' &&
+        typeof ctx.exportCSVResult.exported === 'number' &&
+        typeof ctx.exportCSVResult.fileName === 'string' &&
+        typeof ctx.exportCSVResult.bytesWritten === 'number',
+      'api:exportCSV-prefix-count': (ctx) =>
+        ctx.exportCSVResult.exported === 2 &&
+        ctx.exportCSVResult.fileName === EXPORT_CSV_PATH &&
+        ctx.exportCSVResult.bytesWritten > 0,
+      'api:exportCSV-limit': (ctx) =>
+        ctx.exportCSVLimitedResult.exported === 1 &&
+        ctx.exportCSVLimitedResult.fileName === EXPORT_CSV_LIMIT_PATH &&
+        ctx.exportCSVLimitedResult.bytesWritten > 0,
+      'api:exportCSV-missing-column-allowed': (ctx) =>
+        ctx.exportCSVMissingColumnResult.exported === 2 &&
+        ctx.exportCSVMissingColumnResult.bytesWritten > 0,
+      'api:exportCSV-non-object-rejects': () => exportCSVNonObjectError,
+      'api:exportCSV-nested-rejects': () => exportCSVNestedError
+    }
+  );
+
+  // validateCSV()/validateJSONL(): validate preflight result contracts and malformed-content behavior.
+  const validateCSVValid = await kv.validateCSV({
+    fileName: IMPORT_CSV_PATH,
+    keyColumn: 'id',
+    hasHeader: true
+  });
+  const validateCSVWithoutKeyColumn = await kv.validateCSV({
+    fileName: IMPORT_CSV_PATH,
+    hasHeader: true
+  });
+  const validateCSVLimit = await kv.validateCSV({
+    fileName: IMPORT_CSV_PATH,
+    keyColumn: 'id',
+    hasHeader: true,
+    limit: 1
+  });
+  const validateCSVDuplicateHeader = await kv.validateCSV({
+    fileName: INVALID_CSV_DUPLICATE_HEADER_PATH,
+    keyColumn: 'id',
+    hasHeader: true
+  });
+  const validateCSVEmptyKey = await kv.validateCSV({
+    fileName: INVALID_CSV_EMPTY_KEY_PATH,
+    keyColumn: 'id',
+    hasHeader: true
+  });
+  const validateCSVSyntax = await kv.validateCSV({
+    fileName: INVALID_CSV_SYNTAX_PATH,
+    keyColumn: 'id',
+    hasHeader: true
+  });
+
+  const validateJSONLValid = await kv.validateJSONL({
+    fileName: IMPORT_JSONL_PATH
+  });
+  const validateJSONLLimit = await kv.validateJSONL({
+    fileName: IMPORT_JSONL_PATH,
+    limit: 1
+  });
+  const validateJSONLInvalidJSON = await kv.validateJSONL({
+    fileName: INVALID_JSONL_MALFORMED_PATH
+  });
+  const validateJSONLBlankLine = await kv.validateJSONL({
+    fileName: INVALID_JSONL_BLANK_LINE_PATH
+  });
+  const validateJSONLMissingKey = await kv.validateJSONL({
+    fileName: INVALID_JSONL_MISSING_KEY_PATH
+  });
+  const validateCSVValidFirstError = getOptionalFirstError(validateCSVValid);
+  const validateCSVWithoutKeyColumnFirstError = getOptionalFirstError(validateCSVWithoutKeyColumn);
+  const validateCSVLimitFirstError = getOptionalFirstError(validateCSVLimit);
+  const validateCSVDuplicateHeaderFirstError = getOptionalFirstError(validateCSVDuplicateHeader);
+  const validateCSVEmptyKeyFirstError = getOptionalFirstError(validateCSVEmptyKey);
+  const validateCSVSyntaxFirstError = getOptionalFirstError(validateCSVSyntax);
+  const validateJSONLValidFirstError = getOptionalFirstError(validateJSONLValid);
+  const validateJSONLLimitFirstError = getOptionalFirstError(validateJSONLLimit);
+  const validateJSONLInvalidJSONFirstError = getOptionalFirstError(validateJSONLInvalidJSON);
+  const validateJSONLBlankLineFirstError = getOptionalFirstError(validateJSONLBlankLine);
+  const validateJSONLMissingKeyFirstError = getOptionalFirstError(validateJSONLMissingKey);
+
+  check(
+    {
+      validateCSVValid,
+      validateCSVWithoutKeyColumn,
+      validateCSVLimit,
+      validateCSVDuplicateHeader,
+      validateCSVEmptyKey,
+      validateCSVSyntax,
+      validateCSVValidFirstError,
+      validateCSVWithoutKeyColumnFirstError,
+      validateCSVLimitFirstError,
+      validateCSVDuplicateHeaderFirstError,
+      validateCSVEmptyKeyFirstError,
+      validateCSVSyntaxFirstError,
+      validateJSONLValid,
+      validateJSONLLimit,
+      validateJSONLInvalidJSON,
+      validateJSONLBlankLine,
+      validateJSONLMissingKey,
+      validateJSONLValidFirstError,
+      validateJSONLLimitFirstError,
+      validateJSONLInvalidJSONFirstError,
+      validateJSONLBlankLineFirstError,
+      validateJSONLMissingKeyFirstError
+    },
+    {
+      'api:validateCSV-valid': (ctx) =>
+        ctx.validateCSVValid.valid === true &&
+        ctx.validateCSVValid.rows === 2 &&
+        ctx.validateCSVValid.bytesRead > 0 &&
+        ctx.validateCSVValid.checkedAll === true &&
+        ctx.validateCSVValidFirstError === null,
+      'api:validateCSV-without-keyColumn': (ctx) =>
+        ctx.validateCSVWithoutKeyColumn.valid === true &&
+        ctx.validateCSVWithoutKeyColumn.rows === 2 &&
+        ctx.validateCSVWithoutKeyColumn.bytesRead > 0 &&
+        ctx.validateCSVWithoutKeyColumn.checkedAll === true &&
+        ctx.validateCSVWithoutKeyColumnFirstError === null,
+      'api:validateCSV-limit': (ctx) =>
+        ctx.validateCSVLimit.valid === true &&
+        ctx.validateCSVLimit.rows === 1 &&
+        ctx.validateCSVLimit.bytesRead > 0 &&
+        ctx.validateCSVLimit.checkedAll === false &&
+        ctx.validateCSVLimitFirstError === null,
+      'api:validateCSV-duplicate-header-invalid': (ctx) =>
+        ctx.validateCSVDuplicateHeader.valid === false &&
+        typeof ctx.validateCSVDuplicateHeaderFirstError === 'object' &&
+        ctx.validateCSVDuplicateHeaderFirstError !== null &&
+        ctx.validateCSVDuplicateHeaderFirstError.name === 'ValueParseError',
+      'api:validateCSV-empty-key-invalid': (ctx) =>
+        ctx.validateCSVEmptyKey.valid === false &&
+        typeof ctx.validateCSVEmptyKeyFirstError === 'object' &&
+        ctx.validateCSVEmptyKeyFirstError !== null &&
+        ctx.validateCSVEmptyKeyFirstError.name === 'ValueParseError',
+      'api:validateCSV-syntax-invalid': (ctx) =>
+        ctx.validateCSVSyntax.valid === false &&
+        typeof ctx.validateCSVSyntaxFirstError === 'object' &&
+        ctx.validateCSVSyntaxFirstError !== null &&
+        ctx.validateCSVSyntaxFirstError.name === 'ValueParseError',
+      'api:validateJSONL-valid': (ctx) =>
+        ctx.validateJSONLValid.valid === true &&
+        ctx.validateJSONLValid.records === 2 &&
+        ctx.validateJSONLValid.bytesRead > 0 &&
+        ctx.validateJSONLValid.checkedAll === true &&
+        ctx.validateJSONLValidFirstError === null,
+      'api:validateJSONL-limit': (ctx) =>
+        ctx.validateJSONLLimit.valid === true &&
+        ctx.validateJSONLLimit.records === 1 &&
+        ctx.validateJSONLLimit.bytesRead > 0 &&
+        ctx.validateJSONLLimit.checkedAll === false &&
+        ctx.validateJSONLLimitFirstError === null,
+      'api:validateJSONL-invalid-json': (ctx) =>
+        ctx.validateJSONLInvalidJSON.valid === false &&
+        typeof ctx.validateJSONLInvalidJSONFirstError === 'object' &&
+        ctx.validateJSONLInvalidJSONFirstError !== null &&
+        ctx.validateJSONLInvalidJSONFirstError.name === 'ValueParseError',
+      'api:validateJSONL-blank-line': (ctx) =>
+        ctx.validateJSONLBlankLine.valid === false &&
+        typeof ctx.validateJSONLBlankLineFirstError === 'object' &&
+        ctx.validateJSONLBlankLineFirstError !== null &&
+        ctx.validateJSONLBlankLineFirstError.name === 'ValueParseError',
+      'api:validateJSONL-missing-key': (ctx) =>
+        ctx.validateJSONLMissingKey.valid === false &&
+        typeof ctx.validateJSONLMissingKeyFirstError === 'object' &&
+        ctx.validateJSONLMissingKeyFirstError !== null &&
+        ctx.validateJSONLMissingKeyFirstError.name === 'ValueParseError'
+    }
+  );
 
   // list(): Validate that results are returned as an array of entry objects.
   // Each entry must have camelCase field names (key, value) and preserve all value types.
@@ -1801,6 +2360,139 @@ export default async function apiOutputValidationTest() {
       }),
     'InvalidOptionsError'
   );
+  const validationClaimKeysNonArray = await expectErrorName(
+    () => kv.claimKeys('bad'),
+    'InvalidOptionsError'
+  );
+  const validationClaimKeysDuplicate = await expectErrorName(
+    () => kv.claimKeys(['dup:key', 'dup:key'], { ttl: 30000 }),
+    'InvalidOptionsError'
+  );
+  const validationClaimKeysEmptyKey = await expectErrorName(
+    () => kv.claimKeys(['ok:key', ''], { ttl: 30000 }),
+    'InvalidOptionsError'
+  );
+  const validationClaimKeysBadTTL = await expectErrorName(
+    () => kv.claimKeys(['ok:key'], { ttl: 0 }),
+    'InvalidOptionsError'
+  );
+  const validationReleaseClaimsNonArray = await expectErrorName(
+    () => kv.releaseClaims('bad'),
+    'InvalidOptionsError'
+  );
+  const validationReleaseClaimsBadItem = await expectErrorName(
+    () => kv.releaseClaims([{}]),
+    'InvalidOptionsError'
+  );
+  const validationCompleteClaimsNonArray = await expectErrorName(
+    () => kv.completeClaims('bad'),
+    'InvalidOptionsError'
+  );
+  const validationCompleteClaimsBadOptions = await expectErrorName(
+    () => kv.completeClaims([{ id: 'x', key: 'k', token: 1 }], 'bad'),
+    'InvalidOptionsError'
+  );
+  const validationRenewClaimsMissingTTL = await expectErrorName(
+    () => kv.renewClaims([{ id: 'x', key: 'k', token: 1 }], {}),
+    'InvalidOptionsError'
+  );
+  const validationRenewClaimsBadClaims = await expectErrorName(
+    () => kv.renewClaims('bad', { ttl: 30000 }),
+    'InvalidOptionsError'
+  );
+  const validationAllocationStatsBadOptions = await expectErrorName(
+    () => kv.allocationStats('bad'),
+    'InvalidOptionsError'
+  );
+  const validationAllocationStatsBadPrefixType = await expectErrorName(
+    () => kv.allocationStats({ prefix: 123 }),
+    'InvalidOptionsError'
+  );
+  const validationExportCSVMissingColumns = await expectErrorName(
+    () => kv.exportCSV({ fileName: EXPORT_CSV_PATH }),
+    'InvalidOptionsError'
+  );
+  const validationExportCSVBadDelimiter = await expectErrorName(
+    () =>
+      kv.exportCSV({
+        fileName: EXPORT_CSV_PATH,
+        columns: ['status'],
+        delimiter: ';;'
+      }),
+    'InvalidOptionsError'
+  );
+  const validationExportCSVBadFileName = await expectErrorName(
+    () =>
+      kv.exportCSV({
+        fileName: '   ',
+        columns: ['status']
+      }),
+    'InvalidOptionsError'
+  );
+  const validationValidateCSVMissingFileName = await expectErrorName(
+    () => kv.validateCSV({}),
+    'InvalidOptionsError'
+  );
+  const validationValidateCSVBadDelimiter = await expectErrorName(
+    () =>
+      kv.validateCSV({
+        fileName: IMPORT_CSV_PATH,
+        delimiter: ';;'
+      }),
+    'InvalidOptionsError'
+  );
+  const validationValidateCSVNonNumericKeyColumnNoHeader = await expectErrorName(
+    () =>
+      kv.validateCSV({
+        fileName: IMPORT_CSV_PATH,
+        hasHeader: false,
+        keyColumn: 'id'
+      }),
+    'InvalidOptionsError'
+  );
+  const validationValidateCSVMissingFile = await expectErrorName(
+    () =>
+      kv.validateCSV({
+        fileName: MISSING_CSV_PATH
+      }),
+    'SnapshotNotFoundError'
+  );
+  const validationValidateJSONLMissingFileName = await expectErrorName(
+    () => kv.validateJSONL({}),
+    'InvalidOptionsError'
+  );
+  const validationValidateJSONLMissingFile = await expectErrorName(
+    () =>
+      kv.validateJSONL({
+        fileName: MISSING_JSONL_PATH
+      }),
+    'SnapshotNotFoundError'
+  );
+
+  check(true, {
+    'api:input-validation-new-methods': () =>
+      validationClaimKeysNonArray &&
+      validationClaimKeysDuplicate &&
+      validationClaimKeysEmptyKey &&
+      validationClaimKeysBadTTL &&
+      validationReleaseClaimsNonArray &&
+      validationReleaseClaimsBadItem &&
+      validationCompleteClaimsNonArray &&
+      validationCompleteClaimsBadOptions &&
+      validationRenewClaimsMissingTTL &&
+      validationRenewClaimsBadClaims &&
+      validationAllocationStatsBadOptions &&
+      validationAllocationStatsBadPrefixType &&
+      validationExportCSVMissingColumns &&
+      validationExportCSVBadDelimiter &&
+      validationExportCSVBadFileName &&
+      validationValidateCSVMissingFileName &&
+      validationValidateCSVBadDelimiter &&
+      validationValidateCSVNonNumericKeyColumnNoHeader &&
+      validationValidateCSVMissingFile &&
+      validationValidateJSONLMissingFileName &&
+      validationValidateJSONLMissingFile
+  });
 
   check(true, {
     'api:input-validation-matrix': () =>

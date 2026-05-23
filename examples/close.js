@@ -17,10 +17,6 @@ export default async function () {
   expect(await kv.get("healthcheck")).toEqual("ok");
 }
 
-export async function teardown() {
-  // Explicitly close to release bbolt file handles and any in-memory indexes.
+export function teardown() {
   kv.close();
-
-  // Optional: a second close() should be safe/no-op in a ref-counted scenario.
-  // kv.close();
 }

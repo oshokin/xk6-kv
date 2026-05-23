@@ -6,12 +6,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// TestMemoryStore_PopRandom_Empty_ReturnsNil verifies that memory store pop random empty returns nil.
 func TestMemoryStore_PopRandom_Empty_ReturnsNil(t *testing.T) {
 	t.Parallel()
 
@@ -27,6 +27,7 @@ func TestMemoryStore_PopRandom_Empty_ReturnsNil(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_PopRandom_WithPrefix_RemovesAndReturnsEntry verifies that memory store pop random with prefix removes and returns entry.
 func TestMemoryStore_PopRandom_WithPrefix_RemovesAndReturnsEntry(t *testing.T) {
 	t.Parallel()
 
@@ -59,6 +60,7 @@ func TestMemoryStore_PopRandom_WithPrefix_RemovesAndReturnsEntry(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_PopRandom_SkipsLiveClaim verifies that memory store pop random skips live claim.
 func TestMemoryStore_PopRandom_SkipsLiveClaim(t *testing.T) {
 	t.Parallel()
 
@@ -83,6 +85,7 @@ func TestMemoryStore_PopRandom_SkipsLiveClaim(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_PopRandom_AllowsExpiredClaim verifies that memory store pop random allows expired claim.
 func TestMemoryStore_PopRandom_AllowsExpiredClaim(t *testing.T) {
 	t.Parallel()
 
@@ -100,7 +103,7 @@ func TestMemoryStore_PopRandom_AllowsExpiredClaim(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, claim)
 
-			time.Sleep(10 * time.Millisecond)
+			requireMemoryClaimExpired(t, store, claim.Key)
 
 			entry, err := store.PopRandom("user:")
 			require.NoError(t, err)
@@ -110,6 +113,7 @@ func TestMemoryStore_PopRandom_AllowsExpiredClaim(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ClaimRandom_ExcludesLiveClaim verifies that memory store claim random excludes live claim.
 func TestMemoryStore_ClaimRandom_ExcludesLiveClaim(t *testing.T) {
 	t.Parallel()
 
@@ -137,6 +141,7 @@ func TestMemoryStore_ClaimRandom_ExcludesLiveClaim(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ClaimRandom_TTLMustNotExceedMax verifies that memory store claim random ttl must not exceed max.
 func TestMemoryStore_ClaimRandom_TTLMustNotExceedMax(t *testing.T) {
 	t.Parallel()
 
@@ -168,6 +173,7 @@ func TestMemoryStore_ClaimRandom_TTLMustNotExceedMax(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ClaimRandom_OwnerMustNotExceedMax verifies that memory store claim random owner must not exceed max.
 func TestMemoryStore_ClaimRandom_OwnerMustNotExceedMax(t *testing.T) {
 	t.Parallel()
 
@@ -203,6 +209,7 @@ func TestMemoryStore_ClaimRandom_OwnerMustNotExceedMax(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ClaimRandom_ExpiredClaimBecomesAvailable verifies that memory store claim random expired claim becomes available.
 func TestMemoryStore_ClaimRandom_ExpiredClaimBecomesAvailable(t *testing.T) {
 	t.Parallel()
 
@@ -220,7 +227,7 @@ func TestMemoryStore_ClaimRandom_ExpiredClaimBecomesAvailable(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, firstClaim)
 
-			time.Sleep(10 * time.Millisecond)
+			requireMemoryClaimExpired(t, store, firstClaim.Key)
 
 			secondClaim, err := store.ClaimRandom(&ClaimOptions{
 				Prefix: "user:",
@@ -234,6 +241,7 @@ func TestMemoryStore_ClaimRandom_ExpiredClaimBecomesAvailable(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ClaimRandom_HighOccupancyReturnsOnlyFreeKey verifies that memory store claim random high occupancy returns only free key.
 func TestMemoryStore_ClaimRandom_HighOccupancyReturnsOnlyFreeKey(t *testing.T) {
 	t.Parallel()
 
@@ -255,6 +263,7 @@ func TestMemoryStore_ClaimRandom_HighOccupancyReturnsOnlyFreeKey(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_PopRandom_HighOccupancyReturnsOnlyFreeKey verifies that memory store pop random high occupancy returns only free key.
 func TestMemoryStore_PopRandom_HighOccupancyReturnsOnlyFreeKey(t *testing.T) {
 	t.Parallel()
 
@@ -273,6 +282,7 @@ func TestMemoryStore_PopRandom_HighOccupancyReturnsOnlyFreeKey(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ReleaseClaim_And_CompleteClaim verifies that memory store release claim and complete claim.
 func TestMemoryStore_ReleaseClaim_And_CompleteClaim(t *testing.T) {
 	t.Parallel()
 
@@ -369,6 +379,7 @@ func TestMemoryStore_ReleaseClaim_And_CompleteClaim(t *testing.T) {
 	}
 }
 
+// seedAndPreclaimAllButOne is a test helper for seed and preclaim all but one.
 func seedAndPreclaimAllButOne(t *testing.T, store Store) string {
 	t.Helper()
 
@@ -405,6 +416,7 @@ func seedAndPreclaimAllButOne(t *testing.T, store Store) string {
 	return freeKey
 }
 
+// TestMemoryStore_PopRandom_Concurrent_NoDuplicateKeys verifies that memory store pop random concurrent no duplicate keys.
 func TestMemoryStore_PopRandom_Concurrent_NoDuplicateKeys(t *testing.T) {
 	t.Parallel()
 
@@ -445,6 +457,7 @@ func TestMemoryStore_PopRandom_Concurrent_NoDuplicateKeys(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ClaimRandom_Concurrent_NoDuplicateLiveClaims verifies that memory store claim random concurrent no duplicate live claims.
 func TestMemoryStore_ClaimRandom_Concurrent_NoDuplicateLiveClaims(t *testing.T) {
 	t.Parallel()
 
@@ -488,6 +501,7 @@ func TestMemoryStore_ClaimRandom_Concurrent_NoDuplicateLiveClaims(t *testing.T) 
 	}
 }
 
+// TestMemoryStore_ClearAndRestore_ClearClaims verifies that memory store clear and restore clear claims.
 func TestMemoryStore_ClearAndRestore_ClearClaims(t *testing.T) {
 	t.Parallel()
 
@@ -551,6 +565,7 @@ func TestMemoryStore_ClearAndRestore_ClearClaims(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ClaimKey_Behavior verifies that memory store claim key behavior.
 func TestMemoryStore_ClaimKey_Behavior(t *testing.T) {
 	t.Parallel()
 
@@ -580,6 +595,7 @@ func TestMemoryStore_ClaimKey_Behavior(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_RenewClaim_TokenStableAndExpiryExtended verifies that memory store renew claim token stable and expiry extended.
 func TestMemoryStore_RenewClaim_TokenStableAndExpiryExtended(t *testing.T) {
 	t.Parallel()
 
@@ -595,8 +611,6 @@ func TestMemoryStore_RenewClaim_TokenStableAndExpiryExtended(t *testing.T) {
 			require.NotNil(t, claim)
 
 			oldExpiresAt := claim.ExpiresAt
-
-			time.Sleep(2 * time.Millisecond)
 
 			renewed, err := store.RenewClaim(claim.Ref(), &RenewClaimOptions{TTLMs: 60_000})
 			require.NoError(t, err)
@@ -614,6 +628,7 @@ func TestMemoryStore_RenewClaim_TokenStableAndExpiryExtended(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ClaimRandomMany_ReturnsUniqueFreeClaims verifies that memory store claim random many returns unique free claims.
 func TestMemoryStore_ClaimRandomMany_ReturnsUniqueFreeClaims(t *testing.T) {
 	t.Parallel()
 
@@ -654,6 +669,7 @@ func TestMemoryStore_ClaimRandomMany_ReturnsUniqueFreeClaims(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_PopRandomMany_DeletesOnlyFreeMatchingKeys verifies that memory store pop random many deletes only free matching keys.
 func TestMemoryStore_PopRandomMany_DeletesOnlyFreeMatchingKeys(t *testing.T) {
 	t.Parallel()
 

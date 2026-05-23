@@ -9,6 +9,7 @@ import (
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
+// TestDiskOptionsEqual verifies that disk options equal.
 func TestDiskOptionsEqual(t *testing.T) {
 	t.Parallel()
 
@@ -88,6 +89,7 @@ func TestDiskOptionsEqual(t *testing.T) {
 	}
 }
 
+// TestDiskOptionsValidateRejectsNonFiniteNumericValues verifies that disk options validate rejects non finite numeric values.
 func TestDiskOptionsValidateRejectsNonFiniteNumericValues(t *testing.T) {
 	t.Parallel()
 

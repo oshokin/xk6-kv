@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -12,12 +13,47 @@ import (
 	"github.com/oshokin/xk6-kv/internal/fileutil"
 )
 
+type (
+	// diskRestoreFromSnapshotDBParams carries inputs for restoring from a snapshot bbolt file.
+	diskRestoreFromSnapshotDBParams struct {
+		// ctx cancels long-running restore work.
+		ctx context.Context
+		// snapshotDB is the opened snapshot database handle.
+		snapshotDB *bolt.DB
+		// maxEntries caps how many entries may be loaded.
+		maxEntries int64
+		// maxBytes caps total loaded payload size.
+		maxBytes int64
+	}
+
+	// diskTryFinalizeSelfRestoreParams carries inputs for finalizing an in-place self-restore.
+	diskTryFinalizeSelfRestoreParams struct {
+		// ctx cancels long-running restore work.
+		ctx context.Context
+		// snapshotPath is the on-disk path of the snapshot being applied.
+		snapshotPath string
+	}
+
+	// diskSelfRestoreResult reports whether self-restore completed and its summary.
+	diskSelfRestoreResult struct {
+		// summary describes restore outcome when done is true.
+		summary *RestoreSummary
+		// done reports whether self-restore finished successfully.
+		done bool
+	}
+)
+
 // Backup writes the on-disk bbolt database to a standalone snapshot file.
 // Unlike MemoryStore, DiskStore already persists data, so Backup simply copies
 // the existing bbolt file using a consistent View transaction.
 func (s *DiskStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 	if opts == nil {
 		return nil, ErrBackupOptionsNil
+	}
+
+	ctx := operationContextOrBackground(opts.Context)
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	if err := opts.normalize(); err != nil {
@@ -34,7 +70,7 @@ func (s *DiskStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 		return s.diskSelfSnapshotSummary()
 	}
 
-	return s.writeDiskSnapshot(opts.FileName)
+	return s.writeDiskSnapshot(ctx, opts.FileName)
 }
 
 // isSelfSnapshot checks if the snapshot path is the same as the disk store path.
@@ -69,7 +105,11 @@ func (s *DiskStore) diskSelfSnapshotSummary() (*BackupSummary, error) {
 // writeDiskSnapshot writes a snapshot to a file.
 //
 //nolint:funlen // this is a complex function.
-func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error) {
+func (s *DiskStore) writeDiskSnapshot(ctx context.Context, destination string) (*BackupSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	targetDir := filepath.Dir(destination)
 	targetBase := filepath.Base(destination)
 
@@ -114,6 +154,10 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 	// tx.WriteTo streams the database file format directly, preserving all buckets,
 	// transactions, and metadata. This is more efficient than iterating entries.
 	if err := s.handle.View(func(tx *bolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
 			return fmt.Errorf("%w: %s", ErrBucketNotFound, s.bucket)
@@ -137,6 +181,11 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 		return nil, exportErr
 	}
 
+	if err := ctx.Err(); err != nil {
+		exportErr = err
+		return nil, exportErr
+	}
+
 	// Sync file system buffers to ensure all data is physically written to disk
 	// before renaming. This prevents data loss if the process crashes between
 	// WriteTo and Rename. Without sync, buffered writes might be lost on crash.
@@ -152,6 +201,11 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 		return nil, exportErr
 	}
 
+	if err := ctx.Err(); err != nil {
+		exportErr = err
+		return nil, exportErr
+	}
+
 	info, err := os.Stat(tempFile)
 	if err != nil {
 		exportErr = fmt.Errorf("%w: %w", ErrBBoltSnapshotStatFailed, err)
@@ -159,8 +213,7 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 		return nil, exportErr
 	}
 
-	//nolint:forbidigo // file I/O is required for renaming the temporary file to the destination file.
-	if err := os.Rename(tempFile, destination); err != nil {
+	if err := fileutil.ReplaceFile(tempFile, destination); err != nil {
 		exportErr = fmt.Errorf("%w: %w", ErrBackupFinalizeFailed, err)
 
 		return nil, exportErr
@@ -184,6 +237,11 @@ func (s *DiskStore) writeDiskSnapshot(destination string) (*BackupSummary, error
 func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 	if opts == nil {
 		return nil, ErrRestoreOptionsNil
+	}
+
+	ctx := operationContextOrBackground(opts.Context)
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	if err := opts.normalize(); err != nil {
@@ -212,17 +270,20 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 
 	// Fast path: if restoring from the same file (self-reference), return metadata
 	// without copying. This avoids unnecessary work when snapshot path matches store path.
-	if summary, done := s.tryDiskSelfRestore(opts.FileName); done {
-		// Self-restore still starts a "new world"; drop all persisted claim leases.
-		if err := s.clearDiskClaims(); err != nil {
-			return nil, err
-		}
+	selfRestoreResult, err := s.tryFinalizeSelfRestore(&diskTryFinalizeSelfRestoreParams{
+		ctx:          ctx,
+		snapshotPath: opts.FileName,
+	})
+	if err != nil {
+		return nil, err
+	}
 
-		if s.trackKeys {
-			s.resetTrackedClaimsLocked()
-		}
+	if selfRestoreResult.done {
+		return selfRestoreResult.summary, nil
+	}
 
-		return summary, nil
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	snapshotDB, err := bolt.Open(opts.FileName, 0o600, &bolt.Options{ReadOnly: true})
@@ -232,8 +293,17 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 
 	defer snapshotDB.Close()
 
-	totalEntries, err := s.restoreFromSnapshotDB(snapshotDB, opts)
+	totalEntries, err := s.restoreFromSnapshotDB(&diskRestoreFromSnapshotDBParams{
+		ctx:        ctx,
+		snapshotDB: snapshotDB,
+		maxEntries: opts.MaxEntries,
+		maxBytes:   opts.MaxBytes,
+	})
 	if err != nil {
+		return nil, err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
@@ -251,28 +321,60 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 }
 
 // tryDiskSelfRestore checks if the snapshot path matches the store path.
-// Returns (summary, true) if self-restore, (nil, false) otherwise.
-func (s *DiskStore) tryDiskSelfRestore(snapshotPath string) (*RestoreSummary, bool) {
+// Returns done=true with summary when self-restore is detected.
+func (s *DiskStore) tryDiskSelfRestore(snapshotPath string) *diskSelfRestoreResult {
 	absSnapshotPath, err := filepath.Abs(snapshotPath)
 	if err != nil || absSnapshotPath != s.path {
-		return nil, false
+		return &diskSelfRestoreResult{}
 	}
 
 	totalEntries, err := s.diskKeyCount()
 	if err != nil {
-		return nil, false
+		return &diskSelfRestoreResult{}
 	}
 
-	return &RestoreSummary{
-		TotalEntries: totalEntries,
-	}, true
+	return &diskSelfRestoreResult{
+		summary: &RestoreSummary{
+			TotalEntries: totalEntries,
+		},
+		done: true,
+	}
+}
+
+// tryFinalizeSelfRestore completes an in-place restore and clears persisted claim leases.
+func (s *DiskStore) tryFinalizeSelfRestore(
+	params *diskTryFinalizeSelfRestoreParams,
+) (*diskSelfRestoreResult, error) {
+	selfRestoreResult := s.tryDiskSelfRestore(params.snapshotPath)
+	if !selfRestoreResult.done {
+		return selfRestoreResult, nil
+	}
+
+	if err := params.ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// Self-restore still starts a "new world"; drop all persisted claim leases.
+	if err := s.clearDiskClaims(); err != nil {
+		return nil, err
+	}
+
+	if s.trackKeys {
+		s.resetTrackedClaimsLocked()
+	}
+
+	return selfRestoreResult, nil
 }
 
 // restoreFromSnapshotDB performs the actual restore from an opened snapshot database.
-func (s *DiskStore) restoreFromSnapshotDB(snapshotDB *bolt.DB, opts *RestoreOptions) (int64, error) {
+func (s *DiskStore) restoreFromSnapshotDB(params *diskRestoreFromSnapshotDBParams) (int64, error) {
+	if err := params.ctx.Err(); err != nil {
+		return 0, err
+	}
+
 	budget := &restoreBudget{
-		maxEntries: opts.MaxEntries,
-		maxBytes:   opts.MaxBytes,
+		maxEntries: params.maxEntries,
+		maxBytes:   params.maxBytes,
 	}
 
 	var totalEntries int64
@@ -280,6 +382,10 @@ func (s *DiskStore) restoreFromSnapshotDB(snapshotDB *bolt.DB, opts *RestoreOpti
 	// Perform restore in a single write transaction for atomicity.
 	// If restore fails partway through, the entire operation rolls back.
 	if err := s.handle.Update(func(tx *bolt.Tx) error {
+		if err := params.ctx.Err(); err != nil {
+			return err
+		}
+
 		// Drop existing bucket to start fresh. ErrBucketNotFound is acceptable
 		// if the bucket doesn't exist yet (empty store).
 		if err := tx.DeleteBucket(s.bucket); err != nil && !errors.Is(err, boltErrors.ErrBucketNotFound) {
@@ -301,7 +407,11 @@ func (s *DiskStore) restoreFromSnapshotDB(snapshotDB *bolt.DB, opts *RestoreOpti
 		// while writing to destination DB (write Update). This is safe because
 		// bbolt allows concurrent read transactions from different DB handles.
 		// The snapshot DB is opened read-only, so no write conflicts can occur.
-		return snapshotDB.View(func(snapshotTx *bolt.Tx) error {
+		return params.snapshotDB.View(func(snapshotTx *bolt.Tx) error {
+			if err := params.ctx.Err(); err != nil {
+				return err
+			}
+
 			srcBucket := snapshotTx.Bucket(defaultBBoltBucketBytes)
 			if srcBucket == nil {
 				return fmt.Errorf("%w: %q", ErrBucketNotFound, defaultBBoltBucketBytes)
@@ -309,6 +419,10 @@ func (s *DiskStore) restoreFromSnapshotDB(snapshotDB *bolt.DB, opts *RestoreOpti
 
 			// Copy all entries from snapshot bucket to destination bucket.
 			return srcBucket.ForEach(func(k, v []byte) error {
+				if err := params.ctx.Err(); err != nil {
+					return err
+				}
+
 				// Check budget limits before accumulating this entry.
 				if err := budget.track(len(k), len(v)); err != nil {
 					return err
@@ -325,6 +439,10 @@ func (s *DiskStore) restoreFromSnapshotDB(snapshotDB *bolt.DB, opts *RestoreOpti
 		})
 	}); err != nil {
 		return 0, fmt.Errorf("%w: %w", ErrSnapshotReadFailed, err)
+	}
+
+	if err := params.ctx.Err(); err != nil {
+		return 0, err
 	}
 
 	return totalEntries, nil

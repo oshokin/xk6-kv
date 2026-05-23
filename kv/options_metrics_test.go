@@ -2,6 +2,7 @@ package kv
 
 import "testing"
 
+// TestMetricsOptionsEqual verifies that metrics options equal.
 func TestMetricsOptionsEqual(t *testing.T) {
 	t.Parallel()
 

@@ -41,6 +41,5 @@ export default async function () {
 }
 
 export function teardown() {
-  // Close once after all iterations.
   kv.close();
 }

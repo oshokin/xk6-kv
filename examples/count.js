@@ -38,3 +38,7 @@ export default async function () {
     "count all keys": (value) => value === 3
   });
 }
+
+export function teardown() {
+  kv.close();
+}

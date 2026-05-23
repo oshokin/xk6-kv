@@ -6,11 +6,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// emptyKeyOperation is a test type used by empty key operation tests.
 type emptyKeyOperation struct {
+	// name identifies the name case under test.
 	name string
-	run  func(Store) error
+	// run holds test state for empty key operation.
+	run func(Store) error
 }
 
+// TestMemoryStoreRejectsEmptyKeyForSingleKeyOperations verifies that memory store rejects empty key for single key operations.
 func TestMemoryStoreRejectsEmptyKeyForSingleKeyOperations(t *testing.T) {
 	t.Parallel()
 
@@ -25,6 +29,7 @@ func TestMemoryStoreRejectsEmptyKeyForSingleKeyOperations(t *testing.T) {
 	}
 }
 
+// TestDiskStoreRejectsEmptyKeyForSingleKeyOperations verifies that disk store rejects empty key for single key operations.
 func TestDiskStoreRejectsEmptyKeyForSingleKeyOperations(t *testing.T) {
 	t.Parallel()
 
@@ -39,6 +44,7 @@ func TestDiskStoreRejectsEmptyKeyForSingleKeyOperations(t *testing.T) {
 	}
 }
 
+// singleKeyEmptyKeyOperations is a test helper for single key empty key operations.
 func singleKeyEmptyKeyOperations() []emptyKeyOperation {
 	return []emptyKeyOperation{
 		{
@@ -136,6 +142,7 @@ func singleKeyEmptyKeyOperations() []emptyKeyOperation {
 	}
 }
 
+// requireEmptyKeyRejectedWithoutMutation is a test helper for require empty key rejected without mutation.
 func requireEmptyKeyRejectedWithoutMutation(t *testing.T, store Store, operation emptyKeyOperation) {
 	t.Helper()
 

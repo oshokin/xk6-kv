@@ -10,6 +10,7 @@ import { openKv } from "k6/x/kv";
 // - serialization: "json"
 // - trackKeys: false
 // - disk options: bbolt defaults (1s lock timeout, fsync on)
+// Data persists between runs. For clean test state add setup() + await kv.clear().
 const kv = openKv({ backend: "disk" });
 
 export default async function () {
@@ -18,7 +19,6 @@ export default async function () {
   console.log(`disk-basic value: ${value}`);
 }
 
-export async function teardown() {
-  // Close once after the run.
+export function teardown() {
   kv.close();
 }

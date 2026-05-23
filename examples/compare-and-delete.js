@@ -41,3 +41,7 @@ export default async function () {
   expect(nullDelete.deleted).toEqual(true);
   expect(nullDelete.reason).toEqual("deleted");
 }
+
+export function teardown() {
+  kv.close();
+}

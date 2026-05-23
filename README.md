@@ -13,16 +13,16 @@ Use **xk6-kv** when your k6 test needs writable shared state inside one k6 proce
 - **claim** or **pop** rows from a local pool (CSV/JSONL import, `setMany`, or runtime writes);
 - build **task queues** and producer/consumer flows;
 - share **mutable** state between scenarios;
-- **export** captured data after a run (`exportJSONL`, disk backend, snapshots).
+- **export** captured data after a run (`exportJSONL`, `exportCSV`, disk backend, snapshots).
 
 ## Why not just SharedArray?
 
 [`SharedArray`](https://grafana.com/docs/k6/latest/javascript-api/k6-data/sharedarray/) is read-only after initialization and is not meant for communication between VUs. **xk6-kv** adds a process-local, concurrency-safe store with:
 
-- lease-based allocation: `claimRandom`, `claimKey`, `claimRandomMany`;
+- lease-based allocation: `claimRandom`, `claimKey`, `claimKeys`, `claimRandomMany`;
 - one-shot drains: `popRandom`, `popRandomMany`;
 - streaming seed import: `importCSV`, `importJSONL`;
-- portable export: `exportJSONL`, `backup`, `restore`;
+- portable export: `exportJSONL`, `exportCSV`, `backup`, `restore`;
 - CAS-style operations (`compareAndSwap`, `incrementBy`, …) and operation metrics.
 
 ## xk6-kv vs built-in k6
@@ -31,10 +31,10 @@ Use **xk6-kv** when your k6 test needs writable shared state inside one k6 proce
 | --- | --- | --- |
 | Read-only shared fixtures | `SharedArray` | yes (import once, read many) |
 | Mutable shared state across VUs | no | yes (memory or disk backend) |
-| Unique credential / user allocation | manual indexing / external store | `claimRandom`, `claimKey`, `claimRandomMany` |
+| Unique credential / user allocation | manual indexing / external store | `claimRandom`, `claimKey`, `claimKeys`, `claimRandomMany` |
 | One-shot task queue (consume once) | manual | `popRandom`, `popRandomMany` |
 | Large CSV/JSONL seed files | load in `setup` yourself | `importCSV`, `importJSONL` |
-| Response capture to file | `handleSummary` / custom scripts | `exportJSONL`, `backup` / `restore` |
+| Response capture to file | `handleSummary` / custom scripts | `exportJSONL`, `exportCSV`, `backup` / `restore` |
 | Local mutable coordination without Redis | no | yes |
 
 ## When not to use xk6-kv
@@ -66,6 +66,9 @@ k6 run examples/import-csv.js
 
 # Export a prefix to JSONL after writes
 k6 run examples/export-jsonl.js
+
+# Export a prefix to flat CSV after writes
+k6 run examples/export-csv.js
 ```
 
 Production-style scenarios (metrics, thresholds, disk paths): [`e2e/`](./e2e/) — e.g. [`e2e/import-csv-portable-seed.js`](./e2e/import-csv-portable-seed.js), [`e2e/credential-pool-drain-observability.js`](./e2e/credential-pool-drain-observability.js). Full script index: [`examples/README.md`](./examples/README.md).
@@ -76,16 +79,27 @@ This project is **GNU AGPL v3.0** (fork of [oleiade/xk6-kv](https://github.com/o
 
 ## Core features
 
-- **Unique allocation:** `claimRandom`, `claimKey`, `claimRandomMany`, `renewClaim`, `releaseClaim`, `completeClaim`.
+- **Unique allocation:** `claimRandom`, `claimKey`, `claimKeys`, `claimRandomMany`, `renewClaim`, `releaseClaim`, `completeClaim`, `renewClaims`, `releaseClaims`, `completeClaims`.
 - **One-shot queues:** `popRandom`, `popRandomMany` (each successful pop removes the key).
 - **Large seed files:** streaming `importCSV` and `importJSONL`.
-- **Response capture & handoff:** `exportJSONL`, `backup` / `restore`, disk backend.
+- **Response capture & handoff:** `exportJSONL`, `exportCSV`, `validateCSV`, `validateJSONL`, `backup` / `restore`, disk backend.
 - **Batch KV:** `setMany`, `getMany`, `deleteMany`.
 - **Prefix workflows:** `scan`, `scanKeys`, `list`, `listKeys`, `deleteByPrefix`, `count`, `randomKey`, `randomKeys`.
 - **CAS-style ops:** `incrementBy`, `getOrSet`, `swap`, `compareAndSwap`, `compareAndDelete`, and related helpers.
-- **Observability:** optional operation metrics, `stats()`, `reportStats()`.
+- **Observability:** optional operation metrics, `stats()`, `allocationStats()`, `reportStats()`.
 - **Backends:** memory (sharded, fast) or disk/bbolt (persistent); optional `trackKeys` for faster random/claim paths on large datasets.
 - **TypeScript:** declarations in [`typescript/`](./typescript/) for IntelliSense.
+
+## Not implemented intentionally
+
+`xk6-kv` stays a local k6 test-data lifecycle engine. The following are intentionally out of scope:
+
+- no Redis backend;
+- no distributed locks;
+- no general key TTL (outside claim leases);
+- no general transactions;
+- no ETL transforms/schema inference/compression pipelines;
+- no `feedNext` in this release.
 
 ## 60-second example
 
@@ -292,8 +306,22 @@ try {
 High-level categories:
 
 - **Options & inputs** - typed guards such as `BackupOptionsRequiredError`, `ValueNumberRequiredError`, `UnsupportedValueTypeError`.
-- **Concurrency & lifecycle** - e.g. `BackupInProgressError`, `RestoreInProgressError`, `StoreReadOnlyError`, `StoreClosedError`.
+- **Concurrency & lifecycle** - e.g. `BackupInProgressError`, `RestoreInProgressError`, `OperationCanceledError`, `StoreReadOnlyError`, `StoreClosedError`.
 - **Disk & snapshot IO** - precise signals for path issues, permission problems, bbolt failures, or restore budget overruns.
+
+### OperationCanceledError
+
+`OperationCanceledError` is returned when the owning k6 VU context is canceled or reaches its deadline while an async operation is running.
+
+Typical causes:
+
+- test abort;
+- scenario stop;
+- iteration timeout;
+- Ctrl+C;
+- k6 engine shutdown.
+
+This is a control-flow error, not data corruption. Long-running operations such as `importJSONL`, `exportJSONL`, `exportCSV`, `importCSV`, `validateCSV`, `validateJSONL`, `backup`, and `restore` may stop early. For imports, already committed batches may remain committed.
 
 📚 A complete catalogue with root causes and remediation tips lives in [`examples/README.md`](./examples/README.md#error-manual).
 
@@ -307,12 +335,12 @@ See [`typescript/README.md`](./typescript/README.md) for complete setup instruct
 
 | Area | Methods |
 | --- | --- |
-| **Allocation** | `claimRandom`, `claimKey`, `claimRandomMany`, `releaseClaim`, `renewClaim`, `completeClaim`, `popRandom`, `popRandomMany` |
-| **Import / export** | `importCSV`, `importJSONL`, `exportJSONL`, `backup`, `restore`, `rebuildKeyList` |
+| **Allocation** | `claimRandom`, `claimKey`, `claimKeys`, `claimRandomMany`, `releaseClaim`, `releaseClaims`, `renewClaim`, `renewClaims`, `completeClaim`, `completeClaims`, `popRandom`, `popRandomMany` |
+| **Import / export** | `importCSV`, `importJSONL`, `exportJSONL`, `exportCSV`, `validateCSV`, `validateJSONL`, `backup`, `restore`, `rebuildKeyList` |
 | **Batch** | `setMany`, `getMany`, `deleteMany` |
 | **Query** | `get`, `set`, `delete`, `exists`, `list`, `listKeys`, `scan`, `scanKeys`, `count`, `size`, `randomKey`, `randomKeys`, `clear`, `close` |
 | **CAS-style** | `incrementBy`, `getOrSet`, `swap`, `compareAndSwap`, `setIfAbsent`, `deleteIfExists`, `compareAndDelete` |
-| **Observability** | `stats`, `reportStats` (+ optional operation metrics via `openKv({ metrics: … })`) |
+| **Observability** | `stats`, `allocationStats`, `reportStats` (+ optional operation metrics via `openKv({ metrics: … })`) |
 
 Full signatures, options, and error shapes: [**API Reference**](#api-reference) below. Scenario recipes: [Usage Examples](#usage-examples) and [`examples/README.md`](./examples/README.md).
 
@@ -619,20 +647,38 @@ Backend note:
 
 - **`claimKey(key: string, options?: { owner?: string, ttl?: number }): Promise<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } } | null>`** - Leases one specific key. Resolves to `null` when the key is missing or already live-claimed.
 
+- **`claimKeys(keys: string[], options?: { owner?: string, ttl?: number, allOrNothing?: boolean }): Promise<{ claimed: Array<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } }>, busy: string[], missing: string[] }>`** - Leases explicit keys in one call and returns `claimed` + `busy` + `missing` sets. Duplicate/empty keys reject as invalid options. With `allOrNothing: true`, processing stops on the first `busy`/`missing` key and only attempts best-effort rollback for claims acquired by this call when a later key is missing or busy. `allOrNothing` is a best-effort cleanup helper and does **not** make `claimKeys()` transactional. Use `allOrNothing: false` when you need a full diagnostic partition of all requested keys; `allOrNothing: true` is optimized for fast reservation and early rollback. `claimKeys()` accepts explicit keys only; it does not support prefix filtering in options.
+  > `claimKeys()` classifies `missing`/`busy` on a best-effort basis under concurrent mutation. It first attempts `ClaimKey()` and only when that returns `null` does a fallback `Exists()` check for `missing` vs `busy` classification. It is designed for deterministic fixture reservation, not transaction-level classification; a key can still be reclassified by concurrent mutation between claim attempt and fallback existence check. Only technical storage errors reject rollback; expiry/missing races during rollback are tolerated.
+
 - **`claimRandomMany(options: { prefix?: string, count: number, owner?: string, ttl?: number }): Promise<Array<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } }>>`** - Leases up to `count` unique random free matching entries from one store call. Resolves to `[]` when no free matches exist.
 
 - **`popRandomMany(options: { prefix?: string, count: number }): Promise<Array<{ key: string, value: any }>>`** - Claims up to `count` random free matching entries, decodes them, and completes each claim with `deleteKey=true`. Resolves to `[]` when no free matches exist. Completed deletes are not rolled back if a later completion fails. Remaining live claims are released best-effort.
 
 - **`releaseClaim(claim: { id: string, key: string, token: number }): Promise<boolean>`** - Releases a live claim back to the pool. Returns `false` for stale/expired/missing claims.
 
+- **`releaseClaims(claims: Array<{ id: string, key: string, token: number }>): Promise<{ attempted: number, released: number, failed: Array<{ index: number, id: string, key: string, name: string, message: string }> }>`** - Batch release helper with partial success. Payload shape errors reject; stale/missing claims are reported in `failed` with `name: "ClaimNotUpdated"`. Technical storage errors reject the whole promise, include applied-progress details in the error message (`after releasing X of Y`), and may happen after earlier items in the same batch were already applied.
+
 - **`completeClaim(claim, options?: { deleteKey?: boolean }): Promise<boolean>`** - Completes a live claim. By default it also deletes the underlying key (`deleteKey: true`).
+
+- **`completeClaims(claims: Array<{ id: string, key: string, token: number }>, options?: { deleteKey?: boolean }): Promise<{ attempted: number, completed: number, failed: Array<{ index: number, id: string, key: string, name: string, message: string }> }>`** - Batch completion helper with partial success and the same `deleteKey` default as `completeClaim()`. Stale/missing claims are reported in `failed` with `name: "ClaimNotUpdated"`. Technical storage errors reject the whole promise, include applied-progress details in the error message (`after completing X of Y`), and may happen after earlier items in the same batch were already applied.
 
 - **`renewClaim(claim: { id: string, key: string, token: number }, options: { ttl: number }): Promise<boolean>`** - Extends a live claim lease without changing the claim token. Returns `false` for stale/expired/missing claims or when the claim no longer owns the key.
 
+- **`renewClaims(claims: Array<{ id: string, key: string, token: number }>, options: { ttl: number }): Promise<{ attempted: number, renewed: number, failed: Array<{ index: number, id: string, key: string, name: string, message: string }> }>`** - Batch lease-renew helper with partial success and per-item failure diagnostics. Stale/missing claims are reported in `failed` with `name: "ClaimNotUpdated"`. Technical storage errors reject the whole promise, include applied-progress details in the error message (`after renewing X of Y`), and may happen after earlier items in the same batch were already applied.
+
+  Batch lifecycle helper semantics:
+
+  - `releaseClaims()`, `completeClaims()`, and `renewClaims()` are lifecycle convenience helpers.
+  - They execute claim operations sequentially in Go and return partial success summaries.
+  - Per-item stale/missing failures use stable `name: "ClaimNotUpdated"` in the `failed[]` array; `failed[].index` maps each failure to the original input position.
+  - Technical storage errors reject the whole promise and can happen after earlier items in the same batch were already applied.
+  - Rejection messages include applied-progress context (`after releasing/completing/renewing X of Y`) and earlier successful items are not rolled back.
+  - They are not cross-claim transactions and are intended for cleanup ergonomics, not backend-native high-throughput batch mutation.
+
   Claim lifecycle guidance:
 
-  - Use `completeClaim()` on **success** (`deleteKey: true` consumes the item permanently).
-  - Use `releaseClaim()` on **failure** to return the item to the pool.
+  - Use `completeClaim()` / `completeClaims()` on **success** (`deleteKey: true` consumes items permanently).
+  - Use `releaseClaim()` / `releaseClaims()` on **failure** to return items to the pool.
 
   ```javascript
   const claim = await kv.claimRandom({ prefix: 'user:' });
@@ -647,7 +693,7 @@ Backend note:
   }
   ```
 
-> ⚠️ Claim APIs (`claimRandom`, `claimKey`, `claimRandomMany`, `popRandom`, `popRandomMany`) are local coordination primitives for VUs sharing the same `xk6-kv` process/store. They are not distributed lock services.
+> ⚠️ Claim APIs (`claimRandom`, `claimKey`, `claimKeys`, `claimRandomMany`, `releaseClaim`, `releaseClaims`, `renewClaim`, `renewClaims`, `completeClaim`, `completeClaims`, `popRandom`, `popRandomMany`) are local coordination primitives for VUs sharing the same `xk6-kv` process/store. They are not distributed lock services.
 > `claimRandom()` and `popRandom()` are random allocation helpers optimized for low/moderate live-claim occupancy. Under very high live-claim occupancy, fallback selection can be biased toward scan order, but exclusivity is still preserved.
 > `claim.token` is exposed as a JavaScript number. It should not approach `Number.MAX_SAFE_INTEGER` in practical k6 runs; if that ever becomes realistic, a future major API should expose it as a string.
 
@@ -682,6 +728,38 @@ Backend note:
   console.log(snapshot.count, snapshot.claims.live);
   ```
 
+- **`allocationStats(options?: { prefix?: string }): Promise<{ prefix: string, total: number, claimable: number, claimedLive: number, claimedExpired: number, backend: "memory" | "disk", trackKeys: boolean }>`** - Returns prefix-scoped allocation health for claim workflows.
+  `prefix` is optional; empty/omitted means all keys.
+
+  ```javascript
+  const pool = await kv.allocationStats({ prefix: "users:" });
+  console.log(pool.total, pool.claimable, pool.claimedLive, pool.claimedExpired);
+  ```
+
+  Use `stats()` / `reportStats()` for global store health. Use `allocationStats({ prefix })` when you manage independent pools by prefix.
+  `allocationStats()` is intentionally an on-demand pool-availability diagnostic (not a metrics label dimension and not a low-level bbolt consistency checker). Prefix tags would create high-cardinality time-series in Prometheus-style metrics.
+  Backend behavior:
+  - memory backend: scans matching in-memory keyspace/shards;
+  - disk backend + `trackKeys: true`: writable handles read process-local operational key index used by claim APIs;
+  - disk backend + `trackKeys: true` + read-only open: falls back to durable bbolt key/claim scan;
+  - disk backend + `trackKeys: false`: scans durable bbolt keys for the prefix.
+  Treat `total` as "keys visible to the allocation index" for disk `trackKeys: true`, not as a forensic durable bbolt key count after out-of-band mutations.
+  After out-of-band durable mutations, check `stats().index.consistent` and call `rebuildKeyList()` before trusting prefix totals.
+  Recovery pattern:
+
+  ```javascript
+  const stats = await kv.stats();
+  if (stats.backend === "disk" && stats.trackKeys && stats.index && !stats.index.consistent) {
+    await kv.rebuildKeyList();
+  }
+
+  const pool = await kv.allocationStats({ prefix: "users:" });
+  ```
+
+  For large prefixes it may still be scan-heavy; use it in setup/teardown, health checks, or low-frequency diagnostics, not on every hot-path iteration.
+  Expired claims are counted as claimable; allocation operations can lazily reap or overwrite expired claim metadata.
+  The diagnostic call itself does not promise physical cleanup of stale lease records.
+
 - **`reportStats(): Promise<void>`** - Emits state gauges to k6 custom metrics using the current snapshot.
 
   Emitted metrics:
@@ -691,6 +769,8 @@ Backend note:
   - `xk6_kv_index_keys` (with `index=keys_list|keys_map|ost`)
   - `xk6_kv_index_consistent`
   - `xk6_kv_disk_size_bytes` (disk backend only)
+
+  Prefix-specific diagnostics are intentionally excluded from metrics labels to avoid high-cardinality time-series. Use `allocationStats({ prefix })` for those checks.
 
   ```javascript
   await kv.reportStats();
@@ -706,7 +786,9 @@ Backend note:
   - `xk6_kv_empty_result` (Rate for `random_key`/`random_keys`/`pop_random`/`claim_random`/`claim_key`/`claim_random_many`/`pop_random_many`, tags: `op`, `backend`, `track_keys`, `serialization`)
   - `xk6_kv_async_in_flight` (Gauge for async store operations currently running, tags: `backend`, `track_keys`, `serialization`)
 
-  `xk6_kv_async_in_flight` is the current saturation signal for background store operations in the async bridge. It is decremented when the store goroutine queues its event-loop completion callback, so it is not a count of unresolved JavaScript promises. There is no `waiting` metric because xk6-kv does not currently have an async limiter or queue; if one is added later, a low-cardinality waiting gauge can be added alongside it.
+  Batch lifecycle helpers (`releaseClaims` / `completeClaims` / `renewClaims`) can resolve with item-level `failed[]` entries without promise rejection. Those partial outcomes are returned in API results and are not emitted as operation-level error metrics unless the promise itself rejects on a technical storage error.
+
+  `xk6_kv_async_in_flight` is the current saturation signal for background store operations in the async bridge. It is decremented when the store goroutine queues its event-loop completion callback, so it is not a count of unresolved JavaScript promises. During shutdown/cancellation, the VU context may already be canceled and the final decrement sample can be dropped by the k6 metrics sink, even though xk6-kv still decrements its internal in-flight counter. There is no `waiting` metric because xk6-kv does not currently have an async limiter or queue; if one is added later, a low-cardinality waiting gauge can be added alongside it.
 
   ```javascript
   const kv = openKv({
@@ -753,7 +835,7 @@ Backend note:
   >
   > **Shared-file workflow:** Leaving `fileName` blank while running the memory backend is intentional—it writes into `.k6.kv`, the same file the disk backend mounts by default. That makes a common DX pattern possible: run the hot path with `backend: "memory"`, call `backup()` without arguments in `teardown()`, and later rerun the same test with `backend: "disk"` to replay the captured dataset. If you want snapshots to live somewhere else (or you run disk workloads in parallel), provide an explicit `fileName` so you don’t clobber the shared DB.
   >
-  > **File replacement semantics:** backup/export writes to a temp file in the destination directory, fsyncs, then renames into place and syncs the parent directory. On Unix-like filesystems, same-directory rename is atomic. On platforms where `os.Rename` is not guaranteed atomic, treat this as a best-effort crash-safety strategy; it still avoids intentionally writing partial data directly into the destination file.
+  > **File replacement semantics:** backup/export writes to a temp file in the destination directory, fsyncs, then replaces the destination and syncs the parent directory. On Unix-like filesystems this is same-directory atomic rename. On Windows, replacement uses best-effort remove-then-rename fallback when direct rename cannot replace an existing file, so treat it as crash-safer overwrite rather than a portable transactional primitive.
 
 - **`restore(options?: RestoreOptions): Promise<RestoreSummary>`**  
   Replaces the dataset with a snapshot produced by `backup()`. Optional `maxEntries` / `maxBytes` guards protect against oversized or corrupted inputs.
@@ -761,6 +843,11 @@ Backend note:
 - **`exportJSONL(options: { fileName: string, prefix?: string, limit?: number }): Promise<{ exported: number, fileName: string, bytesWritten: number }>`**  
   Exports key/value entries to a JSON Lines file for portable seed data and diff-friendly snapshots. Each line is:
   `{"key":"...","value":...}`. Values are exported after normal KV deserialization, not as raw backend bytes.
+  This is a scan-based export, not a long-lived point-in-time snapshot. Concurrent writes/deletes may affect later pages; use `backup()` for snapshot-style capture.
+
+- **`exportCSV(options: { fileName: string, prefix?: string, limit?: number, delimiter?: string, columns: string[], includeKey?: boolean }): Promise<{ exported: number, fileName: string, bytesWritten: number }>`**  
+  Exports tabular object data to CSV for portable handoff/reporting. Header row is always written. Values are exported after normal KV deserialization, not as raw backend bytes.
+  This is a scan-based export, not a long-lived point-in-time snapshot. Concurrent writes/deletes may affect later pages; use `backup()` for snapshot-style capture.
 
 - **`importJSONL(options: { fileName: string, limit?: number, batchSize?: number }): Promise<{ imported: number, fileName: string, bytesRead: number }>`**  
   Imports key/value entries from a JSON Lines file. Each line must be:
@@ -768,6 +855,29 @@ Backend note:
 
 - **`importCSV(options: { fileName: string, keyColumn: string, delimiter?: string, hasHeader?: boolean, limit?: number, batchSize?: number }): Promise<{ imported: number, fileName: string, bytesRead: number }>`**  
   Imports key/value rows from a CSV file. Each row becomes one object value; `keyColumn` selects the key field.
+
+- **`validateCSV(options: { fileName: string, keyColumn?: string, delimiter?: string, hasHeader?: boolean, limit?: number }): Promise<{ valid: boolean, rows: number, bytesRead: number, checkedAll: boolean, firstError?: { row: number, name: string, message: string } }>`**  
+  Read-only CSV preflight check with two modes:
+  - syntax mode (`keyColumn` omitted): validates CSV readability, delimiter/header shape;
+  - import-shape mode (`keyColumn` provided): validates syntax plus key extraction rules used by `importCSV()`.
+  Validation APIs are KV-instance methods for API consistency and metrics collection.
+  They require an open KV handle (reject with `StoreClosedError` after `close()`), but do not read or write KV store contents.
+  Content errors resolve with `valid: false`; invalid options and file I/O errors reject.
+  `bytesRead` is diagnostic progress information only. It is not a stable resume offset and should not be used as a cursor.
+  `checkedAll=true` means validation reached EOF. `checkedAll=false` means validation stopped because `limit` was reached.
+  Contract: treat `valid: true` as full-file validity only when `checkedAll === true`.
+  `delimiter` follows the same contract as `importCSV()` (`1` character, not `\r`, `\n`, `"`, or Unicode replacement rune `\uFFFD`).
+  If omitted or `<= 0`, `limit` validates all rows.
+  When `limit > 0`, only the first `N` data rows are checked, so `valid: true` applies to the inspected prefix.
+
+- **`validateJSONL(options: { fileName: string, limit?: number }): Promise<{ valid: boolean, records: number, bytesRead: number, checkedAll: boolean, firstError?: { line: number, name: string, message: string } }>`**  
+  Read-only JSONL preflight check. Content errors resolve with `valid: false`; invalid options and file I/O errors reject.
+  Validation APIs are KV-instance methods for API consistency and metrics collection.
+  They require an open KV handle (reject with `StoreClosedError` after `close()`), but do not read or write KV store contents.
+  `bytesRead` is diagnostic progress information only. It is not a stable resume offset and should not be used as a cursor.
+  `checkedAll=true` means validation reached EOF. `checkedAll=false` means validation stopped because `limit` was reached.
+  Contract: treat `valid: true` as full-file validity only when `checkedAll === true`.
+  When `limit > 0`, only the first `N` records are checked, so `valid: true` applies to the inspected prefix.
 
 ```typescript
 await kv.backup({
@@ -798,7 +908,74 @@ console.log(result.bytesWritten);
 - `prefix` is optional; empty or omitted means all keys.
 - `limit` is optional; if omitted or `<= 0`, all matching entries are exported. Positive values are capped at `1000000`.
 
-`exportJSONL()` writes to a temporary file, flushes and fsyncs it, renames it into place, then syncs the parent directory. On Unix-like filesystems this gives atomic replacement in the common same-directory case. On platforms where `os.Rename` is not guaranteed atomic, this remains a best-effort crash-safety strategy and still avoids intentionally writing partial data directly into the target file.
+`exportJSONL()` writes to a temporary file, flushes and fsyncs it, replaces the target, then syncs the parent directory. On Unix-like filesystems this gives atomic replacement in the common same-directory case. On Windows, replacement falls back to remove-then-rename when needed; this is still best-effort crash safety and avoids intentionally writing partial data directly into the target file.
+
+`exportCSV()` example:
+
+```javascript
+const result = await kv.exportCSV({
+  fileName: "./exports/responses.csv",
+  prefix: "responses:",
+  includeKey: true,
+  columns: ["status", "requestId", "userId", "bodyHash"],
+});
+
+console.log(result.exported);
+console.log(result.bytesWritten);
+```
+
+`exportCSV()` options:
+
+- `fileName` is required and must be a non-empty string.
+- `columns` is required, must be non-empty, and column names must be unique non-empty strings.
+- Column names are exact; leading/trailing whitespace is significant.
+- `includeKey` is optional and defaults to `true`.
+- When `includeKey=true`, `columns` must not contain `"key"` because `exportCSV()` writes the store key as the first CSV column.
+- Use `includeKey=false` if you need to export a value field named `"key"`.
+- `delimiter` is optional and must be a valid CSV delimiter: exactly one character, not `\r`, `\n`, `"`, or Unicode replacement rune `\uFFFD`. Default is comma.
+- `prefix` is optional; empty or omitted means all keys.
+- `limit` is optional; if omitted or `<= 0`, all matching entries are exported. Positive values are capped at `1000000`.
+
+`exportCSV()` data-shape constraints:
+
+- `exportCSV()` exports tabular object data.
+- Each exported value must decode to a plain JSON object row.
+- Internal contract: value deserialization must produce `map[string]any`.
+- Only top-level scalar fields are supported.
+- Missing requested fields are written as empty cells.
+- Nested objects and arrays are rejected.
+- Nested path expressions (for example, `user.id`) are not supported.
+- Scalar/non-object stored values are rejected.
+- Stores opened with `serialization: "string"` are generally incompatible with `exportCSV()` because values decode as strings, not JSON object rows.
+- Supported scalar field types: string, boolean, integer/float, `json.Number`, and `null`.
+- CSV is a flat text format and does not preserve JSON value types across roundtrips.
+- Numbers/booleans are exported as text cells and `importCSV()` reads those cells as strings.
+- Use `exportJSONL()` + `importJSONL()` for type-preserving roundtrips.
+- For scalar/string values, use `exportJSONL()`.
+- No flattening, schema inference, transforms, or automatic nested JSON stringification are performed.
+
+Rejected-shape examples:
+
+```javascript
+await kv.set("bad:1", {
+  status: 200,
+  body: { id: 123 },
+});
+
+await kv.set("bad:2", "raw body");
+
+await kv.exportCSV({
+  fileName: "./bad.csv",
+  prefix: "bad:",
+  columns: ["status", "body"],
+});
+// rejects:
+// - bad:1 -> nested object column ("body")
+// - bad:2 -> scalar/non-object row value
+// use exportJSONL() for nested/scalar data
+```
+
+`exportCSV()` uses the same temp-file -> flush/sync -> rename -> parent-dir-sync replacement strategy as `exportJSONL()`.
 
 `importJSONL()` example:
 
@@ -832,19 +1009,77 @@ The import is batch-atomic, not file-atomic: if a later line is invalid, already
 
 `importCSV()` streams rows and writes them in `setMany()` batches. Existing keys are overwritten.
 `keyColumn` is required; with `hasHeader: true` it is a header name, with `hasHeader: false` it must be a zero-based column index encoded as string.
+CSV rows are lenient by width: if a row has fewer columns than the header, missing fields are imported as empty strings; if a row has more columns than the header, extra fields are preserved as `column_N`.
 Rows with missing/empty keys are rejected with row-numbered parse errors.
 
 `importCSV()` options:
 
 - `fileName` is required and must be a non-empty string.
 - `keyColumn` is required (column name when `hasHeader: true`, zero-based index string when `hasHeader: false`).
-- `delimiter` is optional and must be exactly one character.
+- `delimiter` is optional and must be a valid CSV delimiter: exactly one character, not `\r`, `\n`, `"`, or Unicode replacement rune `\uFFFD`.
 - `hasHeader` is optional and defaults to `true`.
 - `limit` is optional; if omitted or `0`, all rows are imported. Negative values are rejected. Positive values are capped at `1000000`.
 - `batchSize` is optional; if omitted or `0`, the default batch size is used. Negative values are rejected. Positive values are capped at `10000`.
+- CSV import/validation currently relies on Go `encoding/csv` and does not enforce a per-record byte cap; avoid feeding untrusted arbitrarily large rows. For bounded per-record guards, prefer JSONL (`64 MiB` per-line limit).
+
+`validateCSV()` example:
+
+```javascript
+const csvCheck = await kv.validateCSV({
+  fileName: "./examples/fixtures/users.csv",
+  keyColumn: "id",
+  hasHeader: true,
+});
+
+if (!csvCheck.valid) {
+  throw new Error(`csv invalid at row ${csvCheck.firstError.row}: ${csvCheck.firstError.message}`);
+}
+```
+
+`validateJSONL()` example:
+
+```javascript
+const jsonlCheck = await kv.validateJSONL({
+  fileName: "./examples/fixtures/users.jsonl",
+});
+
+if (!jsonlCheck.valid) {
+  throw new Error(`jsonl invalid at line ${jsonlCheck.firstError.line}: ${jsonlCheck.firstError.message}`);
+}
+```
+
+Validation semantics (`validateCSV()` / `validateJSONL()`):
+
+- Read-only: no writes to the KV store.
+- `validateCSV()` has two modes:
+  - syntax mode (`validateCSV({ fileName, hasHeader, delimiter })`) checks CSV readability/header shape;
+  - import-shape mode (`validateCSV({ fileName, keyColumn, hasHeader, delimiter })`) also validates key extraction compatibility with `importCSV()`.
+- Validation methods are KV-instance methods for API consistency and metrics collection.
+- They require an open KV handle (`StoreClosedError` after `close()`), but they do not read or write KV store contents.
+- They are read-only (no KV writes) but still go through normal operation lifecycle/metrics paths.
+- Stops at first malformed content record.
+- Malformed content resolves a structured invalid result (`valid: false`, `firstError`).
+- Invalid options, file open/permission/system I/O failures, and context cancellation reject.
+- `bytesRead` is a diagnostic byte counter for data read from the file, not a stable resume/cursor offset.
+- `validateCSV()` uses the same delimiter contract as `importCSV()` / `exportCSV()` (exactly one character, not `\r`, `\n`, `"`, or `\uFFFD`).
+- `validateCSV()` uses Go `encoding/csv` parsing compatible with `importCSV()`.
+- CSV row-width handling is lenient (same as `importCSV()`): missing columns are treated as empty fields; extra columns are accepted.
+- In import-shape mode (`keyColumn` set), this means key checks run against normalized rows (`""` for missing cells, `column_N` for extras).
+- `validateCSV()` `limit` defaults to full-file validation when omitted or `<= 0`.
+- `validateJSONL()` `limit` defaults to full-file validation when omitted or `<= 0`.
+- `checkedAll=true` means validation reached EOF.
+- `checkedAll=false` means validation was stopped by `limit`; in this case `valid: true` confirms only inspected prefix validity.
+- Contract: `valid: true` means "whole file valid" only when `checkedAll === true`.
+- With `limit > 0`, only the inspected prefix is validated:
+  - CSV: first `N` data rows;
+  - JSONL: first `N` records.
+  In that mode, `valid: true` does not imply the whole file is valid.
+- Empty CSV/JSONL files are considered valid preflight input (`rows: 0` / `records: 0`).
+- If your workflow requires non-empty data, assert `rows > 0` or `records > 0` in script checks.
 
 - **`close(): void`** - Synchronously closes this KV handle. Call once in `teardown()`.
   After `close()`, this handle rejects async operations with `StoreClosedError` on both backends.
+  Operations that already started before `close()` may still resolve or reject normally.
   Closing one handle does not affect other open handles until the shared store refcount reaches zero.
   It also does not allow later `openKv()` calls to switch backend, path, serialization, or key-tracking options.
   Do **not** call `close()` from `default()` iterations.
@@ -862,6 +1097,28 @@ Rows with missing/empty keys are rejected with row-numbered parse errors.
 - **Memory `trackKeys: false` scan/list costs:** `scan()`, `scanKeys()`, `list()`, and `listKeys()` use untracked shard-map iteration. On large keyspaces, repeated pagination can become expensive; if these operations are hot, prefer `trackKeys: true`.
 - **Disk backend and `trackKeys`:** bbolt is the persistent source of truth. With `trackKeys: true`, the disk backend maintains an exact derived in-memory key index rebuilt from bbolt on open/restore and updated after successful mutations. That index accelerates `randomKey()`, `randomKeys()`, and `count()`, while cursor-style key reads (`scanKeys()` and `listKeys()`) still read from bbolt.
 - **Disk claim allocation:** with `trackKeys: true`, claim metadata is stored in process-local in-memory OST metadata (not bbolt). `claimRandom()`, `claimKey()`, `claimRandomMany()`, `releaseClaim()`, `renewClaim()`, and `completeClaim({ deleteKey: false })` stay on the in-memory path; only durable key deletes (`popRandom()`, `popRandomMany()`, `completeClaim({ deleteKey: true })`) require bbolt `Update()`. With `trackKeys: false`, claim metadata remains in the bbolt claims-bucket fallback path, and batch random claim allocation may scan/materialize a large candidate set. For high-throughput disk random allocation, prefer `trackKeys: true`.
+
+#### AllocationStats Benchmark Matrix
+
+`allocationStats()` is diagnostic and can be scan-heavy on large prefixes. Use this benchmark matrix to profile your environment:
+
+```bash
+go test ./kv/store -run '^$' -bench 'AllocationStats' -benchtime=3s -count=3 -benchmem
+```
+
+Scenarios covered in the benchmark:
+
+- memory `trackKeys=false` with prefix coverage `1%`, `10%`, `100%`
+- memory `trackKeys=true` with prefix coverage `1%`, `10%`, `100%`
+- disk `trackKeys=false` with prefix coverage `1%`, `10%`, `100%`
+- disk `trackKeys=true` with prefix coverage `1%`, `10%`, `100%`
+- memory keyspace-scaling matrix (`1k`, `10k`, `100k` total keys with `10%` prefix matches)
+
+Memory keyspace-scaling command (to quantify O(N)-style diagnostics pressure before optimizing):
+
+```bash
+go test ./kv/store -run '^$' -bench 'MemoryStore_AllocationStats_KeyspaceScaling' -benchtime=3s -count=3 -benchmem
+```
 
 #### Disk Allocation Benchmark Snapshot
 
@@ -902,14 +1159,24 @@ Observability-focused scripts:
 - E2E lease-worker observability scenario: [`e2e/subscription-renewal-lease-observability.js`](./e2e/subscription-renewal-lease-observability.js)
 - E2E credential pool drain scenario: [`e2e/credential-pool-drain-observability.js`](./e2e/credential-pool-drain-observability.js)
 - Batch claim allocation example: [`examples/claim-random-many.js`](./examples/claim-random-many.js)
+- Batch claim lifecycle example: [`examples/claim-batch-lifecycle.js`](./examples/claim-batch-lifecycle.js)
+- Explicit fixture reservation example: [`examples/claim-keys.js`](./examples/claim-keys.js)
 - Batch pop allocation example: [`examples/pop-random-many.js`](./examples/pop-random-many.js)
 - CSV import example: [`examples/import-csv.js`](./examples/import-csv.js)
+- CSV export example: [`examples/export-csv.js`](./examples/export-csv.js)
+- Allocation diagnostics example: [`examples/allocation-stats.js`](./examples/allocation-stats.js)
+- Import preflight validation example: [`examples/validate-import-files.js`](./examples/validate-import-files.js)
+- E2E batch lifecycle scenario: [`e2e/batch-claim-lifecycle.js`](./e2e/batch-claim-lifecycle.js)
+- E2E explicit fixture reservation scenario: [`e2e/claim-keys-explicit-fixtures.js`](./e2e/claim-keys-explicit-fixtures.js)
+- E2E allocation diagnostics scenario: [`e2e/allocation-stats-pool-health.js`](./e2e/allocation-stats-pool-health.js)
+- E2E CSV export scenario: [`e2e/export-csv-response-capture.js`](./e2e/export-csv-response-capture.js)
 
 ### Allocation Recipes
 
-- **Unique users:** import a user pool (`importCSV()` or `setMany()`), allocate with `claimRandom()` / `claimRandomMany()`, then `completeClaim()` on success or `releaseClaim()` on failure.
-- **Credential pool:** fetch exact credentials with `claimKey()`, extend long-running work with `renewClaim()`, and always release stale/failed attempts.
-- **Response capture:** write response envelopes with `kv.set("responses:<id>", payload)` during the run, then `exportJSONL()` in teardown/summary.
+- **Unique users:** import a user pool (`importCSV()` or `setMany()`), allocate with `claimRandom()` / `claimRandomMany()`, then `completeClaim()` / `completeClaims()` on success or `releaseClaim()` / `releaseClaims()` on failure.
+- **Credential pool:** fetch exact credentials with `claimKey()` / `claimKeys()`, extend long-running work with `renewClaim()` / `renewClaims()`, and always release stale/failed attempts.
+- **Response capture:** write response envelopes with `kv.set("responses:<id>", payload)` during the run, then `exportJSONL()` or `exportCSV()` in teardown/summary.
+- **Pool diagnostics:** use global `stats()` for store-wide health and `allocationStats({ prefix })` for prefix-scoped claimability snapshots.
 - **Cross-run handoff:** use disk backend + `backup()`/`restore()` or `exportJSONL()`/`importJSONL()`; claim leases are process-local and are cleared on writable open/clear/restore/rebuild/close.
 
 ### Producer / Consumer
@@ -999,15 +1266,18 @@ The Taskfile includes one internal helper (`_ensure-bin`) plus user-facing tasks
 | `task xk6-lint-community` | Run `xk6 lint --preset community .` with pinned toolchain; auto-installs `gosec` into `./bin` if missing. |
 | `task test` | Run unit tests (`go test -v ./...`). |
 | `task test-race` | Run unit tests with race detector. |
+| `task test-typescript` | Run TypeScript declaration smoke tests (`npm ci` + `npm test` in `typescript/`). |
+| `task release-check` | Run full release readiness checks (`lint`, `xk6-lint-community`, `test-race`, `test-typescript`, and E2E via `scripts/release_check_e2e.sh` / `scripts/release_check_e2e.ps1`). |
 | `task build-k6` | Build `./bin/k6` with local `xk6-kv` and pinned `xk6-file`. |
 | `task test-e2e-all` | Run all `e2e/*.js` scenarios across backend/key-tracking matrix. |
 | `task test-e2e-single E2E_SCENARIO=tenant-prefix-count-window` | Run one scenario across backend/key-tracking matrix. |
-| `task clean` | Remove generated artifacts (`./bin`, `.k6.kv`). |
+| `task clean` | Remove generated artifacts (`./bin`, `./tmp/e2e`, `.k6.kv`). |
 
 #### E2E recipe notes
 
 - `test-e2e-single` requires `E2E_SCENARIO`.
 - `test-e2e-all` and `test-e2e-single` support `VUS` and `ITERATIONS` overrides.
+- E2E scenarios require the Taskfile-built binary (`task build-k6`) because some tests import `k6/x/file` (`xk6-file` extension).
 - Example: `task test-e2e-single E2E_SCENARIO=tenant-prefix-count-window VUS=20 ITERATIONS=200`.
 
 ### Code Quality
@@ -1019,9 +1289,21 @@ The Taskfile includes one internal helper (`_ensure-bin`) plus user-facing tasks
 
 Run `task lint-fix` before committing.
 
+### Public API Change Checklist
+
+When adding or changing a public JS method, update all of:
+
+- Go method implementation and operation metric name.
+- `typescript/xk6-kv.d.ts`.
+- `README.md` API table/reference.
+- user-facing example or e2e scenario when behavior is externally visible.
+- `typescript/api-smoke.ts`.
+
 ## Versioning & Releases
 
 This project uses **automated semantic versioning** based on commit messages:
+
+Before public release, run `task release-check`.
 
 - **`fix: description`** -> Patch version (1.0.0 -> 1.0.1)
 - **`feat: description`** -> Minor version (1.0.0 -> 1.1.0)

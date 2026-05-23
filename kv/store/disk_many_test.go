@@ -14,6 +14,7 @@ import (
 	boltErrors "go.etcd.io/bbolt/errors"
 )
 
+// TestDiskStore_SetMany_Empty verifies that disk store set many empty.
 func TestDiskStore_SetMany_Empty(t *testing.T) {
 	t.Parallel()
 
@@ -37,6 +38,7 @@ func TestDiskStore_SetMany_Empty(t *testing.T) {
 	}
 }
 
+// TestDiskStore_SetMany_WritesAndOverwrites verifies that disk store set many writes and overwrites.
 func TestDiskStore_SetMany_WritesAndOverwrites(t *testing.T) {
 	t.Parallel()
 
@@ -75,6 +77,7 @@ func TestDiskStore_SetMany_WritesAndOverwrites(t *testing.T) {
 	}
 }
 
+// TestDiskStore_SetMany_UnsupportedValueTypeDoesNotWrite verifies that disk store set many unsupported value type does not write.
 func TestDiskStore_SetMany_UnsupportedValueTypeDoesNotWrite(t *testing.T) {
 	t.Parallel()
 
@@ -91,6 +94,7 @@ func TestDiskStore_SetMany_UnsupportedValueTypeDoesNotWrite(t *testing.T) {
 	assert.False(t, exists, "batch must be all-or-nothing")
 }
 
+// TestDiskStore_SetMany_EmptyKeyDoesNotWrite verifies that disk store set many empty key does not write.
 func TestDiskStore_SetMany_EmptyKeyDoesNotWrite(t *testing.T) {
 	t.Parallel()
 
@@ -107,6 +111,7 @@ func TestDiskStore_SetMany_EmptyKeyDoesNotWrite(t *testing.T) {
 	assert.False(t, exists, "batch must be all-or-nothing")
 }
 
+// TestDiskStore_SetMany_DoesNotClearLiveClaim verifies that disk store set many does not clear live claim.
 func TestDiskStore_SetMany_DoesNotClearLiveClaim(t *testing.T) {
 	t.Parallel()
 
@@ -134,6 +139,7 @@ func TestDiskStore_SetMany_DoesNotClearLiveClaim(t *testing.T) {
 	assert.Nil(t, secondClaim, "overwriting value must not release live claim")
 }
 
+// TestDiskStore_SetMany_Concurrent_TrackKeysConsistency verifies that disk store set many concurrent track keys consistency.
 func TestDiskStore_SetMany_Concurrent_TrackKeysConsistency(t *testing.T) {
 	t.Parallel()
 
@@ -206,6 +212,7 @@ func TestDiskStore_SetMany_Concurrent_TrackKeysConsistency(t *testing.T) {
 	}
 }
 
+// TestDiskStore_GetMany_EmptyKeys verifies that disk store get many empty keys.
 func TestDiskStore_GetMany_EmptyKeys(t *testing.T) {
 	t.Parallel()
 
@@ -221,6 +228,7 @@ func TestDiskStore_GetMany_EmptyKeys(t *testing.T) {
 	}
 }
 
+// TestDiskStore_GetMany_PreservesOrderAndMissing verifies that disk store get many preserves order and missing.
 func TestDiskStore_GetMany_PreservesOrderAndMissing(t *testing.T) {
 	t.Parallel()
 
@@ -249,6 +257,7 @@ func TestDiskStore_GetMany_PreservesOrderAndMissing(t *testing.T) {
 	}
 }
 
+// TestDiskStore_GetMany_DuplicateKeys verifies that disk store get many duplicate keys.
 func TestDiskStore_GetMany_DuplicateKeys(t *testing.T) {
 	t.Parallel()
 
@@ -264,6 +273,7 @@ func TestDiskStore_GetMany_DuplicateKeys(t *testing.T) {
 	assert.Equal(t, []byte("one"), entries[1].Value)
 }
 
+// TestDiskStore_GetMany_ReturnsDefensiveCopies verifies that disk store get many returns defensive copies.
 func TestDiskStore_GetMany_ReturnsDefensiveCopies(t *testing.T) {
 	t.Parallel()
 
@@ -282,6 +292,7 @@ func TestDiskStore_GetMany_ReturnsDefensiveCopies(t *testing.T) {
 	assert.Equal(t, []byte("one"), actual)
 }
 
+// TestDiskStore_GetMany_EmptyKeyReturnsMissingEntry verifies that disk store get many empty key returns missing entry.
 func TestDiskStore_GetMany_EmptyKeyReturnsMissingEntry(t *testing.T) {
 	t.Parallel()
 
@@ -293,6 +304,7 @@ func TestDiskStore_GetMany_EmptyKeyReturnsMissingEntry(t *testing.T) {
 	assert.Nil(t, entries[0])
 }
 
+// TestDiskStore_GetMany_ConcurrentWithSetMany verifies that disk store get many concurrent with set many.
 func TestDiskStore_GetMany_ConcurrentWithSetMany(t *testing.T) {
 	t.Parallel()
 
@@ -364,6 +376,7 @@ func TestDiskStore_GetMany_ConcurrentWithSetMany(t *testing.T) {
 	}
 }
 
+// TestDiskStore_DeleteMany_EmptyKeys verifies that disk store delete many empty keys.
 func TestDiskStore_DeleteMany_EmptyKeys(t *testing.T) {
 	t.Parallel()
 
@@ -382,6 +395,7 @@ func TestDiskStore_DeleteMany_EmptyKeys(t *testing.T) {
 	}
 }
 
+// TestDiskStore_DeleteMany_EmptyKeyRejectsWithoutPartialDelete verifies that disk store delete many empty key rejects without partial delete.
 func TestDiskStore_DeleteMany_EmptyKeyRejectsWithoutPartialDelete(t *testing.T) {
 	t.Parallel()
 
@@ -397,6 +411,7 @@ func TestDiskStore_DeleteMany_EmptyKeyRejectsWithoutPartialDelete(t *testing.T) 
 	assert.True(t, exists, "DeleteMany must validate first and avoid partial delete")
 }
 
+// TestDiskStore_DeleteMany_DeletesExistingAndCountsMissing verifies that disk store delete many deletes existing and counts missing.
 func TestDiskStore_DeleteMany_DeletesExistingAndCountsMissing(t *testing.T) {
 	t.Parallel()
 
@@ -423,6 +438,7 @@ func TestDiskStore_DeleteMany_DeletesExistingAndCountsMissing(t *testing.T) {
 	}
 }
 
+// TestDiskStore_DeleteMany_TrackedClaimsMode_DoesNotTouchClaimsBucket verifies that disk store delete many tracked claims mode does not touch claims bucket.
 func TestDiskStore_DeleteMany_TrackedClaimsMode_DoesNotTouchClaimsBucket(t *testing.T) {
 	t.Parallel()
 
@@ -450,6 +466,7 @@ func TestDiskStore_DeleteMany_TrackedClaimsMode_DoesNotTouchClaimsBucket(t *test
 	}))
 }
 
+// TestDiskStore_DeleteMany_BoltClaimsMode_CreatesClaimsBucket verifies that disk store delete many bolt claims mode creates claims bucket.
 func TestDiskStore_DeleteMany_BoltClaimsMode_CreatesClaimsBucket(t *testing.T) {
 	t.Parallel()
 
@@ -477,6 +494,7 @@ func TestDiskStore_DeleteMany_BoltClaimsMode_CreatesClaimsBucket(t *testing.T) {
 	}))
 }
 
+// TestDiskStore_DeleteMany_DuplicateKeys verifies that disk store delete many duplicate keys.
 func TestDiskStore_DeleteMany_DuplicateKeys(t *testing.T) {
 	t.Parallel()
 
@@ -490,6 +508,7 @@ func TestDiskStore_DeleteMany_DuplicateKeys(t *testing.T) {
 	assert.EqualValues(t, 1, result.Missing)
 }
 
+// TestDiskStore_DeleteMany_UpdatesCountAndTracking verifies that disk store delete many updates count and tracking.
 func TestDiskStore_DeleteMany_UpdatesCountAndTracking(t *testing.T) {
 	t.Parallel()
 
@@ -518,6 +537,7 @@ func TestDiskStore_DeleteMany_UpdatesCountAndTracking(t *testing.T) {
 	requireDiskTrackingMatchesStore(t, store)
 }
 
+// TestDiskStore_DeleteMany_CleansClaims verifies that disk store delete many cleans claims.
 func TestDiskStore_DeleteMany_CleansClaims(t *testing.T) {
 	t.Parallel()
 
@@ -546,6 +566,7 @@ func TestDiskStore_DeleteMany_CleansClaims(t *testing.T) {
 	assert.False(t, released, "claim metadata for deleted key must be removed")
 }
 
+// TestDiskStore_DeleteMany_CleansClaimsForMissingKey verifies that disk store delete many cleans claims for missing key.
 func TestDiskStore_DeleteMany_CleansClaimsForMissingKey(t *testing.T) {
 	t.Parallel()
 
@@ -599,6 +620,7 @@ func TestDiskStore_DeleteMany_CleansClaimsForMissingKey(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestDiskStore_DeleteMany_CleansStalePositiveIndexForMissingKey verifies that disk store delete many cleans stale positive index for missing key.
 func TestDiskStore_DeleteMany_CleansStalePositiveIndexForMissingKey(t *testing.T) {
 	t.Parallel()
 
@@ -634,6 +656,7 @@ func TestDiskStore_DeleteMany_CleansStalePositiveIndexForMissingKey(t *testing.T
 	assert.False(t, indexed, "DeleteMany must clean stale-positive index entries")
 }
 
+// TestDiskStore_DeleteMany_ConcurrentWithSetAndGet verifies that disk store delete many concurrent with set and get.
 func TestDiskStore_DeleteMany_ConcurrentWithSetAndGet(t *testing.T) {
 	t.Parallel()
 

@@ -61,12 +61,15 @@ func (k *KV) Backup(options sobek.Value) *sobek.Promise {
 		return k.rejectedPromiseObserved(opBackup, err)
 	}
 
+	ctx := k.vu.Context()
+
 	return k.runAsyncWithStoreObserved(
 		opBackup,
 		func(s store.Store) (any, error) {
 			storeSummary, err := s.Backup(&store.BackupOptions{
 				FileName:              backupOptions.FileName,
 				AllowConcurrentWrites: backupOptions.AllowConcurrentWrites,
+				Context:               ctx,
 			})
 			if err != nil {
 				return nil, err
@@ -94,6 +97,8 @@ func (k *KV) Restore(options sobek.Value) *sobek.Promise {
 		return k.rejectedPromiseObserved(opRestore, err)
 	}
 
+	ctx := k.vu.Context()
+
 	return k.runAsyncWithStoreObserved(
 		opRestore,
 		func(s store.Store) (any, error) {
@@ -101,6 +106,7 @@ func (k *KV) Restore(options sobek.Value) *sobek.Promise {
 				FileName:   restoreOptions.FileName,
 				MaxEntries: restoreOptions.MaxEntries,
 				MaxBytes:   restoreOptions.MaxBytes,
+				Context:    ctx,
 			})
 			if err != nil {
 				return nil, err

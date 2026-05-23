@@ -886,6 +886,11 @@ func (s *DiskStore) ensureWritable() error {
 	return nil
 }
 
+// diskReadOnly returns whether the disk is read-only.
+func (s *DiskStore) diskReadOnly() bool {
+	return s.boltOptions != nil && s.boltOptions.ReadOnly
+}
+
 // beginOperation acquires the lifecycle read-lock and verifies the store is open.
 // The returned release function must be called exactly once.
 func (s *DiskStore) beginOperation() (func(), error) {

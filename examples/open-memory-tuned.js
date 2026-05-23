@@ -19,3 +19,7 @@ export default async function () {
   const nextValue = await kv.incrementBy("counter", 1);
   console.log(`memory-tuned counter=${nextValue}`);
 }
+
+export function teardown() {
+  kv.close();
+}

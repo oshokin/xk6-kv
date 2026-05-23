@@ -550,6 +550,7 @@ func TestDiskStore_Count_MutationParity(t *testing.T) {
 	}
 }
 
+// TestDiskStore_Count_MutationParityAfterRestoreAndReopen verifies that disk store count mutation parity after restore and reopen.
 func TestDiskStore_Count_MutationParityAfterRestoreAndReopen(t *testing.T) {
 	t.Parallel()
 
@@ -584,6 +585,7 @@ func TestDiskStore_Count_MutationParityAfterRestoreAndReopen(t *testing.T) {
 	assert.EqualValues(t, 3, requireCountMatchesScan(t, reopened, ""))
 }
 
+// TestDiskStore_ListKeys_EmptyStore verifies that disk store list keys empty store.
 func TestDiskStore_ListKeys_EmptyStore(t *testing.T) {
 	t.Parallel()
 
@@ -600,6 +602,7 @@ func TestDiskStore_ListKeys_EmptyStore(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ListKeys_AllKeysOrdered verifies that disk store list keys all keys ordered.
 func TestDiskStore_ListKeys_AllKeysOrdered(t *testing.T) {
 	t.Parallel()
 
@@ -622,6 +625,7 @@ func TestDiskStore_ListKeys_AllKeysOrdered(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ListKeys_Prefix verifies that disk store list keys prefix.
 func TestDiskStore_ListKeys_Prefix(t *testing.T) {
 	t.Parallel()
 
@@ -644,6 +648,7 @@ func TestDiskStore_ListKeys_Prefix(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ListKeys_Limit verifies that disk store list keys limit.
 func TestDiskStore_ListKeys_Limit(t *testing.T) {
 	t.Parallel()
 
@@ -666,6 +671,7 @@ func TestDiskStore_ListKeys_Limit(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ListKeys_AfterDeleteMany verifies that disk store list keys after delete many.
 func TestDiskStore_ListKeys_AfterDeleteMany(t *testing.T) {
 	t.Parallel()
 
@@ -690,6 +696,7 @@ func TestDiskStore_ListKeys_AfterDeleteMany(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ListKeys_AfterRebuildKeyList verifies that disk store list keys after rebuild key list.
 func TestDiskStore_ListKeys_AfterRebuildKeyList(t *testing.T) {
 	t.Parallel()
 
@@ -714,6 +721,7 @@ func TestDiskStore_ListKeys_AfterRebuildKeyList(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ScanKeys_EmptyStore verifies that disk store scan keys empty store.
 func TestDiskStore_ScanKeys_EmptyStore(t *testing.T) {
 	t.Parallel()
 
@@ -730,6 +738,7 @@ func TestDiskStore_ScanKeys_EmptyStore(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ScanKeys_PrefixPagination verifies that disk store scan keys prefix pagination.
 func TestDiskStore_ScanKeys_PrefixPagination(t *testing.T) {
 	t.Parallel()
 
@@ -757,6 +766,7 @@ func TestDiskStore_ScanKeys_PrefixPagination(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ScanKeys_ListKeysParity verifies that disk store scan keys list keys parity.
 func TestDiskStore_ScanKeys_ListKeysParity(t *testing.T) {
 	t.Parallel()
 
@@ -795,6 +805,7 @@ func TestDiskStore_ScanKeys_ListKeysParity(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ListKeys_EqualsScanKeysFirstPage verifies that disk store list keys equals scan keys first page.
 func TestDiskStore_ListKeys_EqualsScanKeysFirstPage(t *testing.T) {
 	t.Parallel()
 
@@ -819,6 +830,7 @@ func TestDiskStore_ListKeys_EqualsScanKeysFirstPage(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ScanAndListKeysIgnoreStalePositiveIndex verifies that disk store scan and list keys ignore stale positive index.
 func TestDiskStore_ScanAndListKeysIgnoreStalePositiveIndex(t *testing.T) {
 	t.Parallel()
 
@@ -843,6 +855,7 @@ func TestDiskStore_ScanAndListKeysIgnoreStalePositiveIndex(t *testing.T) {
 	assert.Equal(t, []string{"user:real"}, listKeys)
 }
 
+// TestDiskStore_ScanAndListKeysIgnoreStaleNegativeIndex verifies that disk store scan and list keys ignore stale negative index.
 func TestDiskStore_ScanAndListKeysIgnoreStaleNegativeIndex(t *testing.T) {
 	t.Parallel()
 

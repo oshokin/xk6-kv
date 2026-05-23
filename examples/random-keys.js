@@ -45,3 +45,7 @@ export default async function () {
       result.every((item) => item && item.exists === true),
   });
 }
+
+export function teardown() {
+  kv.close();
+}

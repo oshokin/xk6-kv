@@ -11,10 +11,13 @@ import (
 )
 
 const (
+	// setManyErrorNameInvalidEntries is the set many error name invalid entries const.
 	setManyErrorNameInvalidEntries = "InvalidEntries"
-	setManyErrorNameEmptyKey       = "EmptyKey"
+	// setManyErrorNameEmptyKey is the set many error name empty key const.
+	setManyErrorNameEmptyKey = "EmptyKey"
 )
 
+// importGetManyKeys is an internal helper.
 func importGetManyKeys(value sobek.Value) ([]string, error) {
 	if common.IsNullish(value) {
 		return nil, NewError(
@@ -55,6 +58,7 @@ func importGetManyKeys(value sobek.Value) ([]string, error) {
 	}
 }
 
+// importDeleteManyKeys is an internal helper.
 func importDeleteManyKeys(value sobek.Value) ([]string, error) {
 	if common.IsNullish(value) {
 		return nil, NewError(
@@ -112,6 +116,7 @@ func importDeleteManyKeys(value sobek.Value) ([]string, error) {
 	}
 }
 
+// importSetManyEntries is an internal helper.
 func importSetManyEntries(entriesValue sobek.Value) ([]store.Entry, error) {
 	if common.IsNullish(entriesValue) {
 		return nil, NewErrorWithDetails(

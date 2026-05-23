@@ -144,6 +144,7 @@ func (s *MemoryStore) CompareAndDeleteDetailed(
 	}, nil
 }
 
+// newCompareAndSwapMismatchResult builds a mismatch result for compare-and-swap.
 func (s *MemoryStore) newCompareAndSwapMismatchResult(
 	existed bool,
 	currentValue []byte,
@@ -163,6 +164,7 @@ func (s *MemoryStore) newCompareAndSwapMismatchResult(
 	return result
 }
 
+// newCompareAndDeleteMismatchResult builds a mismatch result for compare-and-delete.
 func (s *MemoryStore) newCompareAndDeleteMismatchResult(
 	existed bool,
 	currentValue []byte,

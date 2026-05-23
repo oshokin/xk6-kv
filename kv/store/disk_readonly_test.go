@@ -4,11 +4,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	bolt "go.etcd.io/bbolt"
 )
 
+// newReadOnlyDiskStoreFixture creates read only disk store fixture for tests.
 func newReadOnlyDiskStoreFixture(t *testing.T, trackKeys bool) (*DiskStore, *ClaimRef) {
 	t.Helper()
 
@@ -47,6 +50,23 @@ func newReadOnlyDiskStoreFixture(t *testing.T, trackKeys bool) (*DiskStore, *Cla
 	}
 }
 
+// putDurableClaimForTest is a test helper for put durable claim for test.
+func putDurableClaimForTest(t *testing.T, store *DiskStore, claim *EntryClaim) {
+	t.Helper()
+
+	require.NotNil(t, claim)
+
+	require.NoError(t, store.handle.Update(func(tx *bolt.Tx) error {
+		claimsBucket, err := store.ensureClaimsBucket(tx)
+		if err != nil {
+			return err
+		}
+
+		return store.putDiskClaimTx(claimsBucket, claim)
+	}))
+}
+
+// TestDiskStoreReadOnlyAllowsReads verifies that disk store read only allows reads.
 func TestDiskStoreReadOnlyAllowsReads(t *testing.T) {
 	t.Parallel()
 
@@ -73,6 +93,7 @@ func TestDiskStoreReadOnlyAllowsReads(t *testing.T) {
 	}
 }
 
+// TestDiskStoreReadOnlyRejectsMutations verifies that disk store read only rejects mutations.
 func TestDiskStoreReadOnlyRejectsMutations(t *testing.T) {
 	t.Parallel()
 
@@ -208,6 +229,7 @@ func TestDiskStoreReadOnlyRejectsMutations(t *testing.T) {
 	}
 }
 
+// TestDiskStoreReadOnlyRejectsClaims verifies that disk store read only rejects claims.
 func TestDiskStoreReadOnlyRejectsClaims(t *testing.T) {
 	t.Parallel()
 
@@ -230,6 +252,7 @@ func TestDiskStoreReadOnlyRejectsClaims(t *testing.T) {
 	}
 }
 
+// TestDiskStoreReadOnlyRejectsRestore verifies that disk store read only rejects restore.
 func TestDiskStoreReadOnlyRejectsRestore(t *testing.T) {
 	t.Parallel()
 
@@ -251,4 +274,141 @@ func TestDiskStoreReadOnlyRejectsRestore(t *testing.T) {
 			require.ErrorIs(t, err, ErrDiskStoreReadOnly)
 		})
 	}
+}
+
+// TestDiskAllocationStats_ReadOnlyTrackKeysUsesDurableClaims verifies that disk allocation stats read only track keys uses durable claims.
+func TestDiskAllocationStats_ReadOnlyTrackKeysUsesDurableClaims(t *testing.T) {
+	t.Parallel()
+
+	t.Run("live claim", func(t *testing.T) {
+		t.Parallel()
+
+		dbPath := filepath.Join(t.TempDir(), "allocation-readonly-live.db")
+		writable := newTestDiskStore(t, true, dbPath, true)
+		require.NoError(t, writable.Set("users:1", "alice"))
+
+		putDurableClaimForTest(t, writable, &EntryClaim{
+			ID:        "claim-live",
+			Key:       "users:1",
+			Token:     1,
+			ExpiresAt: time.Now().Add(time.Minute).UnixMilli(),
+		})
+		require.NoError(t, writable.Close())
+
+		readOnlyStore, err := NewDiskStore(true, dbPath, &DiskConfig{
+			ReadOnly: GetComparablePointer(true),
+		})
+		require.NoError(t, err)
+		require.NoError(t, readOnlyStore.Open())
+		t.Cleanup(func() {
+			_ = readOnlyStore.Close()
+		})
+
+		snapshot, err := readOnlyStore.AllocationStats("users:")
+		require.NoError(t, err)
+		require.NotNil(t, snapshot)
+		assert.EqualValues(t, 1, snapshot.Total)
+		assert.EqualValues(t, 0, snapshot.Claimable)
+		assert.EqualValues(t, 1, snapshot.ClaimedLive)
+		assert.EqualValues(t, 0, snapshot.ClaimedExpired)
+	})
+
+	t.Run("expired claim", func(t *testing.T) {
+		t.Parallel()
+
+		dbPath := filepath.Join(t.TempDir(), "allocation-readonly-expired.db")
+		writable := newTestDiskStore(t, true, dbPath, true)
+		require.NoError(t, writable.Set("users:1", "alice"))
+
+		putDurableClaimForTest(t, writable, &EntryClaim{
+			ID:        "claim-expired",
+			Key:       "users:1",
+			Token:     2,
+			ExpiresAt: time.Now().Add(-time.Minute).UnixMilli(),
+		})
+		require.NoError(t, writable.Close())
+
+		readOnlyStore, err := NewDiskStore(true, dbPath, &DiskConfig{
+			ReadOnly: GetComparablePointer(true),
+		})
+		require.NoError(t, err)
+		require.NoError(t, readOnlyStore.Open())
+		t.Cleanup(func() {
+			_ = readOnlyStore.Close()
+		})
+
+		snapshot, err := readOnlyStore.AllocationStats("users:")
+		require.NoError(t, err)
+		require.NotNil(t, snapshot)
+		assert.EqualValues(t, 1, snapshot.Total)
+		assert.EqualValues(t, 1, snapshot.Claimable)
+		assert.EqualValues(t, 0, snapshot.ClaimedLive)
+		assert.EqualValues(t, 1, snapshot.ClaimedExpired)
+	})
+}
+
+// TestDiskStats_ReadOnlyTrackKeysUsesDurableClaims_Live verifies that disk stats read only track keys uses durable claims live.
+func TestDiskStats_ReadOnlyTrackKeysUsesDurableClaims_Live(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "stats-readonly-live.db")
+	writable := newTestDiskStore(t, true, dbPath, true)
+	require.NoError(t, writable.Set("users:1", "alice"))
+
+	putDurableClaimForTest(t, writable, &EntryClaim{
+		ID:        "claim-live",
+		Key:       "users:1",
+		Token:     1,
+		ExpiresAt: time.Now().Add(time.Minute).UnixMilli(),
+	})
+	require.NoError(t, writable.Close())
+
+	readOnlyStore, err := NewDiskStore(true, dbPath, &DiskConfig{
+		ReadOnly: GetComparablePointer(true),
+	})
+	require.NoError(t, err)
+	require.NoError(t, readOnlyStore.Open())
+	t.Cleanup(func() {
+		_ = readOnlyStore.Close()
+	})
+
+	snapshot, err := readOnlyStore.Stats()
+	require.NoError(t, err)
+	require.NotNil(t, snapshot)
+	assert.EqualValues(t, 1, snapshot.Count)
+	assert.EqualValues(t, 1, snapshot.Claims.Live)
+	assert.EqualValues(t, 0, snapshot.Claims.Expired)
+}
+
+// TestDiskStats_ReadOnlyTrackKeysUsesDurableClaims_Expired verifies that disk stats read only track keys uses durable claims expired.
+func TestDiskStats_ReadOnlyTrackKeysUsesDurableClaims_Expired(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "stats-readonly-expired.db")
+	writable := newTestDiskStore(t, true, dbPath, true)
+	require.NoError(t, writable.Set("users:1", "alice"))
+
+	putDurableClaimForTest(t, writable, &EntryClaim{
+		ID:        "claim-expired",
+		Key:       "users:1",
+		Token:     2,
+		ExpiresAt: time.Now().Add(-time.Minute).UnixMilli(),
+	})
+	require.NoError(t, writable.Close())
+
+	readOnlyStore, err := NewDiskStore(true, dbPath, &DiskConfig{
+		ReadOnly: GetComparablePointer(true),
+	})
+	require.NoError(t, err)
+	require.NoError(t, readOnlyStore.Open())
+	t.Cleanup(func() {
+		_ = readOnlyStore.Close()
+	})
+
+	snapshot, err := readOnlyStore.Stats()
+	require.NoError(t, err)
+	require.NotNil(t, snapshot)
+	assert.EqualValues(t, 1, snapshot.Count)
+	assert.EqualValues(t, 0, snapshot.Claims.Live)
+	assert.EqualValues(t, 1, snapshot.Claims.Expired)
 }

@@ -2,6 +2,7 @@ package kv
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/grafana/sobek"
 	"go.k6.io/k6/js/common"
@@ -10,48 +11,138 @@ import (
 )
 
 type (
+	// popRandomOptions holds parsed options for the corresponding KV method.
 	popRandomOptions struct {
+		// Prefix selects only keys that start with the given string.
 		Prefix string `js:"prefix"`
 	}
 
+	// popRandomManyOptions holds parsed options for the corresponding KV method.
 	popRandomManyOptions struct {
+		// Prefix selects only keys that start with the given string.
 		Prefix string `js:"prefix"`
-		Count  int64  `js:"count"`
+		// Count is the number of keys or claims to allocate.
+		Count int64 `js:"count"`
 	}
 
+	// claimRandomOptions holds parsed options for the corresponding KV method.
 	claimRandomOptions struct {
+		// Prefix selects only keys that start with the given string.
 		Prefix string `js:"prefix"`
-		Owner  string `js:"owner"`
-		TTLMs  int64  `js:"ttl"`
-	}
-
-	claimKeyOptions struct {
+		// Owner is the claim owner identifier.
 		Owner string `js:"owner"`
-		TTLMs int64  `js:"ttl"`
-	}
-
-	claimRandomManyOptions struct {
-		Prefix string `js:"prefix"`
-		Count  int64  `js:"count"`
-		Owner  string `js:"owner"`
-		TTLMs  int64  `js:"ttl"`
-	}
-
-	renewClaimOptions struct {
+		// TTLMs is the claim lease duration in milliseconds.
 		TTLMs int64 `js:"ttl"`
 	}
 
-	claimRefPayload struct {
-		ID    string `js:"id"`
-		Key   string `js:"key"`
-		Token int64  `js:"token"`
+	// claimKeyOptions holds parsed options for the corresponding KV method.
+	claimKeyOptions struct {
+		// Owner is the claim owner identifier.
+		Owner string `js:"owner"`
+		// TTLMs is the claim lease duration in milliseconds.
+		TTLMs int64 `js:"ttl"`
 	}
 
+	// claimRandomManyOptions holds parsed options for the corresponding KV method.
+	claimRandomManyOptions struct {
+		// Prefix selects only keys that start with the given string.
+		Prefix string `js:"prefix"`
+		// Count is the number of keys or claims to allocate.
+		Count int64 `js:"count"`
+		// Owner is the claim owner identifier.
+		Owner string `js:"owner"`
+		// TTLMs is the claim lease duration in milliseconds.
+		TTLMs int64 `js:"ttl"`
+	}
+
+	// claimKeysOptions holds parsed options for the corresponding KV method.
+	claimKeysOptions struct {
+		// Owner is the claim owner identifier.
+		Owner string `js:"owner"`
+		// TTLMs is the claim lease duration in milliseconds.
+		TTLMs int64 `js:"ttl"`
+		// AllOrNothing rolls back acquired claims and stops on first busy/missing key.
+		AllOrNothing bool `js:"allOrNothing"`
+	}
+
+	// renewClaimOptions holds parsed options for the corresponding KV method.
+	renewClaimOptions struct {
+		// TTLMs is the claim lease duration in milliseconds.
+		TTLMs int64 `js:"ttl"`
+	}
+
+	// claimRefPayload holds claim reference fields imported from JavaScript.
+	claimRefPayload struct {
+		// ID is the stable claim identifier.
+		ID string `js:"id"`
+		// Key is the store key associated with the claim or entry.
+		Key string `js:"key"`
+		// Token is the opaque claim token required for renew, release, or complete.
+		Token int64 `js:"token"`
+	}
+
+	// completeClaimOptions holds parsed options for the corresponding KV method.
 	completeClaimOptions struct {
+		// DeleteKey removes the underlying key when completing a claim.
 		DeleteKey bool `js:"deleteKey"`
+	}
+
+	// claimBatchFailure describes a single failed item in a batch claim operation.
+	claimBatchFailure struct {
+		// Index is the zero-based position of the failed item in the input batch.
+		Index int64 `js:"index"`
+		// ID is the stable claim identifier.
+		ID string `js:"id"`
+		// Key is the store key associated with the claim or entry.
+		Key string `js:"key"`
+		// Name is the machine-readable error name.
+		Name string `js:"name"`
+		// Message is a human-readable error description.
+		Message string `js:"message"`
+	}
+
+	// releaseClaimsResult is the Go-side result returned by the corresponding KV operation.
+	releaseClaimsResult struct {
+		// Attempted is the number of batch items processed.
+		Attempted int64 `js:"attempted"`
+		// Released is the number of batch items that succeeded.
+		Released int64 `js:"released"`
+		// Failed lists per-item failures from a batch claim operation.
+		Failed []claimBatchFailure `js:"failed"`
+	}
+
+	// completeClaimsResult is the Go-side result returned by the corresponding KV operation.
+	completeClaimsResult struct {
+		// Attempted is the number of batch items processed.
+		Attempted int64 `js:"attempted"`
+		// Completed is the number of batch items that succeeded.
+		Completed int64 `js:"completed"`
+		// Failed lists per-item failures from a batch claim operation.
+		Failed []claimBatchFailure `js:"failed"`
+	}
+
+	// renewClaimsResult is the Go-side result returned by the corresponding KV operation.
+	renewClaimsResult struct {
+		// Attempted is the number of batch items processed.
+		Attempted int64 `js:"attempted"`
+		// Renewed is the number of batch items that succeeded.
+		Renewed int64 `js:"renewed"`
+		// Failed lists per-item failures from a batch claim operation.
+		Failed []claimBatchFailure `js:"failed"`
+	}
+
+	// claimKeysResult is the Go-side result returned by the corresponding KV operation.
+	claimKeysResult struct {
+		// Claimed is the number of batch items that succeeded.
+		Claimed []*store.EntryClaim `js:"claimed"`
+		// Busy lists keys that were already claimed by another owner.
+		Busy []string `js:"busy"`
+		// Missing lists keys that were not present in the store.
+		Missing []string `js:"missing"`
 	}
 )
 
+// importPopRandomOptions parses Sobek options for the corresponding KV method.
 func importPopRandomOptions(rt *sobek.Runtime, options sobek.Value) (*popRandomOptions, error) {
 	if err := ensureOptionalObjectOptions("popRandom", options); err != nil {
 		return nil, err
@@ -76,6 +167,7 @@ func importPopRandomOptions(rt *sobek.Runtime, options sobek.Value) (*popRandomO
 	return result, nil
 }
 
+// importPopRandomManyOptions parses Sobek options for the corresponding KV method.
 func importPopRandomManyOptions(rt *sobek.Runtime, options sobek.Value) (*popRandomManyOptions, error) {
 	result := &popRandomManyOptions{}
 
@@ -132,6 +224,7 @@ func importPopRandomManyOptions(rt *sobek.Runtime, options sobek.Value) (*popRan
 	return result, nil
 }
 
+// importClaimRandomOptions parses Sobek options for the corresponding KV method.
 func importClaimRandomOptions(rt *sobek.Runtime, options sobek.Value) (*claimRandomOptions, error) {
 	if err := ensureOptionalObjectOptions("claimRandom", options); err != nil {
 		return nil, err
@@ -197,6 +290,7 @@ func importClaimRandomOptions(rt *sobek.Runtime, options sobek.Value) (*claimRan
 	return result, nil
 }
 
+// importClaimKeyOptions parses Sobek options for the corresponding KV method.
 func importClaimKeyOptions(rt *sobek.Runtime, options sobek.Value) (*claimKeyOptions, error) {
 	if err := ensureOptionalObjectOptions("claimKey", options); err != nil {
 		return nil, err
@@ -253,6 +347,7 @@ func importClaimKeyOptions(rt *sobek.Runtime, options sobek.Value) (*claimKeyOpt
 	return result, nil
 }
 
+// importClaimRandomManyOptions parses Sobek options for the corresponding KV method.
 func importClaimRandomManyOptions(rt *sobek.Runtime, options sobek.Value) (*claimRandomManyOptions, error) {
 	result := &claimRandomManyOptions{
 		TTLMs: store.DefaultClaimTTLMs,
@@ -294,6 +389,7 @@ func importClaimRandomManyOptions(rt *sobek.Runtime, options sobek.Value) (*clai
 	return result, nil
 }
 
+// parseRequiredClaimRandomManyCount parses and validates a single options field.
 func parseRequiredClaimRandomManyCount(optionsObj *sobek.Object) (int64, error) {
 	count, isSet, err := parseOptionalInt64Option("claimRandomMany", "count", optionsObj.Get("count"))
 	if err != nil {
@@ -324,6 +420,7 @@ func parseRequiredClaimRandomManyCount(optionsObj *sobek.Object) (int64, error) 
 	return count, nil
 }
 
+// applyOptionalClaimRandomManyClaimOptions is an internal helper.
 func applyOptionalClaimRandomManyClaimOptions(result *claimRandomManyOptions, optionsObj *sobek.Object) error {
 	owner, isSet, err := parseOptionalStringOption("claimRandomMany", "owner", optionsObj.Get("owner"))
 	if err != nil {
@@ -369,6 +466,7 @@ func applyOptionalClaimRandomManyClaimOptions(result *claimRandomManyOptions, op
 	return nil
 }
 
+// importClaimRefPayload imports claim or batch payload values from JavaScript.
 func importClaimRefPayload(rt *sobek.Runtime, method string, claim sobek.Value) (*claimRefPayload, error) {
 	if common.IsNullish(claim) {
 		return nil, NewError(
@@ -419,8 +517,342 @@ func importClaimRefPayload(rt *sobek.Runtime, method string, claim sobek.Value) 
 	}, nil
 }
 
+// importClaimRefsPayload imports claim or batch payload values from JavaScript.
+func importClaimRefsPayload(rt *sobek.Runtime, method string, claims sobek.Value) ([]*store.ClaimRef, error) {
+	if common.IsNullish(claims) {
+		return nil, NewError(
+			InvalidOptionsError,
+			method+" claims must be an array; got null or undefined",
+		)
+	}
+
+	exported := claims.Export()
+
+	if refs, handled, err := importNativeClaimRefsPayload(method, exported); handled || err != nil {
+		return refs, err
+	}
+
+	var items []any
+
+	switch typedItems := exported.(type) {
+	case []any:
+		items = typedItems
+	case []map[string]any:
+		items = make([]any, len(typedItems))
+		for i := range typedItems {
+			items[i] = typedItems[i]
+		}
+	default:
+		return nil, NewError(
+			InvalidOptionsError,
+			fmt.Sprintf("%s claims must be an array; got %T", method, exported),
+		)
+	}
+
+	refs := make([]*store.ClaimRef, 0, len(items))
+	for i, item := range items {
+		itemMethod := method + " claims[" + strconv.Itoa(i) + "]"
+
+		payload, err := importClaimRefPayload(rt, itemMethod, rt.ToValue(item))
+		if err != nil {
+			return nil, err
+		}
+
+		refs = append(refs, &store.ClaimRef{
+			ID:    payload.ID,
+			Key:   payload.Key,
+			Token: payload.Token,
+		})
+	}
+
+	return refs, nil
+}
+
+// importNativeClaimRefsPayload imports claim or batch payload values from JavaScript.
+func importNativeClaimRefsPayload(method string, exported any) ([]*store.ClaimRef, bool, error) {
+	switch typedItems := exported.(type) {
+	case []*store.ClaimRef:
+		refs, err := importStoreClaimRefPointers(method, typedItems)
+
+		return refs, true, err
+	case []store.ClaimRef:
+		refs, err := importStoreClaimRefValues(method, typedItems)
+
+		return refs, true, err
+	case []*store.EntryClaim:
+		refs, err := importEntryClaimPointers(method, typedItems)
+
+		return refs, true, err
+	case []store.EntryClaim:
+		refs, err := importEntryClaimValues(method, typedItems)
+
+		return refs, true, err
+	default:
+		return nil, false, nil
+	}
+}
+
+// importStoreClaimRefPointers is an internal helper.
+func importStoreClaimRefPointers(method string, refsInput []*store.ClaimRef) ([]*store.ClaimRef, error) {
+	refs := make([]*store.ClaimRef, 0, len(refsInput))
+
+	for i, ref := range refsInput {
+		itemMethod := claimRefItemMethod(method, i)
+		if err := validateStoreClaimRef(itemMethod, ref); err != nil {
+			return nil, err
+		}
+
+		refs = append(refs, cloneStoreClaimRef(ref))
+	}
+
+	return refs, nil
+}
+
+// importStoreClaimRefValues is an internal helper.
+func importStoreClaimRefValues(method string, refsInput []store.ClaimRef) ([]*store.ClaimRef, error) {
+	refs := make([]*store.ClaimRef, 0, len(refsInput))
+
+	for i := range refsInput {
+		ref := refsInput[i]
+		if err := validateStoreClaimRef(claimRefItemMethod(method, i), &ref); err != nil {
+			return nil, err
+		}
+
+		refs = append(refs, cloneStoreClaimRef(&ref))
+	}
+
+	return refs, nil
+}
+
+// importEntryClaimPointers is an internal helper.
+func importEntryClaimPointers(method string, claimsInput []*store.EntryClaim) ([]*store.ClaimRef, error) {
+	refs := make([]*store.ClaimRef, 0, len(claimsInput))
+
+	for i, claim := range claimsInput {
+		itemMethod := claimRefItemMethod(method, i)
+		if claim == nil {
+			return nil, validateStoreClaimRef(itemMethod, nil)
+		}
+
+		ref := claim.Ref()
+		if err := validateStoreClaimRef(itemMethod, ref); err != nil {
+			return nil, err
+		}
+
+		refs = append(refs, cloneStoreClaimRef(ref))
+	}
+
+	return refs, nil
+}
+
+// importEntryClaimValues is an internal helper.
+func importEntryClaimValues(method string, claimsInput []store.EntryClaim) ([]*store.ClaimRef, error) {
+	refs := make([]*store.ClaimRef, 0, len(claimsInput))
+
+	for i := range claimsInput {
+		ref := claimsInput[i].Ref()
+		if err := validateStoreClaimRef(claimRefItemMethod(method, i), ref); err != nil {
+			return nil, err
+		}
+
+		refs = append(refs, cloneStoreClaimRef(ref))
+	}
+
+	return refs, nil
+}
+
+// claimRefItemMethod is an internal helper.
+func claimRefItemMethod(method string, index int) string {
+	return method + " claims[" + strconv.Itoa(index) + "]"
+}
+
+// cloneStoreClaimRef is an internal helper.
+func cloneStoreClaimRef(ref *store.ClaimRef) *store.ClaimRef {
+	return &store.ClaimRef{
+		ID:    ref.ID,
+		Key:   ref.Key,
+		Token: ref.Token,
+	}
+}
+
+// validateStoreClaimRef validates user-supplied input.
+func validateStoreClaimRef(method string, ref *store.ClaimRef) error {
+	if ref == nil {
+		return NewError(
+			InvalidOptionsError,
+			method+" claim must be an object; got null",
+		)
+	}
+
+	if ref.ID == "" {
+		return NewError(
+			InvalidOptionsError,
+			method+" claim.id must be a non-empty string",
+		)
+	}
+
+	if ref.Key == "" {
+		return NewError(
+			InvalidOptionsError,
+			method+" claim.key must be a non-empty string",
+		)
+	}
+
+	if ref.Token <= 0 {
+		return NewError(
+			InvalidOptionsError,
+			fmt.Sprintf("%s claim.token must be a positive integer; got %d", method, ref.Token),
+		)
+	}
+
+	return nil
+}
+
+// importClaimKeysPayload imports claim or batch payload values from JavaScript.
+func importClaimKeysPayload(_ *sobek.Runtime, keys sobek.Value) ([]string, error) {
+	if common.IsNullish(keys) {
+		return nil, NewError(
+			InvalidOptionsError,
+			"claimKeys keys must be an array; got null or undefined",
+		)
+	}
+
+	exported := keys.Export()
+
+	var keyItems []any
+
+	switch typed := exported.(type) {
+	case []any:
+		keyItems = typed
+	case []string:
+		keyItems = make([]any, len(typed))
+		for i := range typed {
+			keyItems[i] = typed[i]
+		}
+	default:
+		return nil, NewError(
+			InvalidOptionsError,
+			fmt.Sprintf("claimKeys keys must be an array; got %T", exported),
+		)
+	}
+
+	parsed := make([]string, 0, len(keyItems))
+	seen := make(map[string]struct{}, len(keyItems))
+
+	for i, item := range keyItems {
+		key, ok := item.(string)
+		if !ok {
+			return nil, NewError(
+				InvalidOptionsError,
+				fmt.Sprintf("claimKeys keys[%d] must be a string; got %T", i, item),
+			)
+		}
+
+		if key == "" {
+			return nil, NewError(
+				InvalidOptionsError,
+				fmt.Sprintf("claimKeys keys[%d] must be a non-empty string", i),
+			)
+		}
+
+		if _, exists := seen[key]; exists {
+			return nil, NewError(
+				InvalidOptionsError,
+				fmt.Sprintf("claimKeys keys contains duplicate key %q", key),
+			)
+		}
+
+		seen[key] = struct{}{}
+		parsed = append(parsed, key)
+	}
+
+	return parsed, nil
+}
+
+// importClaimKeysOptions parses Sobek options for the corresponding KV method.
+func importClaimKeysOptions(rt *sobek.Runtime, options sobek.Value) (*claimKeysOptions, error) {
+	if err := ensureOptionalObjectOptions("claimKeys", options); err != nil {
+		return nil, err
+	}
+
+	result := &claimKeysOptions{
+		TTLMs: store.DefaultClaimTTLMs,
+	}
+	if common.IsNullish(options) {
+		return result, nil
+	}
+
+	optionsObj := options.ToObject(rt)
+
+	owner, isSet, err := parseOptionalStringOption("claimKeys", "owner", optionsObj.Get("owner"))
+	if err != nil {
+		return nil, err
+	}
+
+	if isSet {
+		if len(owner) > store.MaxClaimOwnerBytes {
+			return nil, NewError(
+				InvalidOptionsError,
+				fmt.Sprintf("claimKeys options.owner must be less than or equal to %d bytes", store.MaxClaimOwnerBytes),
+			)
+		}
+
+		result.Owner = owner
+	}
+
+	ttl, ttlSet, err := parseOptionalInt64Option("claimKeys", "ttl", optionsObj.Get("ttl"))
+	if err != nil {
+		return nil, err
+	}
+
+	if ttlSet {
+		if ttl <= 0 {
+			return nil, NewError(
+				InvalidOptionsError,
+				"claimKeys options.ttl must be a positive integer",
+			)
+		}
+
+		if err := rejectIfAbove("claimKeys", "ttl", ttl, store.MaxClaimTTLMs); err != nil {
+			return nil, err
+		}
+
+		result.TTLMs = ttl
+	}
+
+	allOrNothing, allOrNothingSet, err := parseOptionalBoolOption(
+		"claimKeys",
+		"allOrNothing",
+		optionsObj.Get("allOrNothing"),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if allOrNothingSet {
+		result.AllOrNothing = allOrNothing
+	}
+
+	return result, nil
+}
+
+// importCompleteClaimOptions parses Sobek options for the corresponding KV method.
 func importCompleteClaimOptions(rt *sobek.Runtime, options sobek.Value) (*completeClaimOptions, error) {
-	if err := ensureOptionalObjectOptions("completeClaim", options); err != nil {
+	return importCompleteClaimOptionsWithMethod(rt, "completeClaim", options)
+}
+
+// importCompleteClaimsOptions parses Sobek options for the corresponding KV method.
+func importCompleteClaimsOptions(rt *sobek.Runtime, options sobek.Value) (*completeClaimOptions, error) {
+	return importCompleteClaimOptionsWithMethod(rt, "completeClaims", options)
+}
+
+// importCompleteClaimOptionsWithMethod is an internal helper.
+func importCompleteClaimOptionsWithMethod(
+	rt *sobek.Runtime,
+	method string,
+	options sobek.Value,
+) (*completeClaimOptions, error) {
+	if err := ensureOptionalObjectOptions(method, options); err != nil {
 		return nil, err
 	}
 
@@ -433,7 +865,7 @@ func importCompleteClaimOptions(rt *sobek.Runtime, options sobek.Value) (*comple
 
 	optionsObj := options.ToObject(rt)
 
-	deleteKey, isSet, err := parseOptionalBoolOption("completeClaim", "deleteKey", optionsObj.Get("deleteKey"))
+	deleteKey, isSet, err := parseOptionalBoolOption(method, "deleteKey", optionsObj.Get("deleteKey"))
 	if err != nil {
 		return nil, err
 	}
@@ -445,21 +877,36 @@ func importCompleteClaimOptions(rt *sobek.Runtime, options sobek.Value) (*comple
 	return result, nil
 }
 
+// importRenewClaimOptions parses Sobek options for the corresponding KV method.
 func importRenewClaimOptions(rt *sobek.Runtime, options sobek.Value) (*renewClaimOptions, error) {
-	if err := ensureOptionalObjectOptions("renewClaim", options); err != nil {
+	return importRenewClaimOptionsWithMethod(rt, "renewClaim", options)
+}
+
+// importRenewClaimsOptions parses Sobek options for the corresponding KV method.
+func importRenewClaimsOptions(rt *sobek.Runtime, options sobek.Value) (*renewClaimOptions, error) {
+	return importRenewClaimOptionsWithMethod(rt, "renewClaims", options)
+}
+
+// importRenewClaimOptionsWithMethod is an internal helper.
+func importRenewClaimOptionsWithMethod(
+	rt *sobek.Runtime,
+	method string,
+	options sobek.Value,
+) (*renewClaimOptions, error) {
+	if err := ensureOptionalObjectOptions(method, options); err != nil {
 		return nil, err
 	}
 
 	if common.IsNullish(options) {
 		return nil, NewError(
 			InvalidOptionsError,
-			"renewClaim options.ttl is required",
+			method+" options.ttl is required",
 		)
 	}
 
 	optionsObj := options.ToObject(rt)
 
-	ttl, ttlSet, err := parseOptionalInt64Option("renewClaim", "ttl", optionsObj.Get("ttl"))
+	ttl, ttlSet, err := parseOptionalInt64Option(method, "ttl", optionsObj.Get("ttl"))
 	if err != nil {
 		return nil, err
 	}
@@ -467,18 +914,18 @@ func importRenewClaimOptions(rt *sobek.Runtime, options sobek.Value) (*renewClai
 	if !ttlSet {
 		return nil, NewError(
 			InvalidOptionsError,
-			"renewClaim options.ttl is required",
+			method+" options.ttl is required",
 		)
 	}
 
 	if ttl <= 0 {
 		return nil, NewError(
 			InvalidOptionsError,
-			"renewClaim options.ttl must be a positive integer",
+			method+" options.ttl must be a positive integer",
 		)
 	}
 
-	if err := rejectIfAbove("renewClaim", "ttl", ttl, store.MaxClaimTTLMs); err != nil {
+	if err := rejectIfAbove(method, "ttl", ttl, store.MaxClaimTTLMs); err != nil {
 		return nil, err
 	}
 

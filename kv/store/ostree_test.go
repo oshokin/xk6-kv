@@ -326,6 +326,40 @@ func TestOSTreeOf_DeleteRemovesMetadata(t *testing.T) {
 	assert.Equal(t, 0, tree.SelectableLen())
 }
 
+// TestOSTreeOf_WalkMetaPrefix verifies that os tree of walk meta prefix.
+func TestOSTreeOf_WalkMetaPrefix(t *testing.T) {
+	t.Parallel()
+
+	tree := NewOSTreeOf[*trackedDiskClaimRecord]()
+	tree.InsertWithMeta("order:1", nil)
+	tree.InsertWithMeta("user:1", &trackedDiskClaimRecord{ID: "claim-user-1"})
+	tree.InsertWithMeta("user:2", &trackedDiskClaimRecord{ID: "claim-user-2"})
+	tree.InsertWithMeta("user:3", nil)
+
+	collected := make([]string, 0)
+	claimed := make([]string, 0)
+
+	tree.WalkMetaPrefix("user:", func(key string, meta *trackedDiskClaimRecord) bool {
+		collected = append(collected, key)
+		if meta != nil {
+			claimed = append(claimed, key)
+		}
+
+		return true
+	})
+
+	assert.Equal(t, []string{"user:1", "user:2", "user:3"}, collected)
+	assert.Equal(t, []string{"user:1", "user:2"}, claimed)
+
+	stopped := make([]string, 0, 1)
+
+	tree.WalkMetaPrefix("user:", func(key string, _ *trackedDiskClaimRecord) bool {
+		stopped = append(stopped, key)
+		return false
+	})
+	assert.Equal(t, []string{"user:1"}, stopped)
+}
+
 // getUniqueValues returns a new slice that contains only the first occurrence
 // of each distinct value from inputSlice, preserving the original encounter order.
 func getUniqueValues[T comparable](inputSlice []T) []T {

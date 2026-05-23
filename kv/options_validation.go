@@ -66,8 +66,6 @@ func parseRequiredStringArg(method, arg string, value sobek.Value) (string, erro
 }
 
 // parseRequiredNonEmptyStringArg reads a required non-empty string argument.
-//
-
 func parseRequiredNonEmptyStringArg(method, arg string, value sobek.Value) (string, error) {
 	parsedValue, err := parseRequiredStringArg(method, arg, value)
 	if err != nil {
@@ -120,6 +118,7 @@ func parseOptionalInt64Option(method, field string, value sobek.Value) (int64, b
 	return parsedValue, true, nil
 }
 
+// rejectIfAbove returns an error when value exceeds maximum.
 func rejectIfAbove(method, field string, value, maximum int64) error {
 	if value <= maximum {
 		return nil

@@ -833,6 +833,7 @@ func TestDiskStore_Delete(t *testing.T) {
 	require.NoError(t, store.Delete("non-existent"), "Delete on missing key must not error")
 }
 
+// TestDiskStore_Delete_TrackedClaimsMode_DoesNotTouchClaimsBucket verifies that disk store delete tracked claims mode does not touch claims bucket.
 func TestDiskStore_Delete_TrackedClaimsMode_DoesNotTouchClaimsBucket(t *testing.T) {
 	t.Parallel()
 
@@ -857,6 +858,7 @@ func TestDiskStore_Delete_TrackedClaimsMode_DoesNotTouchClaimsBucket(t *testing.
 	}))
 }
 
+// TestDiskStore_Delete_BoltClaimsMode_CreatesClaimsBucket verifies that disk store delete bolt claims mode creates claims bucket.
 func TestDiskStore_Delete_BoltClaimsMode_CreatesClaimsBucket(t *testing.T) {
 	t.Parallel()
 

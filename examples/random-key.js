@@ -34,3 +34,7 @@ export default async function () {
   const noMatchKey = await kv.randomKey({ prefix: "not:present:" });
   expect(noMatchKey).toEqual("");
 }
+
+export function teardown() {
+  kv.close();
+}

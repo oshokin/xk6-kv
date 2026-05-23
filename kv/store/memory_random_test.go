@@ -160,6 +160,7 @@ func TestMemoryStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
 	assert.Empty(t, key, "no-match prefix must return empty key")
 }
 
+// TestMemoryStore_RandomKeys_EmptyStore_ReturnsEmptySlice verifies that memory store random keys empty store returns empty slice.
 func TestMemoryStore_RandomKeys_EmptyStore_ReturnsEmptySlice(t *testing.T) {
 	t.Parallel()
 
@@ -185,6 +186,7 @@ func TestMemoryStore_RandomKeys_EmptyStore_ReturnsEmptySlice(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_RandomKeys_CountAboveMaxReturnsError verifies that memory store random keys count above max returns error.
 func TestMemoryStore_RandomKeys_CountAboveMaxReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -206,6 +208,7 @@ func TestMemoryStore_RandomKeys_CountAboveMaxReturnsError(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_RandomKeys_PrefixFilter verifies that memory store random keys prefix filter.
 func TestMemoryStore_RandomKeys_PrefixFilter(t *testing.T) {
 	t.Parallel()
 
@@ -235,6 +238,7 @@ func TestMemoryStore_RandomKeys_PrefixFilter(t *testing.T) {
 	}
 }
 
+// TestMemoryRandomKeysUntrackedDoesNotRequireSortedScan verifies that memory random keys untracked does not require sorted scan.
 func TestMemoryRandomKeysUntrackedDoesNotRequireSortedScan(t *testing.T) {
 	t.Parallel()
 
@@ -256,6 +260,7 @@ func TestMemoryRandomKeysUntrackedDoesNotRequireSortedScan(t *testing.T) {
 	assert.ElementsMatch(t, []string{"user:a", "user:b", "user:c"}, randomKeys)
 }
 
+// TestMemoryStore_RandomKeys_UniqueNoDuplicates verifies that memory store random keys unique no duplicates.
 func TestMemoryStore_RandomKeys_UniqueNoDuplicates(t *testing.T) {
 	t.Parallel()
 
@@ -285,6 +290,7 @@ func TestMemoryStore_RandomKeys_UniqueNoDuplicates(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_RandomKeys_UniqueCountLargerThanAvailableReturnsAll verifies that memory store random keys unique count larger than available returns all.
 func TestMemoryStore_RandomKeys_UniqueCountLargerThanAvailableReturnsAll(t *testing.T) {
 	t.Parallel()
 
@@ -313,6 +319,7 @@ func TestMemoryStore_RandomKeys_UniqueCountLargerThanAvailableReturnsAll(t *test
 	}
 }
 
+// TestMemoryStore_RandomKeys_NonUniqueSingleCandidateRepeats verifies that memory store random keys non unique single candidate repeats.
 func TestMemoryStore_RandomKeys_NonUniqueSingleCandidateRepeats(t *testing.T) {
 	t.Parallel()
 
@@ -336,6 +343,7 @@ func TestMemoryStore_RandomKeys_NonUniqueSingleCandidateRepeats(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_RandomKeys_ResultSubsetOfListKeys verifies that memory store random keys result subset of list keys.
 func TestMemoryStore_RandomKeys_ResultSubsetOfListKeys(t *testing.T) {
 	t.Parallel()
 
@@ -379,6 +387,7 @@ func TestMemoryStore_RandomKeys_ResultSubsetOfListKeys(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_RandomKeys_AfterDeleteManyDoesNotReturnDeletedKeys verifies that memory store random keys after delete many does not return deleted keys.
 func TestMemoryStore_RandomKeys_AfterDeleteManyDoesNotReturnDeletedKeys(t *testing.T) {
 	t.Parallel()
 
@@ -410,6 +419,7 @@ func TestMemoryStore_RandomKeys_AfterDeleteManyDoesNotReturnDeletedKeys(t *testi
 	}
 }
 
+// TestMemoryStore_RandomKeys_AfterDeleteByPrefixDoesNotReturnDeletedKeys verifies that memory store random keys after delete by prefix does not return deleted keys.
 func TestMemoryStore_RandomKeys_AfterDeleteByPrefixDoesNotReturnDeletedKeys(t *testing.T) {
 	t.Parallel()
 
@@ -443,6 +453,7 @@ func TestMemoryStore_RandomKeys_AfterDeleteByPrefixDoesNotReturnDeletedKeys(t *t
 	}
 }
 
+// TestKeyFromShardRanges_CoversPrefixRange verifies that key from shard ranges covers prefix range.
 func TestKeyFromShardRanges_CoversPrefixRange(t *testing.T) {
 	t.Parallel()
 

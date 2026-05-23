@@ -9,6 +9,7 @@ import (
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
+// decodeOpaqueCursor is an internal helper.
 func decodeOpaqueCursor(cursor string) (string, error) {
 	if cursor == "" {
 		return "", nil
@@ -22,6 +23,7 @@ func decodeOpaqueCursor(cursor string) (string, error) {
 	return string(raw), nil
 }
 
+// encodeOpaqueCursor is an internal helper.
 func encodeOpaqueCursor(nextKey string) string {
 	if nextKey == "" {
 		return ""

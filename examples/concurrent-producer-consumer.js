@@ -92,3 +92,7 @@ export async function randomConsumerFunction() {
   // Let's simulate a delay between consuming tokens.
   sleep(1);
 }
+
+export function teardown() {
+  kv.close();
+}

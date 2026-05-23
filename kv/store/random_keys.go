@@ -9,6 +9,7 @@ import (
 // MaxRandomKeysCount bounds randomKeys() output size to avoid unbounded allocations.
 const MaxRandomKeysCount int64 = 1_000_000
 
+// validateRandomKeysCount rejects random key counts above MaxRandomKeysCount.
 func validateRandomKeysCount(count int64) error {
 	if count > MaxRandomKeysCount {
 		return fmt.Errorf(
@@ -21,6 +22,7 @@ func validateRandomKeysCount(count int64) error {
 	return nil
 }
 
+// sampleKeys returns up to count keys, with or without replacement.
 func sampleKeys(keys []string, count int64, unique bool) []string {
 	if count <= 0 || len(keys) == 0 {
 		return []string{}
@@ -33,6 +35,7 @@ func sampleKeys(keys []string, count int64, unique bool) []string {
 	return sampleKeysWithReplacement(keys, count)
 }
 
+// sampleUniqueKeys returns up to count distinct keys from keys.
 func sampleUniqueKeys(keys []string, count int64) []string {
 	if count <= 0 || len(keys) == 0 {
 		return []string{}
@@ -76,6 +79,7 @@ func sampleUniqueKeys(keys []string, count int64) []string {
 	return result
 }
 
+// shuffleKeys returns keys in a uniformly random order.
 func shuffleKeys(keys []string) []string {
 	if len(keys) == 0 {
 		return []string{}
@@ -88,6 +92,7 @@ func shuffleKeys(keys []string) []string {
 	return keys
 }
 
+// sampleKeysWithReplacement draws count keys with replacement from keys.
 func sampleKeysWithReplacement(keys []string, count int64) []string {
 	result := make([]string, 0, count)
 
@@ -103,6 +108,7 @@ func sampleKeysWithReplacement(keys []string, count int64) []string {
 	return result
 }
 
+// sampleUniqueOffsets returns count distinct offsets in [0, total) without cloning keys.
 func sampleUniqueOffsets(total, count int) []int {
 	if total <= 0 || count <= 0 {
 		return []int{}

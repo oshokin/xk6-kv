@@ -29,7 +29,6 @@ export default async function () {
   console.log(`disk-tuned user: ${JSON.stringify(user)}`);
 }
 
-export async function teardown() {
-  // Close once after the run.
+export function teardown() {
   kv.close();
 }

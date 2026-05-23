@@ -330,6 +330,7 @@ func TestMemoryStore_Count_MutationParity(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ListKeys_EmptyStore verifies that memory store list keys empty store.
 func TestMemoryStore_ListKeys_EmptyStore(t *testing.T) {
 	t.Parallel()
 
@@ -346,6 +347,7 @@ func TestMemoryStore_ListKeys_EmptyStore(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ListKeys_AllKeysOrdered verifies that memory store list keys all keys ordered.
 func TestMemoryStore_ListKeys_AllKeysOrdered(t *testing.T) {
 	t.Parallel()
 
@@ -368,6 +370,7 @@ func TestMemoryStore_ListKeys_AllKeysOrdered(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ListKeys_Prefix verifies that memory store list keys prefix.
 func TestMemoryStore_ListKeys_Prefix(t *testing.T) {
 	t.Parallel()
 
@@ -390,6 +393,7 @@ func TestMemoryStore_ListKeys_Prefix(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ListKeys_Limit verifies that memory store list keys limit.
 func TestMemoryStore_ListKeys_Limit(t *testing.T) {
 	t.Parallel()
 
@@ -412,6 +416,7 @@ func TestMemoryStore_ListKeys_Limit(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ListKeys_AfterDeleteMany verifies that memory store list keys after delete many.
 func TestMemoryStore_ListKeys_AfterDeleteMany(t *testing.T) {
 	t.Parallel()
 
@@ -436,6 +441,7 @@ func TestMemoryStore_ListKeys_AfterDeleteMany(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ScanKeys_EmptyStore verifies that memory store scan keys empty store.
 func TestMemoryStore_ScanKeys_EmptyStore(t *testing.T) {
 	t.Parallel()
 
@@ -452,6 +458,7 @@ func TestMemoryStore_ScanKeys_EmptyStore(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ScanKeys_PrefixPagination verifies that memory store scan keys prefix pagination.
 func TestMemoryStore_ScanKeys_PrefixPagination(t *testing.T) {
 	t.Parallel()
 
@@ -479,6 +486,7 @@ func TestMemoryStore_ScanKeys_PrefixPagination(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ScanKeys_ListKeysParity verifies that memory store scan keys list keys parity.
 func TestMemoryStore_ScanKeys_ListKeysParity(t *testing.T) {
 	t.Parallel()
 
@@ -517,6 +525,7 @@ func TestMemoryStore_ScanKeys_ListKeysParity(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ListKeys_EqualsScanKeysFirstPage verifies that memory store list keys equals scan keys first page.
 func TestMemoryStore_ListKeys_EqualsScanKeysFirstPage(t *testing.T) {
 	t.Parallel()
 
@@ -541,6 +550,7 @@ func TestMemoryStore_ListKeys_EqualsScanKeysFirstPage(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_ScanHugeLimitDoesNotPanic verifies that memory store scan huge limit does not panic.
 func TestMemoryStore_ScanHugeLimitDoesNotPanic(t *testing.T) {
 	t.Parallel()
 

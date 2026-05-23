@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestSyncParentDir verifies that sync parent dir.
 func TestSyncParentDir(t *testing.T) {
 	t.Parallel()
 

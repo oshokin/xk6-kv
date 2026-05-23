@@ -104,6 +104,7 @@ func (s *DiskStore) Count(prefix string) (int64, error) {
 	return total, nil
 }
 
+// countFromIndex returns a prefix count from the in-memory key index when available.
 func (s *DiskStore) countFromIndex(prefix string) (int64, bool) {
 	s.keysLock.RLock()
 	defer s.keysLock.RUnlock()

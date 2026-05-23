@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestSerializedStore_SetMany_WritesAll verifies that serialized store set many writes all.
 func TestSerializedStore_SetMany_WritesAll(t *testing.T) {
 	t.Parallel()
 
@@ -23,6 +24,7 @@ func TestSerializedStore_SetMany_WritesAll(t *testing.T) {
 	assert.Equal(t, map[string]any{"name": "Alice"}, first)
 }
 
+// TestSerializedStore_SetMany_SerializationErrorWritesNothing verifies that serialized store set many serialization error writes nothing.
 func TestSerializedStore_SetMany_SerializationErrorWritesNothing(t *testing.T) {
 	t.Parallel()
 
@@ -49,6 +51,7 @@ func TestSerializedStore_SetMany_SerializationErrorWritesNothing(t *testing.T) {
 	assert.False(t, exists, "serialization failures must not partially write")
 }
 
+// TestSerializedStore_GetMany_DeserializesValuesAndPreservesNulls verifies that serialized store get many deserializes values and preserves nulls.
 func TestSerializedStore_GetMany_DeserializesValuesAndPreservesNulls(t *testing.T) {
 	t.Parallel()
 
@@ -76,6 +79,7 @@ func TestSerializedStore_GetMany_DeserializesValuesAndPreservesNulls(t *testing.
 	assert.Equal(t, "Alice", entries[2].Value.(map[string]any)["name"])
 }
 
+// TestSerializedStore_GetMany_JSONNullAndMissingBothReturnNil verifies that serialized store get many json null and missing both return nil.
 func TestSerializedStore_GetMany_JSONNullAndMissingBothReturnNil(t *testing.T) {
 	t.Parallel()
 
@@ -96,6 +100,7 @@ func TestSerializedStore_GetMany_JSONNullAndMissingBothReturnNil(t *testing.T) {
 	assert.Nil(t, entries[1].Value, "JSON null deserializes to nil value")
 }
 
+// TestSerializedStore_DeleteMany_DelegatesAndReturnsCounts verifies that serialized store delete many delegates and returns counts.
 func TestSerializedStore_DeleteMany_DelegatesAndReturnsCounts(t *testing.T) {
 	t.Parallel()
 
@@ -115,6 +120,7 @@ func TestSerializedStore_DeleteMany_DelegatesAndReturnsCounts(t *testing.T) {
 	assert.EqualValues(t, 1, result.Missing)
 }
 
+// TestSerializedStore_ListKeys_DelegatesWithoutDeserializingValues verifies that serialized store list keys delegates without deserializing values.
 func TestSerializedStore_ListKeys_DelegatesWithoutDeserializingValues(t *testing.T) {
 	t.Parallel()
 
@@ -128,6 +134,7 @@ func TestSerializedStore_ListKeys_DelegatesWithoutDeserializingValues(t *testing
 	assert.Equal(t, []string{"user:bad-json"}, keys)
 }
 
+// TestSerializedStore_ScanKeys_DelegatesWithoutDeserializingValues verifies that serialized store scan keys delegates without deserializing values.
 func TestSerializedStore_ScanKeys_DelegatesWithoutDeserializingValues(t *testing.T) {
 	t.Parallel()
 

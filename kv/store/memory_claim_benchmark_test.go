@@ -8,21 +8,30 @@ import (
 )
 
 const (
-	claimAllocationBenchUserKeys  = 512
+	// claimAllocationBenchUserKeys is a test const used by surrounding tests.
+	claimAllocationBenchUserKeys = 512
+	// claimAllocationBenchOtherKeys is a test const used by surrounding tests.
 	claimAllocationBenchOtherKeys = 512
-	claimAllocationBenchTTLMs     = int64(3_600_000)
+	// claimAllocationBenchTTLMs is a test const used by surrounding tests.
+	claimAllocationBenchTTLMs = int64(3_600_000)
 )
 
+// claimAllocationBenchmarkCase is a test type used by claim allocation benchmark case tests.
 type claimAllocationBenchmarkCase struct {
-	prefixLabel   string
-	prefix        string
+	// prefixLabel holds test state for claim allocation benchmark case.
+	prefixLabel string
+	// prefix holds test state for claim allocation benchmark case.
+	prefix string
+	// claimsDensity holds test state for claim allocation benchmark case.
 	claimsDensity int
 }
 
+// claimAllocationBenchmarkCase.name implements name for claim allocation benchmark case test scenarios.
 func (c claimAllocationBenchmarkCase) name() string {
 	return fmt.Sprintf("prefix=%s/claims_density=%d%%", c.prefixLabel, c.claimsDensity)
 }
 
+// claimAllocationBenchmarkCases is a test helper for claim allocation benchmark cases.
 func claimAllocationBenchmarkCases() []claimAllocationBenchmarkCase {
 	prefixes := []struct {
 		label  string
@@ -51,6 +60,7 @@ func claimAllocationBenchmarkCases() []claimAllocationBenchmarkCase {
 	return cases
 }
 
+// seedClaimBenchmarkMemoryStore is a test helper for seed claim benchmark memory store.
 func seedClaimBenchmarkMemoryStore(b *testing.B, s *MemoryStore) {
 	b.Helper()
 
@@ -58,6 +68,7 @@ func seedClaimBenchmarkMemoryStore(b *testing.B, s *MemoryStore) {
 	seedMemoryStore(b, s, claimAllocationBenchOtherKeys, "order:")
 }
 
+// preclaimBenchmarkDensity is a test helper for preclaim benchmark density.
 func preclaimBenchmarkDensity(b *testing.B, s Store, prefix string, claimsDensity int) {
 	b.Helper()
 

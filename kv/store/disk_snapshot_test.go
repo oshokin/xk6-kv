@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -56,6 +57,7 @@ func TestDiskStore_Backup_ProducesSnapshot(t *testing.T) {
 	assert.Equal(t, []byte("2"), collected["beta"])
 }
 
+// TestDiskStore_Backup_DoesNotReplaceExistingFileOnExportError verifies that disk store backup does not replace existing file on export error.
 func TestDiskStore_Backup_DoesNotReplaceExistingFileOnExportError(t *testing.T) {
 	t.Parallel()
 
@@ -191,6 +193,95 @@ func TestDiskStore_Backup_AllowConcurrentWrites_WarningPropagated(t *testing.T) 
 	require.NoError(t, err)
 	assert.False(t, blockingSummary.BestEffort)
 	assert.Empty(t, blockingSummary.Warning)
+}
+
+// TestDiskStore_Backup_ContextCanceledBeforeStart verifies that disk store backup context canceled before start.
+func TestDiskStore_Backup_ContextCanceledBeforeStart(t *testing.T) {
+	t.Parallel()
+
+	store := newTestDiskStore(t, false, "", true)
+	require.NoError(t, store.Set("key", "value"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	target := filepath.Join(t.TempDir(), "canceled-backup.kv")
+	summary, err := store.Backup(&BackupOptions{
+		FileName: target,
+		Context:  ctx,
+	})
+	require.Nil(t, summary)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.NoFileExists(t, target)
+}
+
+// TestDiskStore_Restore_ContextCanceledBeforeTransaction verifies that disk store restore context canceled before transaction.
+func TestDiskStore_Restore_ContextCanceledBeforeTransaction(t *testing.T) {
+	t.Parallel()
+
+	source := NewMemoryStore(&MemoryConfig{TrackKeys: false})
+	require.NoError(t, source.Set("new-key", "new-value"))
+
+	snapshotPath := filepath.Join(t.TempDir(), "restore-source.kv")
+	_, err := source.Backup(&BackupOptions{FileName: snapshotPath})
+	require.NoError(t, err)
+
+	store := newTestDiskStore(t, false, "", true)
+	require.NoError(t, store.Set("old-key", "old-value"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	summary, err := store.Restore(&RestoreOptions{
+		FileName: snapshotPath,
+		Context:  ctx,
+	})
+	require.Nil(t, summary)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+
+	oldValue, getErr := store.Get("old-key")
+	require.NoError(t, getErr)
+	assert.Equal(t, []byte("old-value"), oldValue)
+
+	_, getErr = store.Get("new-key")
+	require.Error(t, getErr)
+}
+
+// TestDiskStore_Restore_ContextCanceledDuringForEachRollsBack verifies that disk store restore context canceled during for each rolls back.
+func TestDiskStore_Restore_ContextCanceledDuringForEachRollsBack(t *testing.T) {
+	t.Parallel()
+
+	source := NewMemoryStore(&MemoryConfig{TrackKeys: false})
+	require.NoError(t, source.Set("new-key", "new-value"))
+
+	snapshotPath := filepath.Join(t.TempDir(), "restore-cancel-midway.kv")
+	_, err := source.Backup(&BackupOptions{FileName: snapshotPath})
+	require.NoError(t, err)
+
+	store := newTestDiskStore(t, false, "", true)
+	require.NoError(t, store.Set("old-key", "old-value"))
+
+	// Restore Err() checks order:
+	// 1) Restore preflight, 2) before opening snapshot, 3) restoreFromSnapshotDB preflight,
+	// 4) destination Update txn, 5) snapshot View txn, 6) first ForEach iteration.
+	ctx := newCancelOnErrCallContext(6)
+
+	summary, err := store.Restore(&RestoreOptions{
+		FileName: snapshotPath,
+		Context:  ctx,
+	})
+	require.Nil(t, summary)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+
+	oldValue, getErr := store.Get("old-key")
+	require.NoError(t, getErr)
+	assert.Equal(t, []byte("old-value"), oldValue)
+
+	_, getErr = store.Get("new-key")
+	require.Error(t, getErr, "canceled restore transaction must roll back")
 }
 
 // TestDiskStore_Restore_HonorsMaxEntries verifies that Restore respects the

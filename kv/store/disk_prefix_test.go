@@ -11,6 +11,7 @@ import (
 	boltErrors "go.etcd.io/bbolt/errors"
 )
 
+// TestDiskStore_DeleteByPrefix_RejectsEmptyPrefix verifies that disk store delete by prefix rejects empty prefix.
 func TestDiskStore_DeleteByPrefix_RejectsEmptyPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -28,6 +29,7 @@ func TestDiskStore_DeleteByPrefix_RejectsEmptyPrefix(t *testing.T) {
 	}
 }
 
+// TestDiskStore_DeleteByPrefix_RejectsInvalidLimit verifies that disk store delete by prefix rejects invalid limit.
 func TestDiskStore_DeleteByPrefix_RejectsInvalidLimit(t *testing.T) {
 	t.Parallel()
 
@@ -47,6 +49,7 @@ func TestDiskStore_DeleteByPrefix_RejectsInvalidLimit(t *testing.T) {
 	}
 }
 
+// TestDiskStore_DeleteByPrefix_DeletesLimitedBatchAndReportsNotDone verifies that disk store delete by prefix deletes limited batch and reports not done.
 func TestDiskStore_DeleteByPrefix_DeletesLimitedBatchAndReportsNotDone(t *testing.T) {
 	t.Parallel()
 
@@ -80,6 +83,7 @@ func TestDiskStore_DeleteByPrefix_DeletesLimitedBatchAndReportsNotDone(t *testin
 	}
 }
 
+// TestDiskStore_DeleteByPrefix_RepeatedCallsReportDone verifies that disk store delete by prefix repeated calls report done.
 func TestDiskStore_DeleteByPrefix_RepeatedCallsReportDone(t *testing.T) {
 	t.Parallel()
 
@@ -114,6 +118,7 @@ func TestDiskStore_DeleteByPrefix_RepeatedCallsReportDone(t *testing.T) {
 	}
 }
 
+// TestDiskStore_DeleteByPrefix_DoesNotDeleteOtherPrefixes verifies that disk store delete by prefix does not delete other prefixes.
 func TestDiskStore_DeleteByPrefix_DoesNotDeleteOtherPrefixes(t *testing.T) {
 	t.Parallel()
 
@@ -141,6 +146,7 @@ func TestDiskStore_DeleteByPrefix_DoesNotDeleteOtherPrefixes(t *testing.T) {
 	assert.True(t, orderExists)
 }
 
+// TestDiskStore_DeleteByPrefix_CleansClaims verifies that disk store delete by prefix cleans claims.
 func TestDiskStore_DeleteByPrefix_CleansClaims(t *testing.T) {
 	t.Parallel()
 
@@ -169,6 +175,7 @@ func TestDiskStore_DeleteByPrefix_CleansClaims(t *testing.T) {
 	assert.False(t, released)
 }
 
+// TestDiskStore_DeleteByPrefix_TrackedClaimsMode_DoesNotTouchClaimsBucket verifies that disk store delete by prefix tracked claims mode does not touch claims bucket.
 func TestDiskStore_DeleteByPrefix_TrackedClaimsMode_DoesNotTouchClaimsBucket(t *testing.T) {
 	t.Parallel()
 
@@ -196,6 +203,7 @@ func TestDiskStore_DeleteByPrefix_TrackedClaimsMode_DoesNotTouchClaimsBucket(t *
 	}))
 }
 
+// TestDiskStore_DeleteByPrefix_BoltClaimsMode_CreatesClaimsBucket verifies that disk store delete by prefix bolt claims mode creates claims bucket.
 func TestDiskStore_DeleteByPrefix_BoltClaimsMode_CreatesClaimsBucket(t *testing.T) {
 	t.Parallel()
 
@@ -223,6 +231,7 @@ func TestDiskStore_DeleteByPrefix_BoltClaimsMode_CreatesClaimsBucket(t *testing.
 	}))
 }
 
+// TestDiskStore_DeleteByPrefix_UpdatesTracking verifies that disk store delete by prefix updates tracking.
 func TestDiskStore_DeleteByPrefix_UpdatesTracking(t *testing.T) {
 	t.Parallel()
 
@@ -243,6 +252,7 @@ func TestDiskStore_DeleteByPrefix_UpdatesTracking(t *testing.T) {
 	requireDiskTrackingMatchesStore(t, store)
 }
 
+// TestDiskStore_DeleteByPrefix_AfterRebuildKeyList verifies that disk store delete by prefix after rebuild key list.
 func TestDiskStore_DeleteByPrefix_AfterRebuildKeyList(t *testing.T) {
 	t.Parallel()
 

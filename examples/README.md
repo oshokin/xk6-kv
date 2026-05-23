@@ -4,6 +4,18 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
 
 **Suggested first runs** (also listed in the root [README](../README.md#start-here-existing-scripts)): `claim-random-default-ttl.js`, `pop-random-unique-users.js`, `import-csv.js`, `export-jsonl.js`.
 
+## Recipe index
+
+| Use case | Example | Methods | When to use |
+| --- | --- | --- | --- |
+| Export captured responses to CSV | `export-csv.js` | `setMany`, `exportCSV` | When response payloads are flat object rows and you need handoff/report files. |
+| Prefix pool diagnostics for claim availability | `allocation-stats.js` | `claimRandomMany`, `allocationStats`, `releaseClaim` | When allocation pools are separated by key prefix and you need operational pool-health checks. |
+| Cleanup many claims safely | `claim-batch-lifecycle.js` | `claimRandomMany`, `renewClaims`, `completeClaims`, `releaseClaims` | When one VU holds multiple leases and you need partial-success lifecycle cleanup. |
+| Reserve explicit fixtures | `claim-keys.js` | `claimKeys`, `releaseClaims` | When test steps need a known fixture set by exact keys. |
+| Validate seed files before import | `validate-import-files.js` | `validateCSV`, `validateJSONL`, `importCSV` | When you want fast preflight checks before long imports. |
+| Portable export to JSONL | `export-jsonl.js` | `setMany`, `exportJSONL` | When values are nested or schema-flexible and must round-trip reliably. |
+| Portable import from CSV | `import-csv.js` | `importCSV`, `getMany` | When seed data is tabular and each row maps to one object value. |
+
 ## Running the examples
 
 1. Build or download a k6 binary that bundles this extension (see the root `README.md` for install options).
@@ -88,10 +100,40 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/export-jsonl.js
    ```
 
+   For portable flat CSV exports, try:
+
+   ```bash
+   k6 run examples/export-csv.js
+   ```
+
    For portable JSONL imports, try:
 
    ```bash
    k6 run examples/import-jsonl.js
+   ```
+
+   For preflight validation before imports, try:
+
+   ```bash
+   k6 run examples/validate-import-files.js
+   ```
+
+   For prefix-scoped allocation diagnostics, try:
+
+   ```bash
+   k6 run examples/allocation-stats.js
+   ```
+
+   For batch claim lifecycle cleanup, try:
+
+   ```bash
+   k6 run examples/claim-batch-lifecycle.js
+   ```
+
+   For explicit fixture reservation by key, try:
+
+   ```bash
+   k6 run examples/claim-keys.js
    ```
 
    For operation metrics in a realistic worker queue flow, try:
@@ -349,6 +391,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | --- | --- | --- |
 | `BackupInProgressError` | Another goroutine is actively snapshotting with `allowConcurrentWrites=false` (mutation lock blocks writers). | `ErrBackupInProgress` |
 | `RestoreInProgressError` | A restore is blocking writers when a mutation is attempted. | `ErrRestoreInProgress` |
+| `OperationCanceledError` | VU context was canceled or deadline exceeded while an async operation was running (for example test abort, iteration timeout, scenario stop). | `context.Canceled`, `context.DeadlineExceeded` |
 | `StoreReadOnlyError` | A mutating API was called on a disk store opened with `disk.readOnly=true`. | `ErrDiskStoreReadOnly` |
 | `StoreClosedError` | You called a KV method after `kv.close()` or before the store opened. | `ErrDiskStoreClosed` |
 | `DatabaseNotOpenError` | `openKv()` failed and you invoked methods on the nil handle. | (JS-layer guard) |
@@ -387,6 +430,7 @@ Each entry lists the JavaScript `err.name`, the underlying Go sentinel(s) it gro
 | Error category | Recovery approach |
 | --- | --- |
 | **Transient** | Retry with backoff: `BackupInProgressError`, `RestoreInProgressError` |
+| **Control flow** | Treat as expected cancellation signal and stop gracefully: `OperationCanceledError` |
 | **User error** | Fix input and retry: `KeyNotFoundError`, `ValueNumberRequiredError`, `SnapshotNotFoundError` (on first run) |
 | **Configuration** | Check paths/permissions/mode: `DiskPathError`, `SnapshotPermissionError`, `DiskStoreOpenError`, `StoreReadOnlyError` |
 | **System failure** | Fail-fast and investigate: `DiskStoreWriteError`, `SnapshotIOError`, `BucketNotFoundError`, `InternalStoreError`, `UnknownError` |

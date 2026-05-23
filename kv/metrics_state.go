@@ -14,28 +14,46 @@ import (
 )
 
 const (
-	metricKVKeys            = "xk6_kv_keys"
-	metricKVClaimsLive      = "xk6_kv_claims_live"
-	metricKVClaimsExpired   = "xk6_kv_claims_expired"
-	metricKVIndexKeys       = "xk6_kv_index_keys"
+	// metricKVKeys is the k6 metric name for keys.
+	metricKVKeys = "xk6_kv_keys"
+	// metricKVClaimsLive is the k6 metric name for claims live.
+	metricKVClaimsLive = "xk6_kv_claims_live"
+	// metricKVClaimsExpired is the k6 metric name for claims expired.
+	metricKVClaimsExpired = "xk6_kv_claims_expired"
+	// metricKVIndexKeys is the k6 metric name for index keys.
+	metricKVIndexKeys = "xk6_kv_index_keys"
+	// metricKVIndexConsistent is the k6 metric name for index consistent.
 	metricKVIndexConsistent = "xk6_kv_index_consistent"
-	metricKVDiskSizeBytes   = "xk6_kv_disk_size_bytes"
+	// metricKVDiskSizeBytes is the k6 metric name for disk size bytes.
+	metricKVDiskSizeBytes = "xk6_kv_disk_size_bytes"
 
-	tagBackend       = "backend"
-	tagTrackKeys     = "track_keys"
+	// tagBackend is the k6 metric tag key for backend.
+	tagBackend = "backend"
+	// tagTrackKeys is the k6 metric tag key for track keys.
+	tagTrackKeys = "track_keys"
+	// tagSerialization is the k6 metric tag key for serialization.
 	tagSerialization = "serialization"
-	tagIndex         = "index"
+	// tagIndex is the k6 metric tag key for index.
+	tagIndex = "index"
 )
 
+// kvStateMetrics holds registered k6 gauges emitted by reportStats().
 type kvStateMetrics struct {
-	keys            *metrics.Metric
-	claimsLive      *metrics.Metric
-	claimsExpired   *metrics.Metric
-	indexKeys       *metrics.Metric
+	// keys tracks the number of entries in the store.
+	keys *metrics.Metric
+	// claimsLive tracks active claim leases.
+	claimsLive *metrics.Metric
+	// claimsExpired tracks expired but not yet reclaimed claims.
+	claimsExpired *metrics.Metric
+	// indexKeys tracks key-index structure sizes when indexing is enabled.
+	indexKeys *metrics.Metric
+	// indexConsistent tracks whether tracked indexes match store contents.
 	indexConsistent *metrics.Metric
-	diskSizeBytes   *metrics.Metric
+	// diskSizeBytes tracks on-disk database size for disk backends.
+	diskSizeBytes *metrics.Metric
 }
 
+// newKVStateMetrics registers reportStats() gauge metrics in the k6 registry.
 func newKVStateMetrics(registry *metrics.Registry) (*kvStateMetrics, error) {
 	if registry == nil {
 		return nil, errors.New("k6 metrics registry is nil")
@@ -81,6 +99,7 @@ func newKVStateMetrics(registry *metrics.Registry) (*kvStateMetrics, error) {
 	}, nil
 }
 
+// emit publishes gauge samples derived from a store stats snapshot.
 func (m *kvStateMetrics) emit(
 	ctx context.Context,
 	state *lib.State,
@@ -113,6 +132,7 @@ func (m *kvStateMetrics) emit(
 	return nil
 }
 
+// emitBaseSamples emits count, claim, and disk gauge samples.
 func (m *kvStateMetrics) emitBaseSamples(
 	ctx context.Context,
 	state *lib.State,
@@ -142,6 +162,7 @@ func (m *kvStateMetrics) emitBaseSamples(
 	}
 }
 
+// emitIndexSamples emits per-index and consistency gauge samples.
 func (m *kvStateMetrics) emitIndexSamples(
 	ctx context.Context,
 	state *lib.State,
@@ -188,6 +209,7 @@ func (m *kvStateMetrics) emitIndexSamples(
 	)
 }
 
+// emitGaugeSample appends one gauge sample when the VU context is still active.
 func (m *kvStateMetrics) emitGaugeSample(
 	ctx context.Context,
 	state *lib.State,

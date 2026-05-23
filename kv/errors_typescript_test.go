@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/afero"
 )
 
+// TestKVErrorNameTypescriptDeclarationsStayInSync verifies that kv error name typescript declarations stay in sync.
 func TestKVErrorNameTypescriptDeclarationsStayInSync(t *testing.T) {
 	t.Parallel()
 
@@ -31,6 +32,7 @@ func TestKVErrorNameTypescriptDeclarationsStayInSync(t *testing.T) {
 	}
 }
 
+// collectGoErrorNames collects go error names.
 func collectGoErrorNames(t *testing.T, path string) map[string]struct{} {
 	t.Helper()
 
@@ -55,6 +57,7 @@ func collectGoErrorNames(t *testing.T, path string) map[string]struct{} {
 	return names
 }
 
+// collectGoErrorNamesFromConstDecl collects go error names from const decl.
 func collectGoErrorNamesFromConstDecl(names map[string]struct{}, decl *ast.GenDecl) {
 	for _, spec := range decl.Specs {
 		valueSpec, ok := spec.(*ast.ValueSpec)
@@ -77,6 +80,7 @@ func collectGoErrorNamesFromConstDecl(names map[string]struct{}, decl *ast.GenDe
 	}
 }
 
+// stringLiteralValue extracts a string literal value from an AST expression.
 func stringLiteralValue(expr ast.Expr) (string, bool) {
 	lit, ok := expr.(*ast.BasicLit)
 	if !ok || lit.Kind != token.STRING {
@@ -91,6 +95,7 @@ func stringLiteralValue(expr ast.Expr) (string, bool) {
 	return value, true
 }
 
+// collectTypescriptErrorNames collects typescript error names.
 func collectTypescriptErrorNames(t *testing.T, path string) map[string]struct{} {
 	t.Helper()
 
@@ -112,6 +117,7 @@ func collectTypescriptErrorNames(t *testing.T, path string) map[string]struct{} 
 	return names
 }
 
+// setDifference returns values present in left but absent in right.
 func setDifference(left map[string]struct{}, right map[string]struct{}) []string {
 	diff := make([]string, 0)
 

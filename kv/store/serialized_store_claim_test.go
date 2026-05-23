@@ -7,10 +7,13 @@ import (
 )
 
 const (
-	corruptJSONKey   = "bad:1"
+	// corruptJSONKey is a test const used by surrounding tests.
+	corruptJSONKey = "bad:1"
+	// corruptJSONValue is a test const used by surrounding tests.
 	corruptJSONValue = "{bad-json"
 )
 
+// TestSerializedStore_PopRandom_JSONDecodeErrorDoesNotDeleteOrLeakClaim verifies that serialized store pop random json decode error does not delete or leak claim.
 func TestSerializedStore_PopRandom_JSONDecodeErrorDoesNotDeleteOrLeakClaim(t *testing.T) {
 	t.Parallel()
 
@@ -31,6 +34,7 @@ func TestSerializedStore_PopRandom_JSONDecodeErrorDoesNotDeleteOrLeakClaim(t *te
 	}
 }
 
+// TestSerializedStore_ClaimRandom_JSONDecodeErrorReleasesClaim verifies that serialized store claim random json decode error releases claim.
 func TestSerializedStore_ClaimRandom_JSONDecodeErrorReleasesClaim(t *testing.T) {
 	t.Parallel()
 
@@ -51,6 +55,7 @@ func TestSerializedStore_ClaimRandom_JSONDecodeErrorReleasesClaim(t *testing.T) 
 	}
 }
 
+// TestSerializedStore_ClaimKey_JSONDecodeErrorReleasesClaim verifies that serialized store claim key json decode error releases claim.
 func TestSerializedStore_ClaimKey_JSONDecodeErrorReleasesClaim(t *testing.T) {
 	t.Parallel()
 
@@ -71,6 +76,7 @@ func TestSerializedStore_ClaimKey_JSONDecodeErrorReleasesClaim(t *testing.T) {
 	}
 }
 
+// TestSerializedStore_ClaimRandomMany_JSONDecodeErrorReleasesAllClaims verifies that serialized store claim random many json decode error releases all claims.
 func TestSerializedStore_ClaimRandomMany_JSONDecodeErrorReleasesAllClaims(t *testing.T) {
 	t.Parallel()
 
@@ -103,6 +109,7 @@ func TestSerializedStore_ClaimRandomMany_JSONDecodeErrorReleasesAllClaims(t *tes
 	}
 }
 
+// TestSerializedStore_PopRandomMany_JSONDecodeErrorDoesNotDeleteOrLeakClaims verifies that serialized store pop random many json decode error does not delete or leak claims.
 func TestSerializedStore_PopRandomMany_JSONDecodeErrorDoesNotDeleteOrLeakClaims(t *testing.T) {
 	t.Parallel()
 
@@ -138,6 +145,7 @@ func TestSerializedStore_PopRandomMany_JSONDecodeErrorDoesNotDeleteOrLeakClaims(
 	}
 }
 
+// TestSerializedStore_PopRandom_CompletionFailureReturnsSentinel verifies that serialized store pop random completion failure returns sentinel.
 func TestSerializedStore_PopRandom_CompletionFailureReturnsSentinel(t *testing.T) {
 	t.Parallel()
 
@@ -151,6 +159,7 @@ func TestSerializedStore_PopRandom_CompletionFailureReturnsSentinel(t *testing.T
 	require.Len(t, raw.released, 1, "single popRandom completion failure must release its claim")
 }
 
+// TestSerializedStore_PopRandom_CompleteError_ReleasesClaim verifies that serialized store pop random complete error releases claim.
 func TestSerializedStore_PopRandom_CompleteError_ReleasesClaim(t *testing.T) {
 	t.Parallel()
 
@@ -163,6 +172,7 @@ func TestSerializedStore_PopRandom_CompleteError_ReleasesClaim(t *testing.T) {
 	require.Len(t, raw.released, 1, "single popRandom completion error must release its claim")
 }
 
+// TestSerializedStore_PopRandomMany_CompleteFailure_ReleasesRemainingClaims verifies that serialized store pop random many complete failure releases remaining claims.
 func TestSerializedStore_PopRandomMany_CompleteFailure_ReleasesRemainingClaims(t *testing.T) {
 	t.Parallel()
 
@@ -178,6 +188,7 @@ func TestSerializedStore_PopRandomMany_CompleteFailure_ReleasesRemainingClaims(t
 	require.Equal(t, "claim-3", raw.released[1].ID)
 }
 
+// TestSerializedStore_PopRandomMany_CompletionFailure_JoinsReleaseError verifies that serialized store pop random many completion failure joins release error.
 func TestSerializedStore_PopRandomMany_CompletionFailure_JoinsReleaseError(t *testing.T) {
 	t.Parallel()
 
@@ -193,11 +204,15 @@ func TestSerializedStore_PopRandomMany_CompletionFailure_JoinsReleaseError(t *te
 	require.Equal(t, "claim-3", raw.released[1].ID)
 }
 
+// serializedRawStoreCase is a test type used by serialized raw store case tests.
 type serializedRawStoreCase struct {
-	name     string
+	// name identifies the name case under test.
+	name string
+	// newStore constructs the store instance for the serialized raw store case case.
 	newStore func(*testing.T) Store
 }
 
+// serializedRawStoreCases is a test helper for serialized raw store cases.
 func serializedRawStoreCases() []serializedRawStoreCase {
 	return []serializedRawStoreCase{
 		{
@@ -222,6 +237,7 @@ func serializedRawStoreCases() []serializedRawStoreCase {
 	}
 }
 
+// requireRawCorruptJSONStillAvailable is a test helper for require raw corrupt json still available.
 func requireRawCorruptJSONStillAvailable(t *testing.T, raw Store) {
 	t.Helper()
 
@@ -244,11 +260,14 @@ func requireRawCorruptJSONStillAvailable(t *testing.T, raw Store) {
 	require.True(t, released)
 }
 
+// popRandomCompletionFailureStore is a test double that stubs pop random completion failure store behavior.
 type popRandomCompletionFailureStore struct {
 	Store
+	// released holds test state for pop random completion failure store.
 	released []*ClaimRef
 }
 
+// popRandomCompletionFailureStore.ClaimRandom implements ClaimRandom for pop random completion failure store test scenarios.
 func (s *popRandomCompletionFailureStore) ClaimRandom(_ *ClaimOptions) (*EntryClaim, error) {
 	return &EntryClaim{
 		ID:    "claim-id",
@@ -261,10 +280,12 @@ func (s *popRandomCompletionFailureStore) ClaimRandom(_ *ClaimOptions) (*EntryCl
 	}, nil
 }
 
+// popRandomCompletionFailureStore.CompleteClaim implements CompleteClaim for pop random completion failure store test scenarios.
 func (s *popRandomCompletionFailureStore) CompleteClaim(_ *ClaimRef, _ *CompleteClaimOptions) (bool, error) {
 	return false, nil
 }
 
+// popRandomCompletionFailureStore.ReleaseClaim implements ReleaseClaim for pop random completion failure store test scenarios.
 func (s *popRandomCompletionFailureStore) ReleaseClaim(ref *ClaimRef) (bool, error) {
 	s.released = append(s.released, &ClaimRef{
 		ID:    ref.ID,
@@ -275,11 +296,14 @@ func (s *popRandomCompletionFailureStore) ReleaseClaim(ref *ClaimRef) (bool, err
 	return true, nil
 }
 
+// popRandomCompleteErrorStore is a test double that stubs pop random complete error store behavior.
 type popRandomCompleteErrorStore struct {
 	Store
+	// released holds test state for pop random complete error store.
 	released []*ClaimRef
 }
 
+// popRandomCompleteErrorStore.ClaimRandom implements ClaimRandom for pop random complete error store test scenarios.
 func (s *popRandomCompleteErrorStore) ClaimRandom(_ *ClaimOptions) (*EntryClaim, error) {
 	return &EntryClaim{
 		ID:    "claim-id",
@@ -292,10 +316,12 @@ func (s *popRandomCompleteErrorStore) ClaimRandom(_ *ClaimOptions) (*EntryClaim,
 	}, nil
 }
 
+// popRandomCompleteErrorStore.CompleteClaim implements CompleteClaim for pop random complete error store test scenarios.
 func (s *popRandomCompleteErrorStore) CompleteClaim(_ *ClaimRef, _ *CompleteClaimOptions) (bool, error) {
 	return false, ErrDiskStoreWriteFailed
 }
 
+// popRandomCompleteErrorStore.ReleaseClaim implements ReleaseClaim for pop random complete error store test scenarios.
 func (s *popRandomCompleteErrorStore) ReleaseClaim(ref *ClaimRef) (bool, error) {
 	s.released = append(s.released, &ClaimRef{
 		ID:    ref.ID,
@@ -306,12 +332,16 @@ func (s *popRandomCompleteErrorStore) ReleaseClaim(ref *ClaimRef) (bool, error) 
 	return true, nil
 }
 
+// popRandomManyCompletionFailureStore is a test double that stubs pop random many completion failure store behavior.
 type popRandomManyCompletionFailureStore struct {
 	Store
+	// completeCalls records complete invocations for pop random many completion failure store.
 	completeCalls int
-	released      []*ClaimRef
+	// released holds test state for pop random many completion failure store.
+	released []*ClaimRef
 }
 
+// popRandomManyCompletionFailureStore.ClaimRandomMany implements ClaimRandomMany for pop random many completion failure store test scenarios.
 func (s *popRandomManyCompletionFailureStore) ClaimRandomMany(_ *ClaimManyOptions) ([]*EntryClaim, error) {
 	return []*EntryClaim{
 		{
@@ -335,6 +365,7 @@ func (s *popRandomManyCompletionFailureStore) ClaimRandomMany(_ *ClaimManyOption
 	}, nil
 }
 
+// popRandomManyCompletionFailureStore.CompleteClaim implements CompleteClaim for pop random many completion failure store test scenarios.
 func (s *popRandomManyCompletionFailureStore) CompleteClaim(_ *ClaimRef, _ *CompleteClaimOptions) (bool, error) {
 	s.completeCalls++
 	if s.completeCalls == 2 {
@@ -344,6 +375,7 @@ func (s *popRandomManyCompletionFailureStore) CompleteClaim(_ *ClaimRef, _ *Comp
 	return true, nil
 }
 
+// popRandomManyCompletionFailureStore.ReleaseClaim implements ReleaseClaim for pop random many completion failure store test scenarios.
 func (s *popRandomManyCompletionFailureStore) ReleaseClaim(ref *ClaimRef) (bool, error) {
 	s.released = append(s.released, &ClaimRef{
 		ID:    ref.ID,
@@ -354,12 +386,16 @@ func (s *popRandomManyCompletionFailureStore) ReleaseClaim(ref *ClaimRef) (bool,
 	return true, nil
 }
 
+// popRandomManyCompletionAndReleaseErrorStore is a test double that stubs pop random many completion and release error store behavior.
 type popRandomManyCompletionAndReleaseErrorStore struct {
 	Store
+	// completeCalls records complete invocations for pop random many completion and release error store.
 	completeCalls int
-	released      []*ClaimRef
+	// released holds test state for pop random many completion and release error store.
+	released []*ClaimRef
 }
 
+// popRandomManyCompletionAndReleaseErrorStore.ClaimRandomMany implements ClaimRandomMany for pop random many completion and release error store test scenarios.
 func (s *popRandomManyCompletionAndReleaseErrorStore) ClaimRandomMany(_ *ClaimManyOptions) ([]*EntryClaim, error) {
 	return []*EntryClaim{
 		{
@@ -383,6 +419,7 @@ func (s *popRandomManyCompletionAndReleaseErrorStore) ClaimRandomMany(_ *ClaimMa
 	}, nil
 }
 
+// popRandomManyCompletionAndReleaseErrorStore.CompleteClaim implements CompleteClaim for pop random many completion and release error store test scenarios.
 func (s *popRandomManyCompletionAndReleaseErrorStore) CompleteClaim(
 	_ *ClaimRef,
 	_ *CompleteClaimOptions,
@@ -395,6 +432,7 @@ func (s *popRandomManyCompletionAndReleaseErrorStore) CompleteClaim(
 	return true, nil
 }
 
+// popRandomManyCompletionAndReleaseErrorStore.ReleaseClaim implements ReleaseClaim for pop random many completion and release error store test scenarios.
 func (s *popRandomManyCompletionAndReleaseErrorStore) ReleaseClaim(ref *ClaimRef) (bool, error) {
 	s.released = append(s.released, &ClaimRef{
 		ID:    ref.ID,

@@ -32,7 +32,6 @@ export default async function () {
   expect(entries).toHaveLength(3);
 }
 
-export async function teardown() {
-  // Close disk-backed store to release file handles and memory.
+export function teardown() {
   kv.close();
 }

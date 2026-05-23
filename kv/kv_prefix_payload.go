@@ -9,11 +9,15 @@ import (
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
+// deleteByPrefixOptions holds parsed options for the corresponding KV method.
 type deleteByPrefixOptions struct {
+	// Prefix selects only keys that start with the given string.
 	Prefix string
-	Limit  int64
+	// Limit caps how many rows or entries are processed.
+	Limit int64
 }
 
+// importDeleteByPrefixOptions parses Sobek options for the corresponding KV method.
 func importDeleteByPrefixOptions(rt *sobek.Runtime, options sobek.Value) (deleteByPrefixOptions, error) {
 	parsed := deleteByPrefixOptions{}
 

@@ -39,6 +39,15 @@ go.work
 /temp/
 /tmp/
 
+# Local scratch/log artifacts.
+*.log
+*.tmp
+*.trace
+
+# Local test/report artifacts.
+/e2e-results/
+/coverage/
+
 # Node.js dependencies.
 node_modules/
 package-lock.json

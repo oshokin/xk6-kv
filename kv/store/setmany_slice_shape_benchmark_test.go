@@ -5,22 +5,33 @@ import (
 	"testing"
 )
 
+// benchmarkSetManyBatchSize is a test const used by surrounding tests.
 const benchmarkSetManyBatchSize = 10_000
 
 type (
+	// benchSetManyEntry is a test type used by bench set many entry tests.
 	benchSetManyEntry struct {
-		Key   string
+		// Key holds test state for bench set many entry.
+		Key string
+		// Value holds test state for bench set many entry.
 		Value any
 	}
 
+	// benchSetManySerializedEntry is a test type used by bench set many serialized entry tests.
 	benchSetManySerializedEntry struct {
-		Key   string
+		// Key holds test state for bench set many serialized entry.
+		Key string
+		// Value holds test state for bench set many serialized entry.
 		Value []byte
 	}
 
+	// benchSetManyErrorDetail is a test type used by bench set many error detail tests.
 	benchSetManyErrorDetail struct {
-		Key     string
-		Name    string
+		// Key holds test state for bench set many error detail.
+		Key string
+		// Name holds test state for bench set many error detail.
+		Name string
+		// Message holds test state for bench set many error detail.
 		Message string
 	}
 )
@@ -39,6 +50,7 @@ var (
 	benchSetManyInputValuesWithFail map[string]any
 )
 
+// init is a test helper for init.
 func init() {
 	benchSetManyInputKeys = make([]string, benchmarkSetManyBatchSize)
 	benchSetManyInputValues = make(map[string]any, benchmarkSetManyBatchSize)
@@ -62,6 +74,7 @@ func init() {
 	}
 }
 
+// benchmarkBuildValueEntries is a test helper for benchmark build value entries.
 func benchmarkBuildValueEntries() []benchSetManyEntry {
 	entries := make([]benchSetManyEntry, benchmarkSetManyBatchSize)
 
@@ -75,6 +88,7 @@ func benchmarkBuildValueEntries() []benchSetManyEntry {
 	return entries
 }
 
+// benchmarkBuildPointerEntries is a test helper for benchmark build pointer entries.
 func benchmarkBuildPointerEntries() []*benchSetManyEntry {
 	entries := make([]*benchSetManyEntry, benchmarkSetManyBatchSize)
 
@@ -88,6 +102,7 @@ func benchmarkBuildPointerEntries() []*benchSetManyEntry {
 	return entries
 }
 
+// benchmarkBuildValueErrorDetails is a test helper for benchmark build value error details.
 func benchmarkBuildValueErrorDetails() []benchSetManyErrorDetail {
 	details := make([]benchSetManyErrorDetail, benchmarkSetManyBatchSize)
 
@@ -102,6 +117,7 @@ func benchmarkBuildValueErrorDetails() []benchSetManyErrorDetail {
 	return details
 }
 
+// benchmarkBuildPointerErrorDetails is a test helper for benchmark build pointer error details.
 func benchmarkBuildPointerErrorDetails() []*benchSetManyErrorDetail {
 	details := make([]*benchSetManyErrorDetail, benchmarkSetManyBatchSize)
 
@@ -116,6 +132,7 @@ func benchmarkBuildPointerErrorDetails() []*benchSetManyErrorDetail {
 	return details
 }
 
+// benchmarkImportEntriesValue is a test helper for benchmark import entries value.
 func benchmarkImportEntriesValue(keys []string, input map[string]any) ([]benchSetManyEntry, []benchSetManyErrorDetail) {
 	entries := make([]benchSetManyEntry, 0, len(keys))
 	details := make([]benchSetManyErrorDetail, 0)
@@ -141,6 +158,7 @@ func benchmarkImportEntriesValue(keys []string, input map[string]any) ([]benchSe
 	return entries, details
 }
 
+// benchmarkImportEntriesPtr is a test helper for benchmark import entries ptr.
 func benchmarkImportEntriesPtr(keys []string, input map[string]any) ([]*benchSetManyEntry, []*benchSetManyErrorDetail) {
 	entries := make([]*benchSetManyEntry, 0, len(keys))
 	details := make([]*benchSetManyErrorDetail, 0)
@@ -166,6 +184,7 @@ func benchmarkImportEntriesPtr(keys []string, input map[string]any) ([]*benchSet
 	return entries, details
 }
 
+// benchmarkSerializeEntriesValue is a test helper for benchmark serialize entries value.
 func benchmarkSerializeEntriesValue(
 	serializer Serializer,
 	entries []benchSetManyEntry,
@@ -194,6 +213,7 @@ func benchmarkSerializeEntriesValue(
 	return serialized, details
 }
 
+// benchmarkSerializeEntriesPtr is a test helper for benchmark serialize entries ptr.
 func benchmarkSerializeEntriesPtr(
 	serializer Serializer,
 	entries []*benchSetManyEntry,
@@ -222,6 +242,7 @@ func benchmarkSerializeEntriesPtr(
 	return serialized, details
 }
 
+// benchmarkWriteSerializedValue is a test helper for benchmark write serialized value.
 func benchmarkWriteSerializedValue(entries []benchSetManySerializedEntry) int {
 	store := make(map[string][]byte, len(entries))
 
@@ -232,6 +253,7 @@ func benchmarkWriteSerializedValue(entries []benchSetManySerializedEntry) int {
 	return len(store)
 }
 
+// benchmarkWriteSerializedPtr is a test helper for benchmark write serialized ptr.
 func benchmarkWriteSerializedPtr(entries []*benchSetManySerializedEntry) int {
 	store := make(map[string][]byte, len(entries))
 
@@ -242,6 +264,7 @@ func benchmarkWriteSerializedPtr(entries []*benchSetManySerializedEntry) int {
 	return len(store)
 }
 
+// BenchmarkSetManyArgBuild_ValueSlice measures set many arg build value slice.
 func BenchmarkSetManyArgBuild_ValueSlice(b *testing.B) {
 	b.ReportAllocs()
 
@@ -250,6 +273,7 @@ func BenchmarkSetManyArgBuild_ValueSlice(b *testing.B) {
 	}
 }
 
+// BenchmarkSetManyArgBuild_PointerSlice measures set many arg build pointer slice.
 func BenchmarkSetManyArgBuild_PointerSlice(b *testing.B) {
 	b.ReportAllocs()
 
@@ -258,6 +282,7 @@ func BenchmarkSetManyArgBuild_PointerSlice(b *testing.B) {
 	}
 }
 
+// BenchmarkSetManyErrorListBuild_ValueSlice measures set many error list build value slice.
 func BenchmarkSetManyErrorListBuild_ValueSlice(b *testing.B) {
 	b.ReportAllocs()
 
@@ -266,6 +291,7 @@ func BenchmarkSetManyErrorListBuild_ValueSlice(b *testing.B) {
 	}
 }
 
+// BenchmarkSetManyErrorListBuild_PointerSlice measures set many error list build pointer slice.
 func BenchmarkSetManyErrorListBuild_PointerSlice(b *testing.B) {
 	b.ReportAllocs()
 
@@ -274,6 +300,7 @@ func BenchmarkSetManyErrorListBuild_PointerSlice(b *testing.B) {
 	}
 }
 
+// BenchmarkSetManyEndToEndSuccess_ValueSlices measures set many end to end success value slices.
 func BenchmarkSetManyEndToEndSuccess_ValueSlices(b *testing.B) {
 	serializer := NewJSONSerializer()
 	keys := benchSetManyInputKeys
@@ -297,6 +324,7 @@ func BenchmarkSetManyEndToEndSuccess_ValueSlices(b *testing.B) {
 	}
 }
 
+// BenchmarkSetManyEndToEndSuccess_PointerSlices measures set many end to end success pointer slices.
 func BenchmarkSetManyEndToEndSuccess_PointerSlices(b *testing.B) {
 	serializer := NewJSONSerializer()
 	keys := benchSetManyInputKeys
@@ -320,6 +348,7 @@ func BenchmarkSetManyEndToEndSuccess_PointerSlices(b *testing.B) {
 	}
 }
 
+// BenchmarkSetManyEndToEndSerializeError_ValueSlices measures set many end to end serialize error value slices.
 func BenchmarkSetManyEndToEndSerializeError_ValueSlices(b *testing.B) {
 	serializer := NewJSONSerializer()
 	keys := benchSetManyInputKeys
@@ -339,6 +368,7 @@ func BenchmarkSetManyEndToEndSerializeError_ValueSlices(b *testing.B) {
 	}
 }
 
+// BenchmarkSetManyEndToEndSerializeError_PointerSlices measures set many end to end serialize error pointer slices.
 func BenchmarkSetManyEndToEndSerializeError_PointerSlices(b *testing.B) {
 	serializer := NewJSONSerializer()
 	keys := benchSetManyInputKeys

@@ -163,6 +163,7 @@ func (s *DiskStore) DeleteMany(keys []string) (*DeleteManyResult, error) {
 	return result, nil
 }
 
+// validateDeleteManyKeys rejects empty keys in a delete-many batch.
 func validateDeleteManyKeys(keys []string) error {
 	for i, key := range keys {
 		if key == "" {
@@ -173,6 +174,7 @@ func validateDeleteManyKeys(keys []string) error {
 	return nil
 }
 
+// deleteManyTx deletes keys and associated claims inside a single bbolt transaction.
 func (s *DiskStore) deleteManyTx(tx *bolt.Tx, keys []string, result *DeleteManyResult) error {
 	bucket := tx.Bucket(s.bucket)
 	if bucket == nil {
@@ -201,6 +203,7 @@ func (s *DiskStore) deleteManyTx(tx *bolt.Tx, keys []string, result *DeleteManyR
 	return nil
 }
 
+// claimsBucketForMutatorTx returns the claims bucket when durable claim storage is active.
 func (s *DiskStore) claimsBucketForMutatorTx(tx *bolt.Tx) (*bolt.Bucket, error) {
 	if s.trackedClaimsEnabled() {
 		return nil, nil //nolint:nilnil // tracked mode intentionally skips bbolt claims bucket access.
@@ -209,6 +212,7 @@ func (s *DiskStore) claimsBucketForMutatorTx(tx *bolt.Tx) (*bolt.Bucket, error) 
 	return s.ensureClaimsBucket(tx)
 }
 
+// deleteKeyAndClaimInTx removes a value key and its claim record when present.
 func (s *DiskStore) deleteKeyAndClaimInTx(bucket *bolt.Bucket, claimsBucket *bolt.Bucket, key string) (bool, error) {
 	keyBytes := []byte(key)
 	if !s.diskKeyExists(bucket, keyBytes) {
@@ -234,6 +238,7 @@ func (s *DiskStore) deleteKeyAndClaimInTx(bucket *bolt.Bucket, claimsBucket *bol
 	return true, nil
 }
 
+// diskKeyExists reports whether bucket contains an exact key match.
 func (s *DiskStore) diskKeyExists(bucket *bolt.Bucket, key []byte) bool {
 	cursor := bucket.Cursor()
 	foundKey, _ := cursor.Seek(key)
@@ -241,6 +246,7 @@ func (s *DiskStore) diskKeyExists(bucket *bolt.Bucket, key []byte) bool {
 	return foundKey != nil && bytes.Equal(foundKey, key)
 }
 
+// getDiskEntryByKey loads a single entry from bucket or returns nil when missing.
 func (s *DiskStore) getDiskEntryByKey(bucket *bolt.Bucket, key string) *Entry {
 	keyBytes := []byte(key)
 

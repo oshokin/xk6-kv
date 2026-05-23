@@ -7,13 +7,19 @@ import (
 )
 
 type (
+	// getManyItem is an internal get many item type.
 	getManyItem struct {
-		Key    string `js:"key"`
-		Exists bool   `js:"exists"`
-		Value  any    `js:"value"`
+		// Key is the store key associated with the claim or entry.
+		Key string `js:"key"`
+		// Exists holds the exists value.
+		Exists bool `js:"exists"`
+		// Value holds the value value.
+		Value any `js:"value"`
 	}
 
+	// setManyResult is the Go-side result returned by the corresponding KV operation.
 	setManyResult struct {
+		// Written holds the written value.
 		Written int64 `js:"written"`
 	}
 )

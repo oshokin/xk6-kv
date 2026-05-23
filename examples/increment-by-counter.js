@@ -151,3 +151,7 @@ export default async function () {
   const incrementedValue = await kv.incrementBy("normal-counter", 5);
   expect(incrementedValue).toEqual(15);
 }
+
+export function teardown() {
+  kv.close();
+}

@@ -30,3 +30,7 @@ export default async function () {
   expect(limitedToOne).toHaveLength(1);
   expect(limitedToOne[0].key).toEqual("a:1");
 }
+
+export function teardown() {
+  kv.close();
+}

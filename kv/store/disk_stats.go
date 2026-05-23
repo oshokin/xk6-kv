@@ -83,6 +83,7 @@ func (s *DiskStore) lockStatsIndexReader() func() {
 // readStatsCounts reads the stats counts.
 func (s *DiskStore) readStatsCounts(now int64) (*diskStatsCounts, error) {
 	counts := &diskStatsCounts{}
+	useTrackedClaims := s.trackedClaimsEnabled() && !s.diskReadOnly()
 
 	err := s.handle.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(s.bucket)
@@ -92,7 +93,7 @@ func (s *DiskStore) readStatsCounts(now int64) (*diskStatsCounts, error) {
 
 		counts.KeyCount = int64(bucket.Stats().KeyN)
 
-		if s.trackedClaimsEnabled() {
+		if useTrackedClaims {
 			return nil
 		}
 
@@ -111,7 +112,7 @@ func (s *DiskStore) readStatsCounts(now int64) (*diskStatsCounts, error) {
 		return nil, fmt.Errorf("%w: %w", ErrDiskStoreReadFailed, err)
 	}
 
-	if s.trackedClaimsEnabled() {
+	if useTrackedClaims {
 		counts.Claims = s.countTrackedClaimsLocked(now)
 	}
 
@@ -140,11 +141,6 @@ func (s *DiskStore) buildIndexStats(keyCount int64) *IndexStats {
 		indexStats.OST == keyCount
 
 	return indexStats
-}
-
-// diskReadOnly returns whether the disk is read-only.
-func (s *DiskStore) diskReadOnly() bool {
-	return s.boltOptions != nil && s.boltOptions.ReadOnly
 }
 
 // countDiskClaimsStats counts the disk claims stats.

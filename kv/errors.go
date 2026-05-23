@@ -1,6 +1,7 @@
 package kv
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
+// Ensure Error implements the error interface at compile time.
 var _ error = (*Error)(nil)
 
 // ErrorName represents the name of an error.
@@ -75,6 +77,9 @@ const (
 
 	// MetricsUnavailableError is emitted when custom metric emission is not available.
 	MetricsUnavailableError ErrorName = "MetricsUnavailableError"
+
+	// OperationCanceledError is emitted when the VU context is canceled/deadline exceeded.
+	OperationCanceledError ErrorName = "OperationCanceledError"
 
 	// KeyListRebuildError is emitted when key rebuild logic fails.
 	KeyListRebuildError ErrorName = "KeyListRebuildError"
@@ -228,6 +233,11 @@ func classifyError(err error) *Error {
 		return kvErr
 	}
 
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return newOperationCanceledError(err)
+	}
+
 	var entryListErr *store.EntryListError
 	if errors.As(err, &entryListErr) {
 		details := make([]ErrorDetail, 0, len(entryListErr.Errors))
@@ -316,8 +326,11 @@ func classifyError(err error) *Error {
 		return NewError(InvalidOptionsError, err.Error())
 	case errors.Is(err, store.ErrBackupDirectoryFailed),
 		errors.Is(err, store.ErrBackupTempFileFailed),
+		errors.Is(err, store.ErrSnapshotDirectoryFailed),
+		errors.Is(err, store.ErrSnapshotTempFileFailed),
 		errors.Is(err, store.ErrBackupCopyFailed),
 		errors.Is(err, store.ErrBackupFinalizeFailed),
+		errors.Is(err, store.ErrSnapshotFinalizeFailed),
 		errors.Is(err, store.ErrSnapshotExportFailed):
 		return NewError(SnapshotExportError, err.Error())
 	case errors.Is(err, store.ErrBBoltSnapshotOpenFailed),
@@ -348,6 +361,11 @@ func classifyError(err error) *Error {
 	}
 
 	return NewError(UnknownError, err.Error())
+}
+
+// newOperationCanceledError constructs a new OperationCanceledError value.
+func newOperationCanceledError(err error) *Error {
+	return NewError(OperationCanceledError, fmt.Sprintf("operation was canceled: %v", err))
 }
 
 // unexpectedStoreOutput returns an error indicating that a store implementation

@@ -11,6 +11,7 @@ import (
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
+// TestImportListKeysOptions_Nullish verifies that import list keys options nullish.
 func TestImportListKeysOptions_Nullish(t *testing.T) {
 	t.Parallel()
 
@@ -24,6 +25,7 @@ func TestImportListKeysOptions_Nullish(t *testing.T) {
 	}
 }
 
+// TestImportListKeysOptions_NonObjectRejects verifies that import list keys options non object rejects.
 func TestImportListKeysOptions_NonObjectRejects(t *testing.T) {
 	t.Parallel()
 
@@ -37,6 +39,7 @@ func TestImportListKeysOptions_NonObjectRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+// TestImportListKeysOptions_ValidOptions verifies that import list keys options valid options.
 func TestImportListKeysOptions_ValidOptions(t *testing.T) {
 	t.Parallel()
 
@@ -53,6 +56,7 @@ func TestImportListKeysOptions_ValidOptions(t *testing.T) {
 	assert.EqualValues(t, 10, opts.Limit)
 }
 
+// TestImportListKeysOptions_InvalidPrefixRejects verifies that import list keys options invalid prefix rejects.
 func TestImportListKeysOptions_InvalidPrefixRejects(t *testing.T) {
 	t.Parallel()
 
@@ -68,6 +72,7 @@ func TestImportListKeysOptions_InvalidPrefixRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+// TestImportListKeysOptions_FractionalLimitRejects verifies that import list keys options fractional limit rejects.
 func TestImportListKeysOptions_FractionalLimitRejects(t *testing.T) {
 	t.Parallel()
 
@@ -83,6 +88,7 @@ func TestImportListKeysOptions_FractionalLimitRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+// TestImportListKeysOptions_ZeroAndNegativeLimitAllowed verifies that import list keys options zero and negative limit allowed.
 func TestImportListKeysOptions_ZeroAndNegativeLimitAllowed(t *testing.T) {
 	t.Parallel()
 
@@ -97,6 +103,7 @@ func TestImportListKeysOptions_ZeroAndNegativeLimitAllowed(t *testing.T) {
 	}
 }
 
+// TestImportListKeysOptions_LimitAboveMaxRejects verifies that import list keys options limit above max rejects.
 func TestImportListKeysOptions_LimitAboveMaxRejects(t *testing.T) {
 	t.Parallel()
 
@@ -108,6 +115,7 @@ func TestImportListKeysOptions_LimitAboveMaxRejects(t *testing.T) {
 	requireInvalidOptionsError(t, err, "listKeys options.limit")
 }
 
+// TestImportScanKeysOptions_Nullish verifies that import scan keys options nullish.
 func TestImportScanKeysOptions_Nullish(t *testing.T) {
 	t.Parallel()
 
@@ -122,6 +130,7 @@ func TestImportScanKeysOptions_Nullish(t *testing.T) {
 	}
 }
 
+// TestImportScanKeysOptions_NonObjectRejects verifies that import scan keys options non object rejects.
 func TestImportScanKeysOptions_NonObjectRejects(t *testing.T) {
 	t.Parallel()
 
@@ -135,6 +144,7 @@ func TestImportScanKeysOptions_NonObjectRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+// TestImportScanKeysOptions_ValidOptions verifies that import scan keys options valid options.
 func TestImportScanKeysOptions_ValidOptions(t *testing.T) {
 	t.Parallel()
 
@@ -153,6 +163,7 @@ func TestImportScanKeysOptions_ValidOptions(t *testing.T) {
 	assert.Equal(t, "YQ==", opts.Cursor)
 }
 
+// TestImportScanKeysOptions_InvalidPrefixRejects verifies that import scan keys options invalid prefix rejects.
 func TestImportScanKeysOptions_InvalidPrefixRejects(t *testing.T) {
 	t.Parallel()
 
@@ -168,6 +179,7 @@ func TestImportScanKeysOptions_InvalidPrefixRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+// TestImportScanKeysOptions_InvalidCursorRejects verifies that import scan keys options invalid cursor rejects.
 func TestImportScanKeysOptions_InvalidCursorRejects(t *testing.T) {
 	t.Parallel()
 
@@ -183,6 +195,7 @@ func TestImportScanKeysOptions_InvalidCursorRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+// TestImportScanKeysOptions_FractionalLimitRejects verifies that import scan keys options fractional limit rejects.
 func TestImportScanKeysOptions_FractionalLimitRejects(t *testing.T) {
 	t.Parallel()
 
@@ -198,6 +211,7 @@ func TestImportScanKeysOptions_FractionalLimitRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+// TestImportScanKeysOptions_ZeroAndNegativeLimitAllowed verifies that import scan keys options zero and negative limit allowed.
 func TestImportScanKeysOptions_ZeroAndNegativeLimitAllowed(t *testing.T) {
 	t.Parallel()
 
@@ -212,6 +226,7 @@ func TestImportScanKeysOptions_ZeroAndNegativeLimitAllowed(t *testing.T) {
 	}
 }
 
+// TestImportScanKeysOptions_LimitAboveMaxRejects verifies that import scan keys options limit above max rejects.
 func TestImportScanKeysOptions_LimitAboveMaxRejects(t *testing.T) {
 	t.Parallel()
 
@@ -223,6 +238,7 @@ func TestImportScanKeysOptions_LimitAboveMaxRejects(t *testing.T) {
 	requireInvalidOptionsError(t, err, "scanKeys options.limit")
 }
 
+// TestImportScanOptions_LimitAboveMaxRejects verifies that import scan options limit above max rejects.
 func TestImportScanOptions_LimitAboveMaxRejects(t *testing.T) {
 	t.Parallel()
 
@@ -234,6 +250,7 @@ func TestImportScanOptions_LimitAboveMaxRejects(t *testing.T) {
 	requireInvalidOptionsError(t, err, "scan options.limit")
 }
 
+// TestImportListOptions_LimitAboveMaxRejects verifies that import list options limit above max rejects.
 func TestImportListOptions_LimitAboveMaxRejects(t *testing.T) {
 	t.Parallel()
 
@@ -245,6 +262,7 @@ func TestImportListOptions_LimitAboveMaxRejects(t *testing.T) {
 	requireInvalidOptionsError(t, err, "list options.limit")
 }
 
+// requireInvalidOptionsError is a test helper for require invalid options error.
 func requireInvalidOptionsError(t *testing.T, err error, messagePart string) {
 	t.Helper()
 

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestSampleUniqueOffsets_UniqueWithinRange verifies that sample unique offsets unique within range.
 func TestSampleUniqueOffsets_UniqueWithinRange(t *testing.T) {
 	t.Parallel()
 
@@ -24,6 +25,7 @@ func TestSampleUniqueOffsets_UniqueWithinRange(t *testing.T) {
 	assert.Len(t, seen, len(offsets))
 }
 
+// TestSampleUniqueOffsets_CountGreaterThanTotal verifies that sample unique offsets count greater than total.
 func TestSampleUniqueOffsets_CountGreaterThanTotal(t *testing.T) {
 	t.Parallel()
 
@@ -40,6 +42,7 @@ func TestSampleUniqueOffsets_CountGreaterThanTotal(t *testing.T) {
 	assert.Len(t, seen, 5)
 }
 
+// TestSampleUniqueKeys_UniqueSubset verifies that sample unique keys unique subset.
 func TestSampleUniqueKeys_UniqueSubset(t *testing.T) {
 	t.Parallel()
 
@@ -58,6 +61,7 @@ func TestSampleUniqueKeys_UniqueSubset(t *testing.T) {
 	assert.Len(t, seen, len(result))
 }
 
+// TestSampleUniqueKeys_SmallCount_ReturnsUniqueSubset verifies that sample unique keys small count returns unique subset.
 func TestSampleUniqueKeys_SmallCount_ReturnsUniqueSubset(t *testing.T) {
 	t.Parallel()
 
@@ -90,6 +94,7 @@ func TestSampleUniqueKeys_SmallCount_ReturnsUniqueSubset(t *testing.T) {
 	assert.Len(t, seen, len(result))
 }
 
+// TestSampleUniqueKeys_CountLargerThanAvailableReturnsAllKeys verifies that sample unique keys count larger than available returns all keys.
 func TestSampleUniqueKeys_CountLargerThanAvailableReturnsAllKeys(t *testing.T) {
 	t.Parallel()
 

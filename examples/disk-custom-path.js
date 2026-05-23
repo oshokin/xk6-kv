@@ -26,6 +26,5 @@ export default async function () {
 }
 
 export function teardown() {
-  // Always close disk stores to release file handles.
   kv.close();
 }

@@ -24,8 +24,13 @@ import { createKv, createSetup, createTeardown } from './common.js';
 // Test name used for generating test-specific database and snapshot paths.
 const TEST_NAME = 'import-csv-portable-seed';
 
-// CSV artifact paths used for import variants.
+// CSV file paths used for import variants.
 const IMPORT_ALL_PATH = './examples/fixtures/users.csv';
+
+// CSV file path for ragged import.
+const IMPORT_RAGGED_PATH = './examples/fixtures/users-ragged.csv';
+
+// CSV file path for missing import.
 const IMPORT_MISSING_PATH = './tmp/import-csv-portable-seed-missing.csv';
 
 // Deterministic user keys reused across checks.
@@ -56,6 +61,8 @@ export const options = {
     'checks{importCSV:imports-records}': ['rate==1'],
     'checks{importCSV:claim-random-many}': ['rate==1'],
     'checks{importCSV:limit-respected}': ['rate==1'],
+    'checks{importCSV:ragged-missing-columns-empty}': ['rate==1'],
+    'checks{importCSV:ragged-extra-columns-preserved}': ['rate==1'],
     'checks{importCSV:invalid-shape-rejects}': ['rate==1'],
     'checks{importCSV:missing-key-column-rejects}': ['rate==1'],
     'checks{importCSV:invalid-delimiter-rejects}': ['rate==1'],
@@ -146,6 +153,30 @@ export default async function importCSVPortableSeed() {
       normalizeImportPath(result.fileName) === normalizeImportPath(IMPORT_ALL_PATH) &&
       result.bytesRead > 0 &&
       limitedKeys.length === 1,
+  });
+
+  await kv.clear();
+
+  const raggedResult = await kv.importCSV({
+    fileName: IMPORT_RAGGED_PATH,
+    keyColumn: 'username',
+    hasHeader: true,
+    batchSize: 1,
+  });
+
+  const raggedItems = await kv.getMany(['u2', 'u3']);
+  const u2 = raggedItems[0];
+  const u3 = raggedItems[1];
+
+  check({ raggedResult, u2, u3 }, {
+    'importCSV:ragged-missing-columns-empty': ({ raggedResult: result, u2 }) =>
+      result.imported === 3 &&
+      u2?.exists === true &&
+      u2?.value?.role === '',
+    'importCSV:ragged-extra-columns-preserved': ({ u3 }) =>
+      u3?.exists === true &&
+      u3?.value?.role === 'user' &&
+      u3?.value?.column_3 === 'extra',
   });
 
   let invalidShapeErr = null;

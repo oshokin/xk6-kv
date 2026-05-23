@@ -201,6 +201,21 @@ func (t *OSTreeOf[M]) WalkMeta(fn func(key string, meta M)) {
 	walkMeta(t.root, fn)
 }
 
+// WalkMetaPrefix walks metadata for keys matching prefix in lexicographic order.
+// Returning false from fn stops the walk early.
+func (t *OSTreeOf[M]) WalkMetaPrefix(prefix string, fn func(key string, meta M) bool) {
+	if fn == nil {
+		return
+	}
+
+	if prefix == "" {
+		walkMetaWhile(t.root, fn)
+		return
+	}
+
+	walkMetaRange(t.root, prefix, nextPrefix(prefix), fn)
+}
+
 // nodeSize gracefully handles nil nodes to avoid nil checks in recursive functions.
 // Returns 0 for nil nodes, which represents an empty subtree.
 func nodeSize[M any](n *ostNode[M]) int {
@@ -407,6 +422,7 @@ func kth[M any](n *ostNode[M], k int) (string, bool) {
 	}
 }
 
+// selectableRankLess returns the number of selectable keys strictly less than key.
 func selectableRankLess[M any](n *ostNode[M], key string) int {
 	if n == nil {
 		return 0
@@ -424,6 +440,7 @@ func selectableRankLess[M any](n *ostNode[M], key string) int {
 	return nodeSelectableSize(n.left) + selfSelectable + selectableRankLess(n.right, key)
 }
 
+// kthSelectable returns the key at selectable rank k in subtree n.
 func kthSelectable[M any](n *ostNode[M], k int) (string, bool) {
 	if n == nil || k < 0 || k >= nodeSelectableSize(n) {
 		return "", false
@@ -446,6 +463,7 @@ func kthSelectable[M any](n *ostNode[M], k int) (string, bool) {
 	return kthSelectable(n.right, k-leftSize-selfSelectable)
 }
 
+// findNode returns the node for key or nil when absent.
 func findNode[M any](n *ostNode[M], key string) *ostNode[M] {
 	for n != nil {
 		switch {
@@ -461,6 +479,7 @@ func findNode[M any](n *ostNode[M], key string) *ostNode[M] {
 	return nil
 }
 
+// updateMeta applies update to the node for key and rebalances when changed.
 func updateMeta[M any](
 	n *ostNode[M],
 	key string,
@@ -489,6 +508,7 @@ func updateMeta[M any](
 	return n, updated
 }
 
+// clearMeta resets metadata on all nodes to zero and marks them selectable.
 func clearMeta[M any](n *ostNode[M], zero M) {
 	if n == nil {
 		return
@@ -503,6 +523,7 @@ func clearMeta[M any](n *ostNode[M], zero M) {
 	pull(n)
 }
 
+// walkMeta visits every node metadata in sorted key order.
 func walkMeta[M any](n *ostNode[M], fn func(key string, meta M)) {
 	if n == nil {
 		return
@@ -511,6 +532,48 @@ func walkMeta[M any](n *ostNode[M], fn func(key string, meta M)) {
 	walkMeta(n.left, fn)
 	fn(n.key, n.meta)
 	walkMeta(n.right, fn)
+}
+
+// walkMetaWhile visits metadata in sorted order until fn returns false.
+func walkMetaWhile[M any](n *ostNode[M], fn func(key string, meta M) bool) bool {
+	if n == nil {
+		return true
+	}
+
+	if !walkMetaWhile(n.left, fn) {
+		return false
+	}
+
+	if !fn(n.key, n.meta) {
+		return false
+	}
+
+	return walkMetaWhile(n.right, fn)
+}
+
+// walkMetaRange visits metadata for keys in [lower, upper) until fn returns false.
+func walkMetaRange[M any](n *ostNode[M], lower, upper string, fn func(key string, meta M) bool) bool {
+	if n == nil {
+		return true
+	}
+
+	if n.key < lower {
+		return walkMetaRange(n.right, lower, upper, fn)
+	}
+
+	if upper != "" && n.key >= upper {
+		return walkMetaRange(n.left, lower, upper, fn)
+	}
+
+	if !walkMetaRange(n.left, lower, upper, fn) {
+		return false
+	}
+
+	if !fn(n.key, n.meta) {
+		return false
+	}
+
+	return walkMetaRange(n.right, lower, upper, fn)
 }
 
 // nextPrefix computes the lexicographic successor of a prefix

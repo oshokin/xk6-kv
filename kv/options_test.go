@@ -6,6 +6,7 @@ import (
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
+// TestOptionsEqual_MemoryIgnoresPath verifies that options equal memory ignores path.
 func TestOptionsEqual_MemoryIgnoresPath(t *testing.T) {
 	t.Parallel()
 
@@ -27,6 +28,7 @@ func TestOptionsEqual_MemoryIgnoresPath(t *testing.T) {
 	}
 }
 
+// TestOptionsEqual_MemoryIgnoresDiskOptions verifies that options equal memory ignores disk options.
 func TestOptionsEqual_MemoryIgnoresDiskOptions(t *testing.T) {
 	t.Parallel()
 
@@ -51,6 +53,7 @@ func TestOptionsEqual_MemoryIgnoresDiskOptions(t *testing.T) {
 	}
 }
 
+// TestOptionsEqual_DiskIgnoresMemoryOptions verifies that options equal disk ignores memory options.
 func TestOptionsEqual_DiskIgnoresMemoryOptions(t *testing.T) {
 	t.Parallel()
 

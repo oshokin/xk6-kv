@@ -55,6 +55,7 @@ func (s *DiskStore) RandomKeys(prefix string, count int64, unique bool) ([]strin
 	return s.randomKeysWithoutTracking(prefix, count, unique)
 }
 
+// randomKeysWithTracking samples keys from the in-memory OST index when tracking is enabled.
 func (s *DiskStore) randomKeysWithTracking(prefix string, count int64, unique bool) ([]string, bool) {
 	s.keysLock.RLock()
 	defer s.keysLock.RUnlock()
@@ -113,6 +114,7 @@ func shouldFallbackToCursorRandomKeys(unique bool, count int64, total int) bool 
 	return count >= half
 }
 
+// randomUniqueKeysFromTrackingRange returns unique keys via rank selection over a tracked range.
 func (s *DiskStore) randomUniqueKeysFromTrackingRange(left, total int, count int64) []string {
 	if count >= int64(total) {
 		keys := make([]string, 0, total)
@@ -140,6 +142,7 @@ func (s *DiskStore) randomUniqueKeysFromTrackingRange(left, total int, count int
 	return keys
 }
 
+// randomKeysWithReplacementFromTrackingRange samples keys with replacement from a tracked range.
 func (s *DiskStore) randomKeysWithReplacementFromTrackingRange(left, total int, count int64) []string {
 	keys := make([]string, 0, count)
 
@@ -156,6 +159,7 @@ func (s *DiskStore) randomKeysWithReplacementFromTrackingRange(left, total int, 
 	return keys
 }
 
+// randomKeysWithoutTracking scans durable keys when the in-memory index is unavailable.
 func (s *DiskStore) randomKeysWithoutTracking(prefix string, count int64, unique bool) ([]string, error) {
 	page := &KeyScanPage{
 		Keys: make([]string, 0),

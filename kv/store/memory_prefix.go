@@ -61,6 +61,7 @@ func (s *MemoryStore) DeleteByPrefix(prefix string, limit int64) (*DeleteByPrefi
 	return result, nil
 }
 
+// selectKeysByPrefix returns key names matching prefix up to limit via ScanKeys.
 func (s *MemoryStore) selectKeysByPrefix(prefix string, limit int64) ([]string, error) {
 	page, err := s.ScanKeys(prefix, "", limit)
 	if err != nil {

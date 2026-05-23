@@ -292,6 +292,27 @@ tasks:
     env:
       CGO_ENABLED: "1"
 
+  test-typescript:
+    desc: "Run TypeScript declaration smoke tests"
+    dir: typescript
+    cmds:
+      - npm ci
+      - npm test
+
+  release-check:
+    desc: "Run full release readiness checks"
+    cmds:
+      - task lint
+      - task xk6-lint-community
+      - task test-race
+      - task test-typescript
+      - |
+        {{if eq OS "windows"}}
+          powershell.exe -ExecutionPolicy Bypass -File "{{.SCRIPTS_DIR}}{{.PS}}release_check_e2e.ps1"
+        {{else}}
+          bash "{{.SCRIPTS_DIR}}{{.PS}}release_check_e2e.sh"
+        {{end}}
+
   # -------------------------------
   # E2E Testing
   # -------------------------------
@@ -375,4 +396,5 @@ tasks:
     desc: "Remove binaries and temporary files"
     cmds:
       - "{{.RMRF}} '{{.BIN_DIR}}'{{.RMRF_END}}"
-      - "{{.RMRF}} '.k6.kv'{{.RMRF_END}}"
+      - "{{.RMRF}} tmp/e2e{{.RMRF_END}}"
+      - "{{.RMRF}} .k6.kv{{.RMRF_END}}"

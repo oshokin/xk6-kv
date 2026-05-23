@@ -7,22 +7,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// rawEncodeErrorSerializer is a test serializer used by raw encode error serializer tests.
 type rawEncodeErrorSerializer struct {
+	// err holds test state for raw encode error serializer.
 	err error
 }
 
+// rawEncodeErrorSerializer implements serializer serialize for raw encode error serializer.
 func (s *rawEncodeErrorSerializer) Serialize(_ any) ([]byte, error) {
 	return nil, s.err
 }
 
+// rawEncodeErrorSerializer implements serializer deserialize for raw encode error serializer.
 func (s *rawEncodeErrorSerializer) Deserialize(data []byte) (any, error) {
 	return string(data), nil
 }
 
+// rawEncodeErrorSerializer implements serializer type for raw encode error serializer.
 func (s *rawEncodeErrorSerializer) Type() string {
 	return "raw-error"
 }
 
+// newSerializedStoreWithRawEncodeError creates serialized store with raw encode error for tests.
 func newSerializedStoreWithRawEncodeError(t *testing.T, err error) *SerializedStore {
 	t.Helper()
 
@@ -32,6 +38,7 @@ func newSerializedStoreWithRawEncodeError(t *testing.T, err error) *SerializedSt
 	return NewSerializedStore(base, &rawEncodeErrorSerializer{err: err})
 }
 
+// TestSerializedStore_NormalizesSerializerEncodeError verifies that serialized store normalizes serializer encode error.
 func TestSerializedStore_NormalizesSerializerEncodeError(t *testing.T) {
 	t.Parallel()
 
@@ -50,6 +57,7 @@ func TestSerializedStore_NormalizesSerializerEncodeError(t *testing.T) {
 	})
 }
 
+// assertSerializedStoreEncodeError asserts serialized store encode error.
 func assertSerializedStoreEncodeError(t *testing.T, name string, run func(*SerializedStore) error) {
 	t.Helper()
 

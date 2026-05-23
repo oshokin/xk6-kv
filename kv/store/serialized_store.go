@@ -38,6 +38,7 @@ func (s *SerializedStore) Close() error {
 	return s.store.Close()
 }
 
+// writeAndDecodeLoadedValue serializes value, writes via write, and decodes loaded bytes.
 func (s *SerializedStore) writeAndDecodeLoadedValue(
 	key string,
 	value any,
@@ -58,6 +59,7 @@ func (s *SerializedStore) writeAndDecodeLoadedValue(
 	return decoded, true, err
 }
 
+// normalizeSerializerEncodeError wraps encode failures with ErrSerializerEncodeFailed.
 func (s *SerializedStore) normalizeSerializerEncodeError(err error) error {
 	if err == nil {
 		return nil
@@ -70,6 +72,7 @@ func (s *SerializedStore) normalizeSerializerEncodeError(err error) error {
 	return fmt.Errorf("%w: %w", ErrSerializerEncodeFailed, err)
 }
 
+// serializeWriteValue encodes value for storage using the configured serializer.
 func (s *SerializedStore) serializeWriteValue(value any) ([]byte, error) {
 	serializedValue, err := s.serializer.Serialize(value)
 	if err != nil {

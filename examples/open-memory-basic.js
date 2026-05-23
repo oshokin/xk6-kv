@@ -17,3 +17,7 @@ export default async function () {
   const value = await kv.get("hello");
   console.log(`memory-basic value: ${value}`);
 }
+
+export function teardown() {
+  kv.close();
+}

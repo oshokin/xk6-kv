@@ -177,6 +177,7 @@ func TestDiskStore_CompareAndDelete_Basic(t *testing.T) {
 	assert.False(t, exists, "key must be removed")
 }
 
+// TestDiskStore_CompareAndDelete_TrackedClaimsMode_DoesNotTouchClaimsBucket verifies that disk store compare and delete tracked claims mode does not touch claims bucket.
 func TestDiskStore_CompareAndDelete_TrackedClaimsMode_DoesNotTouchClaimsBucket(t *testing.T) {
 	t.Parallel()
 
@@ -203,6 +204,7 @@ func TestDiskStore_CompareAndDelete_TrackedClaimsMode_DoesNotTouchClaimsBucket(t
 	}))
 }
 
+// TestDiskStore_CompareAndDelete_BoltClaimsMode_CreatesClaimsBucket verifies that disk store compare and delete bolt claims mode creates claims bucket.
 func TestDiskStore_CompareAndDelete_BoltClaimsMode_CreatesClaimsBucket(t *testing.T) {
 	t.Parallel()
 

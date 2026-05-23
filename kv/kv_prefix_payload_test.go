@@ -11,6 +11,7 @@ import (
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
+// TestImportDeleteByPrefixOptions_NullRejects verifies that import delete by prefix options null rejects.
 func TestImportDeleteByPrefixOptions_NullRejects(t *testing.T) {
 	t.Parallel()
 
@@ -26,6 +27,7 @@ func TestImportDeleteByPrefixOptions_NullRejects(t *testing.T) {
 	}
 }
 
+// TestImportDeleteByPrefixOptions_NonObjectRejects verifies that import delete by prefix options non object rejects.
 func TestImportDeleteByPrefixOptions_NonObjectRejects(t *testing.T) {
 	t.Parallel()
 
@@ -39,6 +41,7 @@ func TestImportDeleteByPrefixOptions_NonObjectRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+// TestImportDeleteByPrefixOptions_MissingPrefixRejects verifies that import delete by prefix options missing prefix rejects.
 func TestImportDeleteByPrefixOptions_MissingPrefixRejects(t *testing.T) {
 	t.Parallel()
 
@@ -55,6 +58,7 @@ func TestImportDeleteByPrefixOptions_MissingPrefixRejects(t *testing.T) {
 	assert.Contains(t, kvErr.Message, "prefix is required")
 }
 
+// TestImportDeleteByPrefixOptions_EmptyPrefixRejects verifies that import delete by prefix options empty prefix rejects.
 func TestImportDeleteByPrefixOptions_EmptyPrefixRejects(t *testing.T) {
 	t.Parallel()
 
@@ -72,6 +76,7 @@ func TestImportDeleteByPrefixOptions_EmptyPrefixRejects(t *testing.T) {
 	assert.Contains(t, kvErr.Message, "non-empty")
 }
 
+// TestImportDeleteByPrefixOptions_InvalidPrefixRejects verifies that import delete by prefix options invalid prefix rejects.
 func TestImportDeleteByPrefixOptions_InvalidPrefixRejects(t *testing.T) {
 	t.Parallel()
 
@@ -88,6 +93,7 @@ func TestImportDeleteByPrefixOptions_InvalidPrefixRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+// TestImportDeleteByPrefixOptions_MissingLimitRejects verifies that import delete by prefix options missing limit rejects.
 func TestImportDeleteByPrefixOptions_MissingLimitRejects(t *testing.T) {
 	t.Parallel()
 
@@ -104,6 +110,7 @@ func TestImportDeleteByPrefixOptions_MissingLimitRejects(t *testing.T) {
 	assert.Contains(t, kvErr.Message, "limit is required")
 }
 
+// TestImportDeleteByPrefixOptions_ZeroLimitRejects verifies that import delete by prefix options zero limit rejects.
 func TestImportDeleteByPrefixOptions_ZeroLimitRejects(t *testing.T) {
 	t.Parallel()
 
@@ -121,6 +128,7 @@ func TestImportDeleteByPrefixOptions_ZeroLimitRejects(t *testing.T) {
 	assert.Contains(t, kvErr.Message, "positive integer")
 }
 
+// TestImportDeleteByPrefixOptions_NegativeLimitRejects verifies that import delete by prefix options negative limit rejects.
 func TestImportDeleteByPrefixOptions_NegativeLimitRejects(t *testing.T) {
 	t.Parallel()
 
@@ -138,6 +146,7 @@ func TestImportDeleteByPrefixOptions_NegativeLimitRejects(t *testing.T) {
 	assert.Contains(t, kvErr.Message, "positive integer")
 }
 
+// TestImportDeleteByPrefixOptions_FractionalLimitRejects verifies that import delete by prefix options fractional limit rejects.
 func TestImportDeleteByPrefixOptions_FractionalLimitRejects(t *testing.T) {
 	t.Parallel()
 
@@ -154,6 +163,7 @@ func TestImportDeleteByPrefixOptions_FractionalLimitRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+// TestImportDeleteByPrefixOptions_LimitAboveMaxRejects verifies that import delete by prefix options limit above max rejects.
 func TestImportDeleteByPrefixOptions_LimitAboveMaxRejects(t *testing.T) {
 	t.Parallel()
 
@@ -171,6 +181,7 @@ func TestImportDeleteByPrefixOptions_LimitAboveMaxRejects(t *testing.T) {
 	assert.Contains(t, kvErr.Message, "deleteByPrefix options.limit")
 }
 
+// TestImportDeleteByPrefixOptions_ValidOptions verifies that import delete by prefix options valid options.
 func TestImportDeleteByPrefixOptions_ValidOptions(t *testing.T) {
 	t.Parallel()
 

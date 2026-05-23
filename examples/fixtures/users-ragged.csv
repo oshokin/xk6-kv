@@ -1,0 +1,4 @@
+username,password,role
+u1,p1,admin
+u2,p2
+u3,p3,user,extra

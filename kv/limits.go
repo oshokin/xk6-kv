@@ -9,6 +9,8 @@ const (
 	MaxJSONLBatchSize int64 = 10_000
 	// MaxImportCSVLimit bounds one explicit CSV import request.
 	MaxImportCSVLimit int64 = 1_000_000
+	// MaxExportCSVLimit bounds one explicit CSV export request.
+	MaxExportCSVLimit int64 = 1_000_000
 	// MaxCSVBatchSize bounds CSV import SetMany batch size and transaction pressure.
 	MaxCSVBatchSize int64 = 10_000
 )

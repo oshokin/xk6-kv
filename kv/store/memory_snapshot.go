@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,6 +33,20 @@ type (
 
 		// value is the value of the key/value pair.
 		value []byte
+	}
+
+	// memorySnapshotReadParams carries inputs for reading snapshot entries from bbolt.
+	memorySnapshotReadParams struct {
+		// ctx cancels long-running restore work.
+		ctx context.Context
+		// db is the opened snapshot database handle.
+		db *bolt.DB
+		// capacity is the preallocation hint for the restore map.
+		capacity int64
+		// maxEntries caps how many entries may be loaded.
+		maxEntries int64
+		// maxBytes caps total loaded payload size.
+		maxBytes int64
 	}
 )
 
@@ -71,6 +86,11 @@ func (s *MemoryStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 		return nil, ErrBackupOptionsNil
 	}
 
+	ctx := operationContextOrBackground(opts.Context)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if err := opts.normalize(); err != nil {
 		return nil, err
 	}
@@ -101,7 +121,7 @@ func (s *MemoryStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 		return nil, fmt.Errorf("%w: %w", ErrBackupTempFileFailed, err)
 	}
 
-	summary, backupErr := s.backupToBBolt(tempFile, opts)
+	summary, backupErr := s.backupToBBolt(ctx, tempFile, opts)
 	if backupErr != nil {
 		//nolint:forbidigo // file I/O is required for removing the temporary file on error.
 		// Cleanup is best-effort-the caller already has backupErr to act on.
@@ -110,8 +130,7 @@ func (s *MemoryStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 		return nil, backupErr
 	}
 
-	//nolint:forbidigo // file I/O is required for renaming the temporary file to the destination file.
-	if err := os.Rename(tempFile, opts.FileName); err != nil {
+	if err := fileutil.ReplaceFile(tempFile, opts.FileName); err != nil {
 		//nolint:forbidigo // file I/O is required for removing the temporary file on error.
 		// Same logic: if the rename failed, removing the temporary file is a courtesy.
 		_ = os.Remove(tempFile)
@@ -130,18 +149,26 @@ func (s *MemoryStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 //  1. Concurrent mode (AllowConcurrentWrites): blocks writers only during key capture,
 //     then streams values while writers proceed. Best-effort consistency.
 //  2. Blocking mode: holds mutation lock for entire backup. Strict consistency.
-func (s *MemoryStore) backupToBBolt(tempFile string, opts *BackupOptions) (*BackupSummary, error) {
+func (s *MemoryStore) backupToBBolt(
+	ctx context.Context,
+	tempFile string,
+	opts *BackupOptions,
+) (*BackupSummary, error) {
 	if opts.AllowConcurrentWrites {
-		return s.backupConcurrent(tempFile)
+		return s.backupConcurrent(ctx, tempFile)
 	}
 
-	return s.backupBlocking(tempFile)
+	return s.backupBlocking(ctx, tempFile)
 }
 
 // backupConcurrent backs up a snapshot with brief writer blocking for key capture only.
 // Writers are blocked only during the initial key snapshot, then immediately released
 // while values are streamed with cloning. This provides best-effort consistency.
-func (s *MemoryStore) backupConcurrent(tempFile string) (*BackupSummary, error) {
+func (s *MemoryStore) backupConcurrent(ctx context.Context, tempFile string) (*BackupSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if err := s.blockMutations(ErrBackupInProgress); err != nil {
 		return nil, err
 	}
@@ -159,6 +186,10 @@ func (s *MemoryStore) backupConcurrent(tempFile string) (*BackupSummary, error) 
 	// Capture the key list while holding the mutation lock.
 	keys := s.snapshotKeys()
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	// Immediately unblock writers - they can now proceed while we stream values.
 	// Any mutation that lands after this point may leak into the snapshot,
 	// which is why the returned summary always advertises best-effort mode.
@@ -167,15 +198,19 @@ func (s *MemoryStore) backupConcurrent(tempFile string) (*BackupSummary, error) 
 
 	blockReleased = true
 
-	return s.writeBBoltSnapshot(tempFile, true, func(yield func(string, []byte) error) error {
-		return s.streamKeysWithClonedValues(keys, yield)
+	return s.writeBBoltSnapshot(ctx, tempFile, true, func(yield func(string, []byte) error) error {
+		return s.streamKeysWithClonedValues(ctx, keys, yield)
 	})
 }
 
 // backupBlocking backs up a snapshot while blocking all writers for the entire duration.
 // Provides strict point-in-time consistency: no keys can be added/removed/modified
 // during the backup. Values are streamed without cloning since mutation is impossible.
-func (s *MemoryStore) backupBlocking(tempFile string) (*BackupSummary, error) {
+func (s *MemoryStore) backupBlocking(ctx context.Context, tempFile string) (*BackupSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if err := s.blockMutations(ErrBackupInProgress); err != nil {
 		return nil, err
 	}
@@ -185,8 +220,12 @@ func (s *MemoryStore) backupBlocking(tempFile string) (*BackupSummary, error) {
 	// Capture keys while holding the mutation block.
 	keys := s.snapshotKeys()
 
-	return s.writeBBoltSnapshot(tempFile, false, func(yield func(string, []byte) error) error {
+	return s.writeBBoltSnapshot(ctx, tempFile, false, func(yield func(string, []byte) error) error {
 		for _, key := range keys {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
 			shard := s.getShardByKey(key)
 			shard.mu.RLock()
 			value, exists := shard.container[key]
@@ -215,10 +254,15 @@ func (s *MemoryStore) backupBlocking(tempFile string) (*BackupSummary, error) {
 // buffered and written in bounded batches to prevent unbounded transaction sizes.
 // Returns a summary with entry count, file size, and consistency guarantees.
 func (s *MemoryStore) writeBBoltSnapshot(
+	ctx context.Context,
 	tempFile string,
 	bestEffort bool,
 	iterate func(yield func(string, []byte) error) error,
 ) (*BackupSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	// Open bbolt file with restrictive permissions (owner read/write only).
 	db, err := bolt.Open(tempFile, 0o600, nil)
 	if err != nil {
@@ -243,10 +287,18 @@ func (s *MemoryStore) writeBBoltSnapshot(
 
 	// Stream entries from iterator into batched bbolt writes.
 	if err := iterate(func(key string, value []byte) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		written++
 
 		return writer.append(key, value)
 	}); err != nil {
+		return nil, err
+	}
+
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
@@ -288,6 +340,11 @@ func (s *MemoryStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 		return nil, ErrRestoreOptionsNil
 	}
 
+	ctx := operationContextOrBackground(opts.Context)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if err := opts.normalize(); err != nil {
 		return nil, err
 	}
@@ -317,36 +374,19 @@ func (s *MemoryStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 
 	defer db.Close()
 
-	// Preallocate map based on expected size to reduce allocations during restore.
-	// We use MaxEntries as a hint if provided, otherwise fall back to default capacity.
-	// Preallocation reduces map rehashing overhead when loading large snapshots.
-	builder := make(map[string][]byte, s.getPreallocationCapacity(0, opts.MaxEntries))
-
-	// Budget tracking prevents OOM by enforcing limits before accumulating entries.
-	budget := &restoreBudget{
+	builder, err := readMemorySnapshotEntries(&memorySnapshotReadParams{
+		ctx:        ctx,
+		db:         db,
+		capacity:   s.getPreallocationCapacity(0, opts.MaxEntries),
 		maxEntries: opts.MaxEntries,
 		maxBytes:   opts.MaxBytes,
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	if err := db.View(func(tx *bolt.Tx) error {
-		bucket := tx.Bucket(defaultBBoltBucketBytes)
-		if bucket == nil {
-			return fmt.Errorf("%w: %q", ErrBucketNotFound, defaultBBoltBucketBytes)
-		}
-
-		return bucket.ForEach(func(k, v []byte) error {
-			// Check budget limits before accumulating this entry.
-			if err := budget.track(len(k), len(v)); err != nil {
-				return err
-			}
-
-			// Clone value bytes to avoid aliasing bbolt's internal memory.
-			builder[string(k)] = slices.Clone(v)
-
-			return nil
-		})
-	}); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSnapshotReadFailed, err)
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	// Atomically replace entire store contents. This happens while mutations are blocked,
@@ -363,6 +403,47 @@ func (s *MemoryStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 	blockReleased = true
 
 	return summary, nil
+}
+
+// readMemorySnapshotEntries loads snapshot key/value pairs with restore budget limits.
+func readMemorySnapshotEntries(params *memorySnapshotReadParams) (map[string][]byte, error) {
+	// Preallocate map based on expected size to reduce allocations during restore.
+	// We use MaxEntries as a hint if provided, otherwise fall back to default capacity.
+	// Preallocation reduces map rehashing overhead when loading large snapshots.
+	builder := make(map[string][]byte, params.capacity)
+
+	// Budget tracking prevents OOM by enforcing limits before accumulating entries.
+	budget := &restoreBudget{
+		maxEntries: params.maxEntries,
+		maxBytes:   params.maxBytes,
+	}
+
+	if err := params.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(defaultBBoltBucketBytes)
+		if bucket == nil {
+			return fmt.Errorf("%w: %q", ErrBucketNotFound, defaultBBoltBucketBytes)
+		}
+
+		return bucket.ForEach(func(k, v []byte) error {
+			if err := params.ctx.Err(); err != nil {
+				return err
+			}
+
+			// Check budget limits before accumulating this entry.
+			if err := budget.track(len(k), len(v)); err != nil {
+				return err
+			}
+
+			// Clone value bytes to avoid aliasing bbolt's internal memory.
+			builder[string(k)] = slices.Clone(v)
+
+			return nil
+		})
+	}); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrSnapshotReadFailed, err)
+	}
+
+	return builder, nil
 }
 
 // applySnapshot atomically replaces the store's entire contents with the restored container.
@@ -456,7 +537,15 @@ func (s *MemoryStore) snapshotKeys() []string {
 // For each key, acquires a brief read lock to clone the value, then yields it.
 // Keys deleted after the initial snapshot are silently skipped (best-effort mode).
 // Batching metrics are reported via streamSnapshotChunkObserver for test observability.
-func (s *MemoryStore) streamKeysWithClonedValues(keys []string, yield func(string, []byte) error) error {
+func (s *MemoryStore) streamKeysWithClonedValues(
+	ctx context.Context,
+	keys []string,
+	yield func(string, []byte) error,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	if len(keys) == 0 {
 		return nil
 	}
@@ -480,6 +569,10 @@ func (s *MemoryStore) streamKeysWithClonedValues(keys []string, yield func(strin
 	}
 
 	for _, key := range keys {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		// Brief read lock to fetch value - concurrent writes may proceed.
 		shard := s.getShardByKey(key)
 		shard.mu.RLock()

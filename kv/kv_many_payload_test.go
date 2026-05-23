@@ -9,6 +9,7 @@ import (
 	"go.k6.io/k6/js/modulestest"
 )
 
+// TestImportSetManyEntries_NullRejects verifies that import set many entries null rejects.
 func TestImportSetManyEntries_NullRejects(t *testing.T) {
 	t.Parallel()
 
@@ -23,6 +24,7 @@ func TestImportSetManyEntries_NullRejects(t *testing.T) {
 	assert.Equal(t, setManyErrorNameInvalidEntries, kvErr.Errors[0].Name)
 }
 
+// TestImportSetManyEntries_ArrayRejects verifies that import set many entries array rejects.
 func TestImportSetManyEntries_ArrayRejects(t *testing.T) {
 	t.Parallel()
 
@@ -38,6 +40,7 @@ func TestImportSetManyEntries_ArrayRejects(t *testing.T) {
 	assert.Equal(t, setManyErrorNameInvalidEntries, kvErr.Errors[0].Name)
 }
 
+// TestImportSetManyEntries_EmptyObjectReturnsEmptySlice verifies that import set many entries empty object returns empty slice.
 func TestImportSetManyEntries_EmptyObjectReturnsEmptySlice(t *testing.T) {
 	t.Parallel()
 
@@ -48,6 +51,7 @@ func TestImportSetManyEntries_EmptyObjectReturnsEmptySlice(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
+// TestImportSetManyEntries_EmptyKeyRejectsWithDetails verifies that import set many entries empty key rejects with details.
 func TestImportSetManyEntries_EmptyKeyRejectsWithDetails(t *testing.T) {
 	t.Parallel()
 
@@ -67,6 +71,7 @@ func TestImportSetManyEntries_EmptyKeyRejectsWithDetails(t *testing.T) {
 	assert.Equal(t, "key must be a non-empty string", kvErr.Errors[0].Message)
 }
 
+// TestImportSetManyEntries_ValidObject verifies that import set many entries valid object.
 func TestImportSetManyEntries_ValidObject(t *testing.T) {
 	t.Parallel()
 
@@ -81,6 +86,7 @@ func TestImportSetManyEntries_ValidObject(t *testing.T) {
 	assert.Equal(t, "user:2", entries[1].Key, "entries are sorted for deterministic behavior")
 }
 
+// TestImportGetManyKeys_NullRejects verifies that import get many keys null rejects.
 func TestImportGetManyKeys_NullRejects(t *testing.T) {
 	t.Parallel()
 
@@ -92,6 +98,7 @@ func TestImportGetManyKeys_NullRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+// TestImportGetManyKeys_NonArrayRejects verifies that import get many keys non array rejects.
 func TestImportGetManyKeys_NonArrayRejects(t *testing.T) {
 	t.Parallel()
 
@@ -104,6 +111,7 @@ func TestImportGetManyKeys_NonArrayRejects(t *testing.T) {
 	assert.Equal(t, InvalidOptionsError, kvErr.Name)
 }
 
+// TestImportGetManyKeys_NonStringElementRejects verifies that import get many keys non string element rejects.
 func TestImportGetManyKeys_NonStringElementRejects(t *testing.T) {
 	t.Parallel()
 
@@ -117,6 +125,7 @@ func TestImportGetManyKeys_NonStringElementRejects(t *testing.T) {
 	assert.Contains(t, kvErr.Message, "keys[1]")
 }
 
+// TestImportGetManyKeys_EmptyArray verifies that import get many keys empty array.
 func TestImportGetManyKeys_EmptyArray(t *testing.T) {
 	t.Parallel()
 
@@ -126,6 +135,7 @@ func TestImportGetManyKeys_EmptyArray(t *testing.T) {
 	assert.Empty(t, keys)
 }
 
+// TestImportGetManyKeys_ValidArray verifies that import get many keys valid array.
 func TestImportGetManyKeys_ValidArray(t *testing.T) {
 	t.Parallel()
 
@@ -135,6 +145,7 @@ func TestImportGetManyKeys_ValidArray(t *testing.T) {
 	assert.Equal(t, []string{"a", "b"}, keys)
 }
 
+// TestImportGetManyKeys_AllowsEmptyString verifies that import get many keys allows empty string.
 func TestImportGetManyKeys_AllowsEmptyString(t *testing.T) {
 	t.Parallel()
 
@@ -144,6 +155,7 @@ func TestImportGetManyKeys_AllowsEmptyString(t *testing.T) {
 	assert.Equal(t, []string{"a", "", "b"}, keys)
 }
 
+// TestImportDeleteManyKeys_NullRejects verifies that import delete many keys null rejects.
 func TestImportDeleteManyKeys_NullRejects(t *testing.T) {
 	t.Parallel()
 
@@ -156,6 +168,7 @@ func TestImportDeleteManyKeys_NullRejects(t *testing.T) {
 	assert.Contains(t, kvErr.Message, "deleteMany")
 }
 
+// TestImportDeleteManyKeys_NonArrayRejects verifies that import delete many keys non array rejects.
 func TestImportDeleteManyKeys_NonArrayRejects(t *testing.T) {
 	t.Parallel()
 
@@ -169,6 +182,7 @@ func TestImportDeleteManyKeys_NonArrayRejects(t *testing.T) {
 	assert.Contains(t, kvErr.Message, "deleteMany")
 }
 
+// TestImportDeleteManyKeys_NonStringElementRejects verifies that import delete many keys non string element rejects.
 func TestImportDeleteManyKeys_NonStringElementRejects(t *testing.T) {
 	t.Parallel()
 
@@ -183,6 +197,7 @@ func TestImportDeleteManyKeys_NonStringElementRejects(t *testing.T) {
 	assert.Contains(t, kvErr.Message, "keys[1]")
 }
 
+// TestImportDeleteManyKeys_EmptyStringRejects verifies that import delete many keys empty string rejects.
 func TestImportDeleteManyKeys_EmptyStringRejects(t *testing.T) {
 	t.Parallel()
 
@@ -198,6 +213,7 @@ func TestImportDeleteManyKeys_EmptyStringRejects(t *testing.T) {
 	assert.Contains(t, kvErr.Message, "non-empty")
 }
 
+// TestImportDeleteManyKeys_EmptyArray verifies that import delete many keys empty array.
 func TestImportDeleteManyKeys_EmptyArray(t *testing.T) {
 	t.Parallel()
 
@@ -207,6 +223,7 @@ func TestImportDeleteManyKeys_EmptyArray(t *testing.T) {
 	assert.Empty(t, keys)
 }
 
+// TestImportDeleteManyKeys_ValidArray verifies that import delete many keys valid array.
 func TestImportDeleteManyKeys_ValidArray(t *testing.T) {
 	t.Parallel()
 

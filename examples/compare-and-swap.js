@@ -42,3 +42,7 @@ export default async function () {
   expect(firstWriter).toEqual(true);
   expect(secondWriter).toEqual(false);
 }
+
+export function teardown() {
+  kv.close();
+}

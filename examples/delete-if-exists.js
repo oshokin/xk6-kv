@@ -25,3 +25,7 @@ export default async function () {
   const wasDeletedSecond = await kv.deleteIfExists("temp:maybe");
   expect(wasDeletedSecond).toEqual(true);
 }
+
+export function teardown() {
+  kv.close();
+}

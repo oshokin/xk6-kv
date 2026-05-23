@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newTestSerializedMemoryStore creates test serialized memory store for tests.
 func newTestSerializedMemoryStore(t *testing.T) *SerializedStore {
 	t.Helper()
 
@@ -16,6 +17,7 @@ func newTestSerializedMemoryStore(t *testing.T) *SerializedStore {
 	return NewSerializedStore(base, NewJSONSerializer())
 }
 
+// TestStringSerializer_CoercesNonStringValues verifies that string serializer coerces non string values.
 func TestStringSerializer_CoercesNonStringValues(t *testing.T) {
 	t.Parallel()
 

@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -85,6 +87,7 @@ func TestMemoryStore_Backup_CreatesBBoltSnapshot(t *testing.T) {
 	assert.Equal(t, []byte("3"), collected["gamma"])
 }
 
+// TestMemoryStore_Backup_DoesNotReplaceExistingFileOnWriteError verifies that memory store backup does not replace existing file on write error.
 func TestMemoryStore_Backup_DoesNotReplaceExistingFileOnWriteError(t *testing.T) {
 	t.Parallel()
 
@@ -236,6 +239,84 @@ func TestMemoryStore_Backup_AllowConcurrentWrites_StreamingMemoryFootprint(t *te
 	assert.Positive(t, maxChunk)
 	assert.LessOrEqual(t, maxChunk, boltDBSnapshotMaxBatchEntries)
 	assert.Less(t, maxChunk, keyCount)
+}
+
+// TestMemoryStore_Backup_ContextCanceledBeforeStart verifies that memory store backup context canceled before start.
+func TestMemoryStore_Backup_ContextCanceledBeforeStart(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: true})
+	require.NoError(t, store.Set("key", "value"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	target := filepath.Join(t.TempDir(), "canceled-before-start.kv")
+
+	summary, err := store.Backup(&BackupOptions{
+		FileName: target,
+		Context:  ctx,
+	})
+	require.Nil(t, summary)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.NoFileExists(t, target)
+}
+
+// TestMemoryStore_Backup_ContextCanceledDuringStream verifies that memory store backup context canceled during stream.
+func TestMemoryStore_Backup_ContextCanceledDuringStream(t *testing.T) {
+	t.Parallel()
+
+	store := NewMemoryStore(&MemoryConfig{TrackKeys: false})
+	for i := range 200 {
+		require.NoError(t, store.Set(fmt.Sprintf("key-%d", i), "value"))
+	}
+
+	ctx := newCancelOnErrCallContext(12)
+	target := filepath.Join(t.TempDir(), "canceled-during-stream.kv")
+
+	summary, err := store.Backup(&BackupOptions{
+		FileName:              target,
+		AllowConcurrentWrites: true,
+		Context:               ctx,
+	})
+	require.Nil(t, summary)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.NoFileExists(t, target)
+}
+
+// TestMemoryStore_Restore_ContextCanceledBeforeApply verifies that memory store restore context canceled before apply.
+func TestMemoryStore_Restore_ContextCanceledBeforeApply(t *testing.T) {
+	t.Parallel()
+
+	source := NewMemoryStore(&MemoryConfig{TrackKeys: false})
+	require.NoError(t, source.Set("snapshot-key", "snapshot-value"))
+
+	snapshotPath := filepath.Join(t.TempDir(), "source.kv")
+	_, err := source.Backup(&BackupOptions{FileName: snapshotPath})
+	require.NoError(t, err)
+
+	target := NewMemoryStore(&MemoryConfig{TrackKeys: false})
+	require.NoError(t, target.Set("keep", "value"))
+
+	// Restore Err() checks order for 1 snapshot entry:
+	// 1) Restore preflight, 2) ForEach entry, 3) pre-apply check.
+	ctx := newCancelOnErrCallContext(3)
+	summary, err := target.Restore(&RestoreOptions{
+		FileName: snapshotPath,
+		Context:  ctx,
+	})
+	require.Nil(t, summary)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+
+	value, getErr := target.Get("keep")
+	require.NoError(t, getErr)
+	assert.Equal(t, []byte("value"), value)
+
+	_, getErr = target.Get("snapshot-key")
+	require.Error(t, getErr, "canceled restore before apply must keep old world intact")
 }
 
 // TestMemoryStore_Restore_HonorsMaxEntries verifies that Restore respects the
@@ -659,4 +740,50 @@ func TestMemoryStore_Backup_Restore_RoundTrip(t *testing.T) {
 		require.NoError(t, getErr)
 		assert.Equal(t, []byte(strings.Join([]string{"value", strconv.Itoa(i)}, "-")), val)
 	}
+}
+
+// cancelOnErrCallContext is a test type used by cancel on err call context tests.
+type cancelOnErrCallContext struct {
+	// base holds test state for cancel on err call context.
+	base context.Context
+	// cancelOn holds test state for cancel on err call context.
+	cancelOn int32
+	// calls holds test state for cancel on err call context.
+	calls atomic.Int32
+}
+
+// newCancelOnErrCallContext creates cancel on err call context for tests.
+func newCancelOnErrCallContext(cancelOn int32) *cancelOnErrCallContext {
+	if cancelOn < 1 {
+		cancelOn = 1
+	}
+
+	return &cancelOnErrCallContext{
+		base:     context.Background(),
+		cancelOn: cancelOn,
+	}
+}
+
+// cancelOnErrCallContext.Deadline implements Deadline for cancel on err call context test scenarios.
+func (c *cancelOnErrCallContext) Deadline() (time.Time, bool) {
+	return time.Time{}, false
+}
+
+// cancelOnErrCallContext.Done implements Done for cancel on err call context test scenarios.
+func (c *cancelOnErrCallContext) Done() <-chan struct{} {
+	return nil
+}
+
+// cancelOnErrCallContext.Err implements Err for cancel on err call context test scenarios.
+func (c *cancelOnErrCallContext) Err() error {
+	if c.calls.Add(1) >= c.cancelOn {
+		return context.Canceled
+	}
+
+	return nil
+}
+
+// cancelOnErrCallContext.Value implements Value for cancel on err call context test scenarios.
+func (c *cancelOnErrCallContext) Value(key any) any {
+	return c.base.Value(key)
 }

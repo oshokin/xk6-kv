@@ -20,9 +20,13 @@ const keyFromShardRangesLinearCutoff = 32
 // cache locality, and this avoids per-range heap allocations and pointer chasing.
 // When a pointer is needed, we take it from the slice element directly.
 type shardRandomRange struct {
-	shard      *memoryShard
-	left       int
-	right      int
+	// shard is the shard owning the indexed key range.
+	shard *memoryShard
+	// left is the inclusive OST rank start within the shard.
+	left int
+	// right is the exclusive OST rank end within the shard.
+	right int
+	// cumulative is the running total of keys through this range inclusive.
 	cumulative int
 }
 
@@ -54,6 +58,7 @@ func (s *MemoryStore) RandomKeys(prefix string, count int64, unique bool) ([]str
 	return sampleKeys(keys, count, unique), nil
 }
 
+// randomKeysTracked samples keys from per-shard OST indexes when tracking is enabled.
 func (s *MemoryStore) randomKeysTracked(prefix string, count int64, unique bool) []string {
 	s.lockAllShardReaders()
 	defer s.unlockAllShardReaders()
@@ -70,6 +75,7 @@ func (s *MemoryStore) randomKeysTracked(prefix string, count int64, unique bool)
 	return randomKeysWithReplacementFromShardRanges(ranges, total, count)
 }
 
+// collectMatchingKeysUntracked gathers all keys matching prefix without OST indexes.
 func (s *MemoryStore) collectMatchingKeysUntracked(prefix string) []string {
 	keys := make([]string, 0)
 
@@ -125,6 +131,7 @@ func buildShardRandomRanges(shards []*memoryShard, prefix string) ([]shardRandom
 	return ranges, total
 }
 
+// randomUniqueKeysFromShardRanges returns unique keys sampled across shard ranges.
 func randomUniqueKeysFromShardRanges(ranges []shardRandomRange, total int, count int64) []string {
 	if count >= int64(total) {
 		keys := make([]string, 0, total)
@@ -154,6 +161,7 @@ func randomUniqueKeysFromShardRanges(ranges []shardRandomRange, total int, count
 	return keys
 }
 
+// randomKeysWithReplacementFromShardRanges samples keys with replacement across shard ranges.
 func randomKeysWithReplacementFromShardRanges(ranges []shardRandomRange, total int, count int64) []string {
 	keys := make([]string, 0, count)
 

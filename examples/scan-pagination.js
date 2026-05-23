@@ -39,3 +39,7 @@ export default async function () {
 
   check(total, { "scanned all sessions": (count) => count === 200 });
 }
+
+export function teardown() {
+  kv.close();
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestDiskStore_PopRandom_Empty_ReturnsNil verifies that disk store pop random empty returns nil.
 func TestDiskStore_PopRandom_Empty_ReturnsNil(t *testing.T) {
 	t.Parallel()
 
@@ -27,6 +28,7 @@ func TestDiskStore_PopRandom_Empty_ReturnsNil(t *testing.T) {
 	}
 }
 
+// TestDiskStore_PopRandom_WithPrefix_RemovesAndReturnsEntry verifies that disk store pop random with prefix removes and returns entry.
 func TestDiskStore_PopRandom_WithPrefix_RemovesAndReturnsEntry(t *testing.T) {
 	t.Parallel()
 
@@ -59,6 +61,7 @@ func TestDiskStore_PopRandom_WithPrefix_RemovesAndReturnsEntry(t *testing.T) {
 	}
 }
 
+// TestDiskStore_PopRandom_SkipsLiveClaim verifies that disk store pop random skips live claim.
 func TestDiskStore_PopRandom_SkipsLiveClaim(t *testing.T) {
 	t.Parallel()
 
@@ -83,6 +86,7 @@ func TestDiskStore_PopRandom_SkipsLiveClaim(t *testing.T) {
 	}
 }
 
+// TestDiskStore_PopRandomTracked_CompleteError_ReleasesClaim verifies that disk store pop random tracked complete error releases claim.
 func TestDiskStore_PopRandomTracked_CompleteError_ReleasesClaim(t *testing.T) {
 	t.Parallel()
 
@@ -109,6 +113,7 @@ func TestDiskStore_PopRandomTracked_CompleteError_ReleasesClaim(t *testing.T) {
 	require.NotNil(t, nextClaim, "tracked pop completion error must not leave a hidden live claim")
 }
 
+// TestDiskStore_PopRandomTracked_CompleteFalse_ReleasesClaim verifies that disk store pop random tracked complete false releases claim.
 func TestDiskStore_PopRandomTracked_CompleteFalse_ReleasesClaim(t *testing.T) {
 	t.Parallel()
 
@@ -137,6 +142,7 @@ func TestDiskStore_PopRandomTracked_CompleteFalse_ReleasesClaim(t *testing.T) {
 	require.NotNil(t, nextClaim, "tracked pop completion=false path must not keep claim hidden until TTL")
 }
 
+// TestDiskStore_PopRandom_AllowsExpiredClaim verifies that disk store pop random allows expired claim.
 func TestDiskStore_PopRandom_AllowsExpiredClaim(t *testing.T) {
 	t.Parallel()
 
@@ -154,7 +160,7 @@ func TestDiskStore_PopRandom_AllowsExpiredClaim(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, claim)
 
-			time.Sleep(10 * time.Millisecond)
+			requireDiskClaimExpired(t, store, claim.Ref())
 
 			entry, err := store.PopRandom("user:")
 			require.NoError(t, err)
@@ -164,6 +170,7 @@ func TestDiskStore_PopRandom_AllowsExpiredClaim(t *testing.T) {
 	}
 }
 
+// TestDiskStore_PopRandom_ExpiredClaimAvailableWhenFullCleanupThrottled verifies that disk store pop random expired claim available when full cleanup throttled.
 func TestDiskStore_PopRandom_ExpiredClaimAvailableWhenFullCleanupThrottled(t *testing.T) {
 	t.Parallel()
 
@@ -181,7 +188,7 @@ func TestDiskStore_PopRandom_ExpiredClaimAvailableWhenFullCleanupThrottled(t *te
 			require.NoError(t, err)
 			require.NotNil(t, claim)
 
-			time.Sleep(10 * time.Millisecond)
+			requireDiskClaimExpired(t, store, claim.Ref())
 			store.lastClaimsCleanupUnixMilli.Store(time.Now().UnixMilli())
 
 			entry, err := store.PopRandom("user:")
@@ -192,6 +199,7 @@ func TestDiskStore_PopRandom_ExpiredClaimAvailableWhenFullCleanupThrottled(t *te
 	}
 }
 
+// TestDiskStore_ClaimRandom_ExcludesLiveClaim verifies that disk store claim random excludes live claim.
 func TestDiskStore_ClaimRandom_ExcludesLiveClaim(t *testing.T) {
 	t.Parallel()
 
@@ -219,6 +227,7 @@ func TestDiskStore_ClaimRandom_ExcludesLiveClaim(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ClaimRandom_TTLMustNotExceedMax verifies that disk store claim random ttl must not exceed max.
 func TestDiskStore_ClaimRandom_TTLMustNotExceedMax(t *testing.T) {
 	t.Parallel()
 
@@ -250,6 +259,7 @@ func TestDiskStore_ClaimRandom_TTLMustNotExceedMax(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ClaimRandom_OwnerMustNotExceedMax verifies that disk store claim random owner must not exceed max.
 func TestDiskStore_ClaimRandom_OwnerMustNotExceedMax(t *testing.T) {
 	t.Parallel()
 
@@ -285,6 +295,7 @@ func TestDiskStore_ClaimRandom_OwnerMustNotExceedMax(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ClaimRandom_ExpiredClaimBecomesAvailable verifies that disk store claim random expired claim becomes available.
 func TestDiskStore_ClaimRandom_ExpiredClaimBecomesAvailable(t *testing.T) {
 	t.Parallel()
 
@@ -302,7 +313,7 @@ func TestDiskStore_ClaimRandom_ExpiredClaimBecomesAvailable(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, firstClaim)
 
-			time.Sleep(10 * time.Millisecond)
+			requireDiskClaimExpired(t, store, firstClaim.Ref())
 
 			secondClaim, err := store.ClaimRandom(&ClaimOptions{
 				Prefix: "user:",
@@ -316,6 +327,7 @@ func TestDiskStore_ClaimRandom_ExpiredClaimBecomesAvailable(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ClaimRandom_ExpiredClaimAvailableWhenFullCleanupThrottled verifies that disk store claim random expired claim available when full cleanup throttled.
 func TestDiskStore_ClaimRandom_ExpiredClaimAvailableWhenFullCleanupThrottled(t *testing.T) {
 	t.Parallel()
 
@@ -333,7 +345,7 @@ func TestDiskStore_ClaimRandom_ExpiredClaimAvailableWhenFullCleanupThrottled(t *
 			require.NoError(t, err)
 			require.NotNil(t, firstClaim)
 
-			time.Sleep(10 * time.Millisecond)
+			requireDiskClaimExpired(t, store, firstClaim.Ref())
 			store.lastClaimsCleanupUnixMilli.Store(time.Now().UnixMilli())
 
 			secondClaim, err := store.ClaimRandom(&ClaimOptions{
@@ -348,6 +360,7 @@ func TestDiskStore_ClaimRandom_ExpiredClaimAvailableWhenFullCleanupThrottled(t *
 	}
 }
 
+// TestDiskStore_ClaimRandom_HighOccupancyReturnsOnlyFreeKey verifies that disk store claim random high occupancy returns only free key.
 func TestDiskStore_ClaimRandom_HighOccupancyReturnsOnlyFreeKey(t *testing.T) {
 	t.Parallel()
 
@@ -369,6 +382,7 @@ func TestDiskStore_ClaimRandom_HighOccupancyReturnsOnlyFreeKey(t *testing.T) {
 	}
 }
 
+// TestDiskStore_PopRandom_HighOccupancyReturnsOnlyFreeKey verifies that disk store pop random high occupancy returns only free key.
 func TestDiskStore_PopRandom_HighOccupancyReturnsOnlyFreeKey(t *testing.T) {
 	t.Parallel()
 
@@ -387,6 +401,7 @@ func TestDiskStore_PopRandom_HighOccupancyReturnsOnlyFreeKey(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ReleaseClaim_And_CompleteClaim verifies that disk store release claim and complete claim.
 func TestDiskStore_ReleaseClaim_And_CompleteClaim(t *testing.T) {
 	t.Parallel()
 
@@ -483,6 +498,7 @@ func TestDiskStore_ReleaseClaim_And_CompleteClaim(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ClaimMetadata_DoesNotLeakIntoUserScan verifies that disk store claim metadata does not leak into user scan.
 func TestDiskStore_ClaimMetadata_DoesNotLeakIntoUserScan(t *testing.T) {
 	t.Parallel()
 
@@ -516,6 +532,7 @@ func TestDiskStore_ClaimMetadata_DoesNotLeakIntoUserScan(t *testing.T) {
 	}
 }
 
+// TestDiskStore_PopRandom_Concurrent_NoDuplicateKeys verifies that disk store pop random concurrent no duplicate keys.
 func TestDiskStore_PopRandom_Concurrent_NoDuplicateKeys(t *testing.T) {
 	t.Parallel()
 
@@ -556,6 +573,7 @@ func TestDiskStore_PopRandom_Concurrent_NoDuplicateKeys(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ClaimRandom_Concurrent_NoDuplicateLiveClaims verifies that disk store claim random concurrent no duplicate live claims.
 func TestDiskStore_ClaimRandom_Concurrent_NoDuplicateLiveClaims(t *testing.T) {
 	t.Parallel()
 
@@ -599,6 +617,7 @@ func TestDiskStore_ClaimRandom_Concurrent_NoDuplicateLiveClaims(t *testing.T) {
 	}
 }
 
+// TestDiskStore_OpenClearRestore_ClearClaims verifies that disk store open clear restore clear claims.
 func TestDiskStore_OpenClearRestore_ClearClaims(t *testing.T) {
 	t.Parallel()
 
@@ -667,6 +686,7 @@ func TestDiskStore_OpenClearRestore_ClearClaims(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ClaimKey_Behavior verifies that disk store claim key behavior.
 func TestDiskStore_ClaimKey_Behavior(t *testing.T) {
 	t.Parallel()
 
@@ -692,6 +712,7 @@ func TestDiskStore_ClaimKey_Behavior(t *testing.T) {
 	}
 }
 
+// TestDiskStore_RenewClaim_TokenStableAndExpiryExtended verifies that disk store renew claim token stable and expiry extended.
 func TestDiskStore_RenewClaim_TokenStableAndExpiryExtended(t *testing.T) {
 	t.Parallel()
 
@@ -707,8 +728,6 @@ func TestDiskStore_RenewClaim_TokenStableAndExpiryExtended(t *testing.T) {
 			require.NotNil(t, claim)
 
 			oldExpiresAt := claim.ExpiresAt
-
-			time.Sleep(2 * time.Millisecond)
 
 			renewed, err := store.RenewClaim(claim.Ref(), &RenewClaimOptions{TTLMs: 60_000})
 			require.NoError(t, err)
@@ -726,6 +745,7 @@ func TestDiskStore_RenewClaim_TokenStableAndExpiryExtended(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ClaimRandomMany_ReturnsUniqueFreeClaims verifies that disk store claim random many returns unique free claims.
 func TestDiskStore_ClaimRandomMany_ReturnsUniqueFreeClaims(t *testing.T) {
 	t.Parallel()
 
@@ -766,6 +786,7 @@ func TestDiskStore_ClaimRandomMany_ReturnsUniqueFreeClaims(t *testing.T) {
 	}
 }
 
+// TestDiskStore_ApplyTrackedClaimLocked_DoesNotOverwriteLiveClaim verifies that disk store apply tracked claim locked does not overwrite live claim.
 func TestDiskStore_ApplyTrackedClaimLocked_DoesNotOverwriteLiveClaim(t *testing.T) {
 	t.Parallel()
 
@@ -789,6 +810,7 @@ func TestDiskStore_ApplyTrackedClaimLocked_DoesNotOverwriteLiveClaim(t *testing.
 	assert.Equal(t, "owner-a", record.Owner)
 }
 
+// TestDiskStore_PopRandomMany_DeletesOnlyFreeMatchingKeys verifies that disk store pop random many deletes only free matching keys.
 func TestDiskStore_PopRandomMany_DeletesOnlyFreeMatchingKeys(t *testing.T) {
 	t.Parallel()
 

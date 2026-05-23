@@ -87,6 +87,7 @@ func (k *KV) storeHandleClosedError() *Error {
 	return NewError(StoreClosedError, "kv store handle is closed")
 }
 
+// preflightStoreError returns a handle error when the store is closed or unavailable.
 func (k *KV) preflightStoreError() *Error {
 	if k.store == nil {
 		return k.databaseNotOpenError()
@@ -151,6 +152,7 @@ func (k *KV) runAsyncWithStore(
 	return k.runAsyncWithStoreAndObserver(operation, toJS, nil)
 }
 
+// runAsyncWithStoreAndObserver runs a store operation asynchronously and invokes an optional observer.
 func (k *KV) runAsyncWithStoreAndObserver(
 	operation func(store store.Store) (any, error),
 	toJS func(rt *sobek.Runtime, result any) sobek.Value,
@@ -165,6 +167,7 @@ func (k *KV) runAsyncWithStoreAndObserver(
 	// the event loop after the store operation completes.
 	var (
 		callback   = k.vu.RegisterCallback()
+		ctx        = k.vu.Context()
 		settleOnce sync.Once
 	)
 
@@ -185,25 +188,28 @@ func (k *KV) runAsyncWithStoreAndObserver(
 				observer(result, err, time.Since(startedAt))
 			}
 		}
+		rejectObserved := func(err error) {
+			observe(nil, err)
+
+			runOnEventLoop(func() error {
+				return reject(classifyError(err).ToSobekValue(rt))
+			})
+		}
 
 		defer func() {
 			if r := recover(); r != nil {
 				panicErr := fmt.Errorf("panic recovered during store operation: %v", r)
-				observe(nil, panicErr)
-
-				runOnEventLoop(func() error {
-					return reject(classifyError(panicErr).ToSobekValue(rt))
-				})
+				rejectObserved(panicErr)
 			}
 		}()
 
 		if err := k.preflightStoreError(); err != nil {
-			observe(nil, err)
+			rejectObserved(err)
+			return
+		}
 
-			runOnEventLoop(func() error {
-				return reject(err.ToSobekValue(rt))
-			})
-
+		if err := ctx.Err(); err != nil {
+			rejectObserved(err)
 			return
 		}
 
@@ -211,12 +217,7 @@ func (k *KV) runAsyncWithStoreAndObserver(
 		// loop remains responsive under contention.
 		goResult, err := operation(k.store)
 		if err != nil {
-			observe(nil, err)
-
-			runOnEventLoop(func() error {
-				return reject(classifyError(err).ToSobekValue(rt))
-			})
-
+			rejectObserved(err)
 			return
 		}
 
@@ -234,6 +235,7 @@ func (k *KV) runAsyncWithStoreAndObserver(
 	return promise
 }
 
+// beginAsyncOperation increments async in-flight metrics and returns a cleanup func.
 func (k *KV) beginAsyncOperation() func() {
 	if k.operationMetrics == nil {
 		return func() {}

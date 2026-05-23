@@ -38,7 +38,9 @@ type (
 	// It holds the per-VU JS bindings and a pointer
 	// to the RootModule to access the shared store.
 	ModuleInstance struct {
+		// vu is the per-VU k6 runtime handle used for JS bindings.
 		vu modules.VU
+		// rm points at the process-wide RootModule that owns the shared store.
 		rm *RootModule
 		// kv provides a key-value database that can be used to store and retrieve data.
 		// The database is opened when the first KV instance is created, and closed when the last KV

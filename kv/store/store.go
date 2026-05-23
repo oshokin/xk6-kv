@@ -278,6 +278,9 @@ type (
 		// The snapshot is intended for explicit observability calls and debugging.
 		Stats() (*StatsSnapshot, error)
 
+		// AllocationStats returns a prefix-scoped allocation snapshot.
+		AllocationStats(prefix string) (*AllocationStats, error)
+
 		// Close releases any resources held by the store (file handles, caches,
 		// background workers, etc.). After Close returns, the Store should not be
 		// used. Close SHOULD be idempotent.

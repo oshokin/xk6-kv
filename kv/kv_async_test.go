@@ -1,6 +1,7 @@
 package kv
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/grafana/sobek"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.k6.io/k6/js/modules"
 	"go.k6.io/k6/js/modulestest"
 	"go.k6.io/k6/lib"
 	k6metrics "go.k6.io/k6/metrics"
@@ -17,6 +19,7 @@ import (
 	"github.com/oshokin/xk6-kv/kv/store"
 )
 
+// TestKVAsync_Set_ResolvesPromise verifies that async set resolves its promise.
 func TestKVAsync_Set_ResolvesPromise(t *testing.T) {
 	t.Parallel()
 
@@ -33,6 +36,7 @@ func TestKVAsync_Set_ResolvesPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_SetMany_ResolvesWrittenCount verifies that kv async set many resolves written count.
 func TestKVAsync_SetMany_ResolvesWrittenCount(t *testing.T) {
 	t.Parallel()
 
@@ -67,6 +71,7 @@ func TestKVAsync_SetMany_ResolvesWrittenCount(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_StringSerialization_CoercesObjectToString verifies that kv async string serialization coerces object to string.
 func TestKVAsync_StringSerialization_CoercesObjectToString(t *testing.T) {
 	t.Parallel()
 
@@ -93,6 +98,7 @@ func TestKVAsync_StringSerialization_CoercesObjectToString(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_SetMany_EmptyObjectResolvesZero verifies that kv async set many empty object resolves zero.
 func TestKVAsync_SetMany_EmptyObjectResolvesZero(t *testing.T) {
 	t.Parallel()
 
@@ -109,6 +115,7 @@ func TestKVAsync_SetMany_EmptyObjectResolvesZero(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_SetMany_InvalidShapeRejectsPromise verifies that kv async set many invalid shape rejects its promise.
 func TestKVAsync_SetMany_InvalidShapeRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -134,6 +141,7 @@ func TestKVAsync_SetMany_InvalidShapeRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_Set_EmptyKeyRejectsPromise verifies that kv async set empty key rejects its promise.
 func TestKVAsync_Set_EmptyKeyRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -153,6 +161,7 @@ func TestKVAsync_Set_EmptyKeyRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_SetMany_EmptyKeyRejectsPromise verifies that kv async set many empty key rejects its promise.
 func TestKVAsync_SetMany_EmptyKeyRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -184,6 +193,7 @@ func TestKVAsync_SetMany_EmptyKeyRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_SetMany_SerializationFailureRejectsAndWritesNothing verifies that kv async set many serialization failure rejects and writes nothing.
 func TestKVAsync_SetMany_SerializationFailureRejectsAndWritesNothing(t *testing.T) {
 	t.Parallel()
 
@@ -227,6 +237,7 @@ func TestKVAsync_SetMany_SerializationFailureRejectsAndWritesNothing(t *testing.
 	`)
 }
 
+// TestKVAsync_CompareDetailed_SerializationFailureRejectsPromise verifies that kv async compare detailed serialization failure rejects its promise.
 func TestKVAsync_CompareDetailed_SerializationFailureRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -282,6 +293,7 @@ func TestKVAsync_CompareDetailed_SerializationFailureRejectsPromise(t *testing.T
 	}
 }
 
+// TestKVAsync_GetMany_ResolvesItemsAndExistsFlags verifies that kv async get many resolves items and exists flags.
 func TestKVAsync_GetMany_ResolvesItemsAndExistsFlags(t *testing.T) {
 	t.Parallel()
 
@@ -317,6 +329,7 @@ func TestKVAsync_GetMany_ResolvesItemsAndExistsFlags(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_GetMany_EmptyArrayResolvesEmptyArray verifies that kv async get many empty array resolves empty array.
 func TestKVAsync_GetMany_EmptyArrayResolvesEmptyArray(t *testing.T) {
 	t.Parallel()
 
@@ -333,6 +346,7 @@ func TestKVAsync_GetMany_EmptyArrayResolvesEmptyArray(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_GetMany_EmptyStringKeyResolvesMissingItem verifies that kv async get many empty string key resolves missing item.
 func TestKVAsync_GetMany_EmptyStringKeyResolvesMissingItem(t *testing.T) {
 	t.Parallel()
 
@@ -352,6 +366,7 @@ func TestKVAsync_GetMany_EmptyStringKeyResolvesMissingItem(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_GetMany_InvalidShapeRejectsPromise verifies that kv async get many invalid shape rejects its promise.
 func TestKVAsync_GetMany_InvalidShapeRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -371,6 +386,7 @@ func TestKVAsync_GetMany_InvalidShapeRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_GetMany_InvalidElementRejectsPromise verifies that kv async get many invalid element rejects its promise.
 func TestKVAsync_GetMany_InvalidElementRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -393,6 +409,7 @@ func TestKVAsync_GetMany_InvalidElementRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_GetMany_DuplicateKeys verifies that kv async get many duplicate keys.
 func TestKVAsync_GetMany_DuplicateKeys(t *testing.T) {
 	t.Parallel()
 
@@ -426,6 +443,7 @@ func TestKVAsync_GetMany_DuplicateKeys(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_GetMany_DistinguishesMissingAndStoredJSONNull verifies that kv async get many distinguishes missing and stored json null.
 func TestKVAsync_GetMany_DistinguishesMissingAndStoredJSONNull(t *testing.T) {
 	t.Parallel()
 
@@ -454,6 +472,7 @@ func TestKVAsync_GetMany_DistinguishesMissingAndStoredJSONNull(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteMany_ResolvesDeletedAndMissingCounts verifies that kv async delete many resolves deleted and missing counts.
 func TestKVAsync_DeleteMany_ResolvesDeletedAndMissingCounts(t *testing.T) {
 	t.Parallel()
 
@@ -480,6 +499,7 @@ func TestKVAsync_DeleteMany_ResolvesDeletedAndMissingCounts(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteMany_RemovesKeys verifies that kv async delete many removes keys.
 func TestKVAsync_DeleteMany_RemovesKeys(t *testing.T) {
 	t.Parallel()
 
@@ -510,6 +530,7 @@ func TestKVAsync_DeleteMany_RemovesKeys(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteMany_EmptyArrayResolvesZeroCounts verifies that kv async delete many empty array resolves zero counts.
 func TestKVAsync_DeleteMany_EmptyArrayResolvesZeroCounts(t *testing.T) {
 	t.Parallel()
 
@@ -526,6 +547,7 @@ func TestKVAsync_DeleteMany_EmptyArrayResolvesZeroCounts(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteMany_DuplicateKeys verifies that kv async delete many duplicate keys.
 func TestKVAsync_DeleteMany_DuplicateKeys(t *testing.T) {
 	t.Parallel()
 
@@ -549,6 +571,7 @@ func TestKVAsync_DeleteMany_DuplicateKeys(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteMany_InvalidShapeRejectsPromise verifies that kv async delete many invalid shape rejects its promise.
 func TestKVAsync_DeleteMany_InvalidShapeRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -571,6 +594,7 @@ func TestKVAsync_DeleteMany_InvalidShapeRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteMany_InvalidElementRejectsPromise verifies that kv async delete many invalid element rejects its promise.
 func TestKVAsync_DeleteMany_InvalidElementRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -593,6 +617,7 @@ func TestKVAsync_DeleteMany_InvalidElementRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteMany_EmptyKeyRejectsPromise verifies that kv async delete many empty key rejects its promise.
 func TestKVAsync_DeleteMany_EmptyKeyRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -615,6 +640,7 @@ func TestKVAsync_DeleteMany_EmptyKeyRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_GetMissingKey_RejectsPromise verifies that kv async get missing key kv async get missing key rejects its promise.
 func TestKVAsync_GetMissingKey_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -634,6 +660,7 @@ func TestKVAsync_GetMissingKey_RejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_Get_PanicInStore_RejectsPromise verifies that kv async get panic in store kv async get panic in store rejects its promise.
 func TestKVAsync_Get_PanicInStore_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -659,6 +686,7 @@ func TestKVAsync_Get_PanicInStore_RejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_CallbackEnqueue_ExactlyOnce verifies that kv async callback enqueue exactly once.
 func TestKVAsync_CallbackEnqueue_ExactlyOnce(t *testing.T) {
 	t.Parallel()
 
@@ -696,6 +724,7 @@ func TestKVAsync_CallbackEnqueue_ExactlyOnce(t *testing.T) {
 	assert.EqualValues(t, 1, enqueueCount.Load(), "enqueue callback must be called exactly once")
 }
 
+// TestKVAsync_ClosedDiskStore_RejectsWithoutHang verifies that kv async closed disk store rejects without hang.
 func TestKVAsync_ClosedDiskStore_RejectsWithoutHang(t *testing.T) {
 	t.Parallel()
 
@@ -722,6 +751,7 @@ func TestKVAsync_ClosedDiskStore_RejectsWithoutHang(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DiskReadOnlyMutationRejectsStableError verifies that kv async disk read only mutation rejects stable error.
 func TestKVAsync_DiskReadOnlyMutationRejectsStableError(t *testing.T) {
 	t.Parallel()
 
@@ -764,6 +794,7 @@ func TestKVAsync_DiskReadOnlyMutationRejectsStableError(t *testing.T) {
 	`)
 }
 
+// TestKV_Close_IdempotentPerHandle verifies that kv close idempotent per handle.
 func TestKV_Close_IdempotentPerHandle(t *testing.T) {
 	t.Parallel()
 
@@ -780,6 +811,7 @@ func TestKV_Close_IdempotentPerHandle(t *testing.T) {
 	assert.EqualValues(t, 1, countingStore.closeCalls.Load(), "underlying Store.Close must run once per KV handle")
 }
 
+// TestKV_Close_MemoryHandleRejectsAfterClose verifies that kv close memory handle rejects after close.
 func TestKV_Close_MemoryHandleRejectsAfterClose(t *testing.T) {
 	t.Parallel()
 
@@ -813,6 +845,7 @@ func TestKV_Close_MemoryHandleRejectsAfterClose(t *testing.T) {
 	`)
 }
 
+// TestKV_Close_DiskHandleRejectsAfterClose verifies that kv close disk handle rejects after close.
 func TestKV_Close_DiskHandleRejectsAfterClose(t *testing.T) {
 	t.Parallel()
 
@@ -855,6 +888,61 @@ func TestKV_Close_DiskHandleRejectsAfterClose(t *testing.T) {
 	`)
 }
 
+// TestValidateCSV_RejectsAfterClose verifies that validate csv rejects after close.
+func TestValidateCSV_RejectsAfterClose(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	fileName := filepath.Join(t.TempDir(), "validate-after-close.csv")
+	//nolint:forbidigo // test fixture creation requires file I/O.
+	require.NoError(t, os.WriteFile(fileName, []byte("id,name\n1,Alice\n"), 0o644))
+	require.NoError(t, runtime.VU.Runtime().Set("fileName", fileName))
+
+	require.NoError(t, kv.Close())
+
+	runKVScript(t, runtime, kv, `
+		__kv.validateCSV({ fileName: fileName, keyColumn: "id", hasHeader: true })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "StoreClosedError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+// TestValidateJSONL_RejectsAfterClose verifies that validate jsonl rejects after close.
+func TestValidateJSONL_RejectsAfterClose(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	fileName := filepath.Join(t.TempDir(), "validate-after-close.jsonl")
+	//nolint:forbidigo // test fixture creation requires file I/O.
+	require.NoError(t, os.WriteFile(fileName, []byte(`{"key":"u:1","value":{"name":"Alice"}}`+"\n"), 0o644))
+	require.NoError(t, runtime.VU.Runtime().Set("fileName", fileName))
+
+	require.NoError(t, kv.Close())
+
+	runKVScript(t, runtime, kv, `
+		__kv.validateJSONL({ fileName: fileName })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "StoreClosedError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+// TestKV_Close_DoesNotCloseOtherHandleUntilLastClose verifies that kv close does not close other handle until last close.
 func TestKV_Close_DoesNotCloseOtherHandleUntilLastClose(t *testing.T) {
 	t.Parallel()
 
@@ -916,6 +1004,49 @@ func TestKV_Close_DoesNotCloseOtherHandleUntilLastClose(t *testing.T) {
 	require.Error(t, err, "store must reject operations after the last handle close")
 }
 
+// TestKV_Close_AllowsAlreadyStartedAsyncOperationToSettle verifies that kv close allows already started async operation to settle.
+func TestKV_Close_AllowsAlreadyStartedAsyncOperationToSettle(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	blockingStore := &blockingGetStore{
+		Store:   store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+		started: make(chan struct{}),
+		unblock: make(chan struct{}),
+	}
+	kv := NewKV(runtime.VU, blockingStore)
+
+	require.NoError(t, blockingStore.Set("close:in-flight:key", "value"))
+	require.NoError(t, runtime.VU.Runtime().Set("__kv", kv))
+
+	errCh := make(chan error, 1)
+
+	go func() {
+		_, err := runtime.RunOnEventLoop(`
+			__kv.get("close:in-flight:key")
+				.then(() => {
+				})
+				.catch((err) => {
+					throw new Error("unexpected rejection: " + String(err && err.name));
+				});
+		`)
+		errCh <- err
+	}()
+
+	select {
+	case <-blockingStore.started:
+	case err := <-errCh:
+		require.NoError(t, err)
+		t.Fatal("expected get operation to block before close")
+	}
+
+	require.NoError(t, kv.Close())
+	close(blockingStore.unblock)
+
+	require.NoError(t, <-errCh)
+}
+
+// TestKVAsync_IncrementBy_InvalidDelta_RejectsPromise verifies that kv async increment by invalid delta kv async increment by invalid delta rejects its promise.
 func TestKVAsync_IncrementBy_InvalidDelta_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -935,6 +1066,7 @@ func TestKVAsync_IncrementBy_InvalidDelta_RejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_Count_ResolvesPromise verifies that async count resolves its promise.
 func TestKVAsync_Count_ResolvesPromise(t *testing.T) {
 	t.Parallel()
 
@@ -962,6 +1094,7 @@ func TestKVAsync_Count_ResolvesPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_Count_InvalidOptions_RejectsPromise verifies that kv async count invalid options kv async count invalid options rejects its promise.
 func TestKVAsync_Count_InvalidOptions_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -981,6 +1114,7 @@ func TestKVAsync_Count_InvalidOptions_RejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ListKeys_ResolvesOrderedKeys verifies that kv async list keys resolves ordered keys.
 func TestKVAsync_ListKeys_ResolvesOrderedKeys(t *testing.T) {
 	t.Parallel()
 
@@ -1012,6 +1146,7 @@ func TestKVAsync_ListKeys_ResolvesOrderedKeys(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ListKeys_PrefixAndLimit verifies that kv async list keys prefix and limit.
 func TestKVAsync_ListKeys_PrefixAndLimit(t *testing.T) {
 	t.Parallel()
 
@@ -1041,6 +1176,7 @@ func TestKVAsync_ListKeys_PrefixAndLimit(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ListKeys_EmptyStore verifies that kv async list keys empty store.
 func TestKVAsync_ListKeys_EmptyStore(t *testing.T) {
 	t.Parallel()
 
@@ -1057,6 +1193,7 @@ func TestKVAsync_ListKeys_EmptyStore(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ListKeys_InvalidShapeRejectsPromise verifies that kv async list keys invalid shape rejects its promise.
 func TestKVAsync_ListKeys_InvalidShapeRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1076,6 +1213,7 @@ func TestKVAsync_ListKeys_InvalidShapeRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ListKeys_InvalidPrefixRejectsPromise verifies that kv async list keys invalid prefix rejects its promise.
 func TestKVAsync_ListKeys_InvalidPrefixRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1095,6 +1233,7 @@ func TestKVAsync_ListKeys_InvalidPrefixRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ListKeys_FractionalLimitRejectsPromise verifies that kv async list keys fractional limit rejects its promise.
 func TestKVAsync_ListKeys_FractionalLimitRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1114,6 +1253,7 @@ func TestKVAsync_ListKeys_FractionalLimitRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ScanKeys_ResolvesPagedKeys verifies that kv async scan keys resolves paged keys.
 func TestKVAsync_ScanKeys_ResolvesPagedKeys(t *testing.T) {
 	t.Parallel()
 
@@ -1157,6 +1297,7 @@ func TestKVAsync_ScanKeys_ResolvesPagedKeys(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ScanKeys_InvalidCursorRejectsPromise verifies that kv async scan keys invalid cursor rejects its promise.
 func TestKVAsync_ScanKeys_InvalidCursorRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1176,6 +1317,7 @@ func TestKVAsync_ScanKeys_InvalidCursorRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ScanKeys_InvalidPrefixRejectsPromise verifies that kv async scan keys invalid prefix rejects its promise.
 func TestKVAsync_ScanKeys_InvalidPrefixRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1195,6 +1337,7 @@ func TestKVAsync_ScanKeys_InvalidPrefixRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ScanKeys_FractionalLimitRejectsPromise verifies that kv async scan keys fractional limit rejects its promise.
 func TestKVAsync_ScanKeys_FractionalLimitRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1214,6 +1357,7 @@ func TestKVAsync_ScanKeys_FractionalLimitRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_RandomKeys_ResolvesKeys verifies that kv async random keys resolves keys.
 func TestKVAsync_RandomKeys_ResolvesKeys(t *testing.T) {
 	t.Parallel()
 
@@ -1247,6 +1391,7 @@ func TestKVAsync_RandomKeys_ResolvesKeys(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_RandomKeys_EmptyReturnsEmptyArray verifies that kv async random keys empty returns empty array.
 func TestKVAsync_RandomKeys_EmptyReturnsEmptyArray(t *testing.T) {
 	t.Parallel()
 
@@ -1263,6 +1408,7 @@ func TestKVAsync_RandomKeys_EmptyReturnsEmptyArray(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_RandomKeys_UniqueNoDuplicates verifies that kv async random keys unique no duplicates.
 func TestKVAsync_RandomKeys_UniqueNoDuplicates(t *testing.T) {
 	t.Parallel()
 
@@ -1288,6 +1434,7 @@ func TestKVAsync_RandomKeys_UniqueNoDuplicates(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_RandomKeys_CountLargerThanAvailableReturnsAvailable verifies that kv async random keys count larger than available returns available.
 func TestKVAsync_RandomKeys_CountLargerThanAvailableReturnsAvailable(t *testing.T) {
 	t.Parallel()
 
@@ -1314,6 +1461,7 @@ func TestKVAsync_RandomKeys_CountLargerThanAvailableReturnsAvailable(t *testing.
 	`)
 }
 
+// TestKVAsync_RandomKeys_NonUniqueSingleCandidateRepeats verifies that kv async random keys non unique single candidate repeats.
 func TestKVAsync_RandomKeys_NonUniqueSingleCandidateRepeats(t *testing.T) {
 	t.Parallel()
 
@@ -1332,6 +1480,7 @@ func TestKVAsync_RandomKeys_NonUniqueSingleCandidateRepeats(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_RandomKeys_InvalidShapeRejectsPromise verifies that kv async random keys invalid shape rejects its promise.
 func TestKVAsync_RandomKeys_InvalidShapeRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1351,6 +1500,7 @@ func TestKVAsync_RandomKeys_InvalidShapeRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_RandomKeys_MissingCountRejectsPromise verifies that kv async random keys missing count rejects its promise.
 func TestKVAsync_RandomKeys_MissingCountRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1370,6 +1520,7 @@ func TestKVAsync_RandomKeys_MissingCountRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_RandomKeys_NonPositiveCountRejectsPromise verifies that kv async random keys non positive count rejects its promise.
 func TestKVAsync_RandomKeys_NonPositiveCountRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1396,6 +1547,7 @@ func TestKVAsync_RandomKeys_NonPositiveCountRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_RandomKeys_FractionalCountRejectsPromise verifies that kv async random keys fractional count rejects its promise.
 func TestKVAsync_RandomKeys_FractionalCountRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1415,6 +1567,7 @@ func TestKVAsync_RandomKeys_FractionalCountRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_RandomKeys_TooLargeCountRejectsPromise verifies that kv async random keys too large count rejects its promise.
 func TestKVAsync_RandomKeys_TooLargeCountRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1437,6 +1590,7 @@ func TestKVAsync_RandomKeys_TooLargeCountRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_RandomKeys_InvalidUniqueRejectsPromise verifies that kv async random keys invalid unique rejects its promise.
 func TestKVAsync_RandomKeys_InvalidUniqueRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1456,6 +1610,7 @@ func TestKVAsync_RandomKeys_InvalidUniqueRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteByPrefix_DeletesLimitedBatchAndReportsNotDone verifies that kv async delete by prefix deletes limited batch and reports not done.
 func TestKVAsync_DeleteByPrefix_DeletesLimitedBatchAndReportsNotDone(t *testing.T) {
 	t.Parallel()
 
@@ -1496,6 +1651,7 @@ func TestKVAsync_DeleteByPrefix_DeletesLimitedBatchAndReportsNotDone(t *testing.
 	`)
 }
 
+// TestKVAsync_DeleteByPrefix_RepeatedCallsReportDone verifies that kv async delete by prefix repeated calls report done.
 func TestKVAsync_DeleteByPrefix_RepeatedCallsReportDone(t *testing.T) {
 	t.Parallel()
 
@@ -1535,6 +1691,7 @@ func TestKVAsync_DeleteByPrefix_RepeatedCallsReportDone(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteByPrefix_InvalidShapeRejectsPromise verifies that kv async delete by prefix invalid shape rejects its promise.
 func TestKVAsync_DeleteByPrefix_InvalidShapeRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1554,6 +1711,7 @@ func TestKVAsync_DeleteByPrefix_InvalidShapeRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteByPrefix_EmptyPrefixRejectsPromise verifies that kv async delete by prefix empty prefix rejects its promise.
 func TestKVAsync_DeleteByPrefix_EmptyPrefixRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1576,6 +1734,7 @@ func TestKVAsync_DeleteByPrefix_EmptyPrefixRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteByPrefix_MissingLimitRejectsPromise verifies that kv async delete by prefix missing limit rejects its promise.
 func TestKVAsync_DeleteByPrefix_MissingLimitRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1595,6 +1754,7 @@ func TestKVAsync_DeleteByPrefix_MissingLimitRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteByPrefix_InvalidLimitRejectsPromise verifies that kv async delete by prefix invalid limit rejects its promise.
 func TestKVAsync_DeleteByPrefix_InvalidLimitRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1614,6 +1774,7 @@ func TestKVAsync_DeleteByPrefix_InvalidLimitRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_DeleteByPrefix_FractionalLimitRejectsPromise verifies that kv async delete by prefix fractional limit rejects its promise.
 func TestKVAsync_DeleteByPrefix_FractionalLimitRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1633,6 +1794,7 @@ func TestKVAsync_DeleteByPrefix_FractionalLimitRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_Stats_ResolvesSnapshot verifies that kv async stats resolves snapshot.
 func TestKVAsync_Stats_ResolvesSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -1677,6 +1839,7 @@ func TestKVAsync_Stats_ResolvesSnapshot(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_Stats_NullsUnavailableOptionalFields verifies that kv async stats nulls unavailable optional fields.
 func TestKVAsync_Stats_NullsUnavailableOptionalFields(t *testing.T) {
 	t.Parallel()
 
@@ -1706,6 +1869,7 @@ func TestKVAsync_Stats_NullsUnavailableOptionalFields(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ReportStats_ResolvesAndEmitsMetrics verifies that kv async report stats resolves and emits metrics.
 func TestKVAsync_ReportStats_ResolvesAndEmitsMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -1762,6 +1926,7 @@ func TestKVAsync_ReportStats_ResolvesAndEmitsMetrics(t *testing.T) {
 	assert.Zero(t, metricHits[metricKVDiskSizeBytes])
 }
 
+// TestKVAsync_ReportStats_MetricsUnavailable_RejectsPromise verifies that kv async report stats metrics unavailable kv async report stats metrics unavailable rejects its promise.
 func TestKVAsync_ReportStats_MetricsUnavailable_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -1787,6 +1952,7 @@ func TestKVAsync_ReportStats_MetricsUnavailable_RejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_OperationMetrics_EmitsExpectedSamples verifies that kv async operation metrics emits expected samples.
 func TestKVAsync_OperationMetrics_EmitsExpectedSamples(t *testing.T) {
 	t.Parallel()
 
@@ -1878,6 +2044,7 @@ func TestKVAsync_OperationMetrics_EmitsExpectedSamples(t *testing.T) {
 	assert.Zero(t, emptyZero, "empty-result metric should be emitted only for allocation operations")
 }
 
+// TestKVAsync_OperationMetrics_EmitsAsyncInFlight verifies that kv async operation metrics emits async in flight.
 func TestKVAsync_OperationMetrics_EmitsAsyncInFlight(t *testing.T) {
 	t.Parallel()
 
@@ -1944,6 +2111,7 @@ func TestKVAsync_OperationMetrics_EmitsAsyncInFlight(t *testing.T) {
 	assert.ElementsMatch(t, []float64{1, 0}, values)
 }
 
+// TestKVAsync_OperationMetrics_EmitsClosedHandlePreflightError verifies that kv async operation metrics emits closed handle preflight error.
 func TestKVAsync_OperationMetrics_EmitsClosedHandlePreflightError(t *testing.T) {
 	t.Parallel()
 
@@ -1968,6 +2136,7 @@ func TestKVAsync_OperationMetrics_EmitsClosedHandlePreflightError(t *testing.T) 
 	assertOperationMetricsError(t, samples, opGet, StoreClosedError)
 }
 
+// TestKVAsync_OperationMetrics_EmitsDatabaseNotOpenPreflightError verifies that kv async operation metrics emits database not open preflight error.
 func TestKVAsync_OperationMetrics_EmitsDatabaseNotOpenPreflightError(t *testing.T) {
 	t.Parallel()
 
@@ -1990,6 +2159,229 @@ func TestKVAsync_OperationMetrics_EmitsDatabaseNotOpenPreflightError(t *testing.
 	assertOperationMetricsError(t, samples, opGet, DatabaseNotOpenError)
 }
 
+// TestKVAsync_ContextCanceledPreflightRejectsPromise verifies that kv async context canceled preflight rejects its promise.
+func TestKVAsync_ContextCanceledPreflightRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	kv := NewKV(
+		contextOverrideVU{
+			VU:  runtime.VU,
+			ctx: ctx,
+		},
+		store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+	)
+
+	runKVScript(t, runtime, kv, `
+		__kv.get("preflight:canceled")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "OperationCanceledError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+// TestAsyncOperation_ContextCanceledRejectsOnceAndDecrementsInFlight verifies that async operation context canceled rejects once and decrements in flight.
+func TestAsyncOperation_ContextCanceledRejectsOnceAndDecrementsInFlight(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		canceledGetStore{
+			Store: store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+		},
+	)
+
+	samples := attachOperationMetricsForTest(t, runtime, kv)
+
+	originalRegisterCallback := runtime.VU.RegisterCallbackField
+
+	var (
+		registerCount atomic.Int64
+		enqueueCount  atomic.Int64
+	)
+
+	runtime.VU.RegisterCallbackField = func() func(func() error) {
+		registerCount.Add(1)
+
+		enqueue := originalRegisterCallback()
+
+		return func(f func() error) {
+			enqueueCount.Add(1)
+			enqueue(f)
+		}
+	}
+
+	runKVScript(t, runtime, kv, `
+		let rejectionCount = 0;
+
+		__kv.get("cancelled:once")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				rejectionCount += 1;
+				if (rejectionCount !== 1) {
+					throw new Error("promise rejected more than once");
+				}
+				if (!err || err.name !== "OperationCanceledError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+
+	metricHits := make(map[string]int)
+
+	var asyncInFlightValues []float64
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			switch sample.Metric.Name {
+			case metricKVAsyncInFlight:
+				metricHits[metricKVAsyncInFlight]++
+
+				asyncInFlightValues = append(asyncInFlightValues, sample.Value)
+			case metricKVOperationsTotal:
+				metricHits[metricKVOperationsTotal]++
+
+				op, hasOp := sample.Tags.Get(tagOp)
+				require.True(t, hasOp)
+				assert.Equal(t, opGet, op)
+
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+			case metricKVOperationFailed:
+				metricHits[metricKVOperationFailed]++
+
+				op, hasOp := sample.Tags.Get(tagOp)
+				require.True(t, hasOp)
+				assert.Equal(t, opGet, op)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+			case metricKVErrorsTotal:
+				metricHits[metricKVErrorsTotal]++
+
+				errorType, hasErrorType := sample.Tags.Get(tagErrorType)
+				require.True(t, hasErrorType)
+				assert.Equal(t, string(OperationCanceledError), errorType)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+			}
+		}
+	}
+
+	assert.EqualValues(t, 1, registerCount.Load(), "RegisterCallback must be called exactly once")
+	assert.EqualValues(t, 1, enqueueCount.Load(), "enqueue callback must be called exactly once")
+	assert.Equal(t, 1, metricHits[metricKVOperationsTotal])
+	assert.Equal(t, 1, metricHits[metricKVOperationFailed])
+	assert.Equal(t, 1, metricHits[metricKVErrorsTotal])
+	require.Len(t, asyncInFlightValues, 2)
+	assert.ElementsMatch(t, []float64{1, 0}, asyncInFlightValues)
+}
+
+// TestOperationMetrics_ContextCanceledUsesOperationCanceledError verifies that operation metrics context canceled uses operation canceled error.
+func TestOperationMetrics_ContextCanceledUsesOperationCanceledError(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(
+		runtime.VU,
+		canceledGetStore{
+			Store: store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+		},
+	)
+
+	samples := attachOperationMetricsForTest(t, runtime, kv)
+
+	runKVScript(t, runtime, kv, `
+		__kv.get("cancelled:operation")
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "OperationCanceledError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+
+	metricHits := make(map[string]int)
+
+	var asyncInFlightValues []float64
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			switch sample.Metric.Name {
+			case metricKVAsyncInFlight:
+				metricHits[metricKVAsyncInFlight]++
+
+				asyncInFlightValues = append(asyncInFlightValues, sample.Value)
+
+				_, hasOp := sample.Tags.Get(tagOp)
+				assert.False(t, hasOp, "async in-flight metric must not carry per-operation labels")
+			case metricKVOperationsTotal:
+				metricHits[metricKVOperationsTotal]++
+
+				op, hasOp := sample.Tags.Get(tagOp)
+				require.True(t, hasOp)
+				assert.Equal(t, opGet, op)
+
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+			case metricKVOperationDuration:
+				metricHits[metricKVOperationDuration]++
+
+				op, hasOp := sample.Tags.Get(tagOp)
+				require.True(t, hasOp)
+				assert.Equal(t, opGet, op)
+
+				status, hasStatus := sample.Tags.Get(tagStatus)
+				require.True(t, hasStatus)
+				assert.Equal(t, statusError, status)
+			case metricKVOperationFailed:
+				metricHits[metricKVOperationFailed]++
+
+				op, hasOp := sample.Tags.Get(tagOp)
+				require.True(t, hasOp)
+				assert.Equal(t, opGet, op)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+			case metricKVErrorsTotal:
+				metricHits[metricKVErrorsTotal]++
+
+				op, hasOp := sample.Tags.Get(tagOp)
+				require.True(t, hasOp)
+				assert.Equal(t, opGet, op)
+
+				errorType, hasErrorType := sample.Tags.Get(tagErrorType)
+				require.True(t, hasErrorType)
+				assert.Equal(t, string(OperationCanceledError), errorType)
+				assert.InDelta(t, 1.0, sample.Value, 1e-9)
+			case metricKVEmptyResult:
+				metricHits[metricKVEmptyResult]++
+			}
+		}
+	}
+
+	assert.Equal(t, 1, metricHits[metricKVOperationsTotal])
+	assert.Equal(t, 1, metricHits[metricKVOperationDuration])
+	assert.Equal(t, 1, metricHits[metricKVOperationFailed])
+	assert.Equal(t, 1, metricHits[metricKVErrorsTotal])
+	assert.Zero(t, metricHits[metricKVEmptyResult])
+	require.Len(t, asyncInFlightValues, 2)
+	assert.ElementsMatch(t, []float64{1, 0}, asyncInFlightValues)
+}
+
+// TestKVAsync_OperationMetrics_EmitsPanicAsUnknownError verifies that kv async operation metrics emits panic as unknown error.
 func TestKVAsync_OperationMetrics_EmitsPanicAsUnknownError(t *testing.T) {
 	t.Parallel()
 
@@ -2079,6 +2471,7 @@ func TestKVAsync_OperationMetrics_EmitsPanicAsUnknownError(t *testing.T) {
 	assert.True(t, seenUnknownError)
 }
 
+// TestKVAsync_OperationMetrics_EmitsValidationError verifies that kv async operation metrics emits validation error.
 func TestKVAsync_OperationMetrics_EmitsValidationError(t *testing.T) {
 	t.Parallel()
 
@@ -2192,6 +2585,7 @@ func TestKVAsync_OperationMetrics_EmitsValidationError(t *testing.T) {
 	assert.True(t, seenErrorsTotal)
 }
 
+// TestKVAsync_SetMany_OperationMetrics verifies that kv async set many operation metrics.
 func TestKVAsync_SetMany_OperationMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -2275,6 +2669,7 @@ func TestKVAsync_SetMany_OperationMetrics(t *testing.T) {
 	assert.True(t, seenFailed)
 }
 
+// TestKVAsync_GetMany_OperationMetrics verifies that kv async get many operation metrics.
 func TestKVAsync_GetMany_OperationMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -2366,6 +2761,7 @@ func TestKVAsync_GetMany_OperationMetrics(t *testing.T) {
 	assert.True(t, seenFailed)
 }
 
+// TestKVAsync_DeleteMany_OperationMetrics verifies that kv async delete many operation metrics.
 func TestKVAsync_DeleteMany_OperationMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -2450,6 +2846,7 @@ func TestKVAsync_DeleteMany_OperationMetrics(t *testing.T) {
 	assert.True(t, seenFailed)
 }
 
+// TestKVAsync_DeleteByPrefix_OperationMetrics verifies that kv async delete by prefix operation metrics.
 func TestKVAsync_DeleteByPrefix_OperationMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -2535,6 +2932,7 @@ func TestKVAsync_DeleteByPrefix_OperationMetrics(t *testing.T) {
 	assert.True(t, seenFailed)
 }
 
+// TestKVAsync_ListKeys_OperationMetrics verifies that kv async list keys operation metrics.
 func TestKVAsync_ListKeys_OperationMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -2619,6 +3017,7 @@ func TestKVAsync_ListKeys_OperationMetrics(t *testing.T) {
 	assert.True(t, seenFailed)
 }
 
+// TestKVAsync_ScanKeys_OperationMetrics verifies that kv async scan keys operation metrics.
 func TestKVAsync_ScanKeys_OperationMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -2703,6 +3102,7 @@ func TestKVAsync_ScanKeys_OperationMetrics(t *testing.T) {
 	assert.True(t, seenFailed)
 }
 
+// TestKVAsync_RandomKeys_OperationMetrics verifies that kv async random keys operation metrics.
 func TestKVAsync_RandomKeys_OperationMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -2793,6 +3193,7 @@ func TestKVAsync_RandomKeys_OperationMetrics(t *testing.T) {
 	assert.True(t, seenEmpty, "randomKeys should emit empty-result metric samples")
 }
 
+// TestKVAsync_RandomKeys_EmptyResultMetrics verifies that kv async random keys empty result metrics.
 func TestKVAsync_RandomKeys_EmptyResultMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -2879,6 +3280,7 @@ func TestKVAsync_RandomKeys_EmptyResultMetrics(t *testing.T) {
 	assert.True(t, seenEmpty, "empty randomKeys result should emit empty-result metrics")
 }
 
+// TestKVAsync_RandomKeys_InvalidOptionsMetrics verifies that kv async random keys invalid options metrics.
 func TestKVAsync_RandomKeys_InvalidOptionsMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -2982,6 +3384,7 @@ func TestKVAsync_RandomKeys_InvalidOptionsMetrics(t *testing.T) {
 	assert.False(t, seenFailedZero, "failed randomKeys should not emit failed=0 samples")
 }
 
+// TestKVAsync_DeleteByPrefix_InvalidOptionsMetrics verifies that kv async delete by prefix invalid options metrics.
 func TestKVAsync_DeleteByPrefix_InvalidOptionsMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -3085,6 +3488,7 @@ func TestKVAsync_DeleteByPrefix_InvalidOptionsMetrics(t *testing.T) {
 	assert.False(t, seenFailedZero, "failed deleteByPrefix should not emit failed=0 samples")
 }
 
+// TestKVAsync_ListKeys_InvalidShapeMetrics verifies that kv async list keys invalid shape metrics.
 func TestKVAsync_ListKeys_InvalidShapeMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -3188,6 +3592,7 @@ func TestKVAsync_ListKeys_InvalidShapeMetrics(t *testing.T) {
 	assert.False(t, seenFailedZero, "failed listKeys should not emit failed=0 samples")
 }
 
+// TestKVAsync_ScanKeys_InvalidShapeMetrics verifies that kv async scan keys invalid shape metrics.
 func TestKVAsync_ScanKeys_InvalidShapeMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -3291,6 +3696,7 @@ func TestKVAsync_ScanKeys_InvalidShapeMetrics(t *testing.T) {
 	assert.False(t, seenFailedZero, "failed scanKeys should not emit failed=0 samples")
 }
 
+// TestKVAsync_ScanKeys_InvalidCursorMetrics verifies that kv async scan keys invalid cursor metrics.
 func TestKVAsync_ScanKeys_InvalidCursorMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -3394,6 +3800,7 @@ func TestKVAsync_ScanKeys_InvalidCursorMetrics(t *testing.T) {
 	assert.False(t, seenFailedZero, "failed scanKeys should not emit failed=0 samples")
 }
 
+// TestKVAsync_DeleteMany_InvalidShapeMetrics verifies that kv async delete many invalid shape metrics.
 func TestKVAsync_DeleteMany_InvalidShapeMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -3497,6 +3904,7 @@ func TestKVAsync_DeleteMany_InvalidShapeMetrics(t *testing.T) {
 	assert.False(t, seenFailedZero, "failed deleteMany should not emit failed=0 samples")
 }
 
+// TestKVAsync_DeleteMany_EmptyKeyMetrics verifies that kv async delete many empty key metrics.
 func TestKVAsync_DeleteMany_EmptyKeyMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -3600,6 +4008,7 @@ func TestKVAsync_DeleteMany_EmptyKeyMetrics(t *testing.T) {
 	assert.False(t, seenFailedZero, "failed deleteMany should not emit failed=0 samples")
 }
 
+// TestKVAsync_GetMany_InvalidShapeMetrics verifies that kv async get many invalid shape metrics.
 func TestKVAsync_GetMany_InvalidShapeMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -3703,6 +4112,7 @@ func TestKVAsync_GetMany_InvalidShapeMetrics(t *testing.T) {
 	assert.False(t, seenFailedZero, "failed getMany should not emit failed=0 samples")
 }
 
+// TestKVAsync_SetMany_ValidationFailureMetrics verifies that kv async set many validation failure metrics.
 func TestKVAsync_SetMany_ValidationFailureMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -3806,6 +4216,7 @@ func TestKVAsync_SetMany_ValidationFailureMetrics(t *testing.T) {
 	assert.False(t, seenFailedZero, "failed setMany should not emit failed=0 samples")
 }
 
+// TestKVAsync_SetMany_SerializationFailureMetrics verifies that kv async set many serialization failure metrics.
 func TestKVAsync_SetMany_SerializationFailureMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -3906,6 +4317,7 @@ func TestKVAsync_SetMany_SerializationFailureMetrics(t *testing.T) {
 	assert.False(t, seenEmpty, "setMany should not emit empty-result metrics")
 }
 
+// TestKVAsync_ExportJSONL_ResolvesSummary verifies that kv async export jsonl resolves summary.
 func TestKVAsync_ExportJSONL_ResolvesSummary(t *testing.T) {
 	t.Parallel()
 
@@ -3945,6 +4357,7 @@ func TestKVAsync_ExportJSONL_ResolvesSummary(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ExportJSONL_InvalidShapeRejectsPromise verifies that kv async export jsonl invalid shape rejects its promise.
 func TestKVAsync_ExportJSONL_InvalidShapeRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -3964,6 +4377,7 @@ func TestKVAsync_ExportJSONL_InvalidShapeRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ExportJSONL_MissingFileNameRejectsPromise verifies that kv async export jsonl missing file name rejects its promise.
 func TestKVAsync_ExportJSONL_MissingFileNameRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -3983,6 +4397,7 @@ func TestKVAsync_ExportJSONL_MissingFileNameRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ExportJSONL_FractionalLimitRejectsPromise verifies that kv async export jsonl fractional limit rejects its promise.
 func TestKVAsync_ExportJSONL_FractionalLimitRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4002,6 +4417,7 @@ func TestKVAsync_ExportJSONL_FractionalLimitRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ExportJSONL_OperationMetrics verifies that kv async export jsonl operation metrics.
 func TestKVAsync_ExportJSONL_OperationMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -4089,6 +4505,7 @@ func TestKVAsync_ExportJSONL_OperationMetrics(t *testing.T) {
 	assert.True(t, seenFailed)
 }
 
+// TestKVAsync_ExportJSONL_InvalidOptionsMetrics verifies that kv async export jsonl invalid options metrics.
 func TestKVAsync_ExportJSONL_InvalidOptionsMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -4192,6 +4609,7 @@ func TestKVAsync_ExportJSONL_InvalidOptionsMetrics(t *testing.T) {
 	assert.False(t, seenFailedZero, "failed exportJSONL should not emit failed=0 samples")
 }
 
+// TestKVAsync_ImportJSONL_ResolvesSummary verifies that kv async import jsonl resolves summary.
 func TestKVAsync_ImportJSONL_ResolvesSummary(t *testing.T) {
 	t.Parallel()
 
@@ -4241,6 +4659,7 @@ func TestKVAsync_ImportJSONL_ResolvesSummary(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ImportJSONL_InvalidShapeRejectsPromise verifies that kv async import jsonl invalid shape rejects its promise.
 func TestKVAsync_ImportJSONL_InvalidShapeRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4260,6 +4679,7 @@ func TestKVAsync_ImportJSONL_InvalidShapeRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ImportJSONL_MissingFileNameRejectsPromise verifies that kv async import jsonl missing file name rejects its promise.
 func TestKVAsync_ImportJSONL_MissingFileNameRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4279,6 +4699,7 @@ func TestKVAsync_ImportJSONL_MissingFileNameRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ImportJSONL_FractionalLimitRejectsPromise verifies that kv async import jsonl fractional limit rejects its promise.
 func TestKVAsync_ImportJSONL_FractionalLimitRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4298,6 +4719,7 @@ func TestKVAsync_ImportJSONL_FractionalLimitRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ImportJSONL_FractionalBatchSizeRejectsPromise verifies that kv async import jsonl fractional batch size rejects its promise.
 func TestKVAsync_ImportJSONL_FractionalBatchSizeRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4317,6 +4739,7 @@ func TestKVAsync_ImportJSONL_FractionalBatchSizeRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ImportJSONL_FileNotFoundRejectsPromise verifies that kv async import jsonl file not found rejects its promise.
 func TestKVAsync_ImportJSONL_FileNotFoundRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4336,6 +4759,7 @@ func TestKVAsync_ImportJSONL_FileNotFoundRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ImportJSONL_MalformedJSONRejectsPromise verifies that kv async import jsonl malformed json rejects its promise.
 func TestKVAsync_ImportJSONL_MalformedJSONRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4391,6 +4815,7 @@ func TestKVAsync_ImportJSONL_MalformedJSONRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ImportJSONL_BlankLineRejectsPromise verifies that kv async import jsonl blank line rejects its promise.
 func TestKVAsync_ImportJSONL_BlankLineRejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4426,6 +4851,96 @@ func TestKVAsync_ImportJSONL_BlankLineRejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ImportJSONL_ContextCanceledDuringOperationRejectsPromise verifies that kv async import jsonl context canceled during operation rejects its promise.
+func TestKVAsync_ImportJSONL_ContextCanceledDuringOperationRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	backing := store.NewSerializedStore(
+		store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+		store.NewJSONSerializer(),
+	)
+
+	kv := NewKV(
+		contextOverrideVU{
+			VU:  runtime.VU,
+			ctx: ctx,
+		},
+		&cancelOnFirstSetManyStore{
+			Store:  backing,
+			cancel: cancel,
+		},
+	)
+
+	fileName := filepath.Join(t.TempDir(), "cancel-import.jsonl")
+	//nolint:forbidigo // test fixture creation requires file I/O.
+	require.NoError(t, os.WriteFile(fileName, []byte(
+		`{"key":"user:1","value":{"name":"Alice"}}`+"\n"+
+			`{"key":"user:2","value":{"name":"Bob"}}`+"\n",
+	), 0o644))
+	require.NoError(t, runtime.VU.Runtime().Set("fileName", fileName))
+
+	runKVScript(t, runtime, kv, `
+		__kv.importJSONL({ fileName: fileName, batchSize: 1 })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "OperationCanceledError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+// TestKVAsync_ImportCSV_ContextCanceledDuringOperationRejectsPromise verifies that kv async import csv context canceled during operation rejects its promise.
+func TestKVAsync_ImportCSV_ContextCanceledDuringOperationRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	backing := store.NewSerializedStore(
+		store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}),
+		store.NewJSONSerializer(),
+	)
+
+	kv := NewKV(
+		contextOverrideVU{
+			VU:  runtime.VU,
+			ctx: ctx,
+		},
+		&cancelOnFirstSetManyStore{
+			Store:  backing,
+			cancel: cancel,
+		},
+	)
+
+	fileName := filepath.Join(t.TempDir(), "cancel-import.csv")
+	//nolint:forbidigo // test fixture creation requires file I/O.
+	require.NoError(t, os.WriteFile(fileName, []byte(
+		"id,name\n"+
+			"user:1,Alice\n"+
+			"user:2,Bob\n",
+	), 0o644))
+	require.NoError(t, runtime.VU.Runtime().Set("fileName", fileName))
+
+	runKVScript(t, runtime, kv, `
+		__kv.importCSV({ fileName: fileName, keyColumn: "id", batchSize: 1 })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "OperationCanceledError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+// TestKVAsync_ImportJSONL_OperationMetrics verifies that kv async import jsonl operation metrics.
 func TestKVAsync_ImportJSONL_OperationMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -4514,6 +5029,7 @@ func TestKVAsync_ImportJSONL_OperationMetrics(t *testing.T) {
 	assert.True(t, seenFailed)
 }
 
+// TestKVAsync_ImportJSONL_InvalidOptionsMetrics verifies that kv async import jsonl invalid options metrics.
 func TestKVAsync_ImportJSONL_InvalidOptionsMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -4617,6 +5133,7 @@ func TestKVAsync_ImportJSONL_InvalidOptionsMetrics(t *testing.T) {
 	assert.False(t, seenFailedZero, "failed importJSONL should not emit failed=0 samples")
 }
 
+// TestKVAsync_AllOptionsMethods_InvalidOptionsType_RejectsPromise verifies that kv async all options methods invalid options type kv async all options methods invalid options type rejects its promise.
 func TestKVAsync_AllOptionsMethods_InvalidOptionsType_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4643,10 +5160,14 @@ func TestKVAsync_AllOptionsMethods_InvalidOptionsType_RejectsPromise(t *testing.
 			expectInvalidOptions(__kv.listKeys("bad"), "listKeys"),
 			expectInvalidOptions(__kv.randomKeys("bad"), "randomKeys"),
 			expectInvalidOptions(__kv.exportJSONL("bad"), "exportJSONL"),
+			expectInvalidOptions(__kv.exportCSV("bad"), "exportCSV"),
 			expectInvalidOptions(__kv.importJSONL("bad"), "importJSONL"),
+			expectInvalidOptions(__kv.validateJSONL("bad"), "validateJSONL"),
+			expectInvalidOptions(__kv.validateCSV("bad"), "validateCSV"),
 			expectInvalidOptions(__kv.deleteByPrefix("bad"), "deleteByPrefix"),
 			expectInvalidOptions(__kv.randomKey("bad"), "randomKey"),
 			expectInvalidOptions(__kv.count("bad"), "count"),
+			expectInvalidOptions(__kv.allocationStats("bad"), "allocationStats"),
 			expectInvalidOptions(__kv.backup("bad"), "backup"),
 			expectInvalidOptions(__kv.restore("bad"), "restore"),
 			expectInvalidOptions(__kv.compareAndSwapDetailed("k", null, "v", "bad"), "compareAndSwapDetailed"),
@@ -4655,6 +5176,7 @@ func TestKVAsync_AllOptionsMethods_InvalidOptionsType_RejectsPromise(t *testing.
 	`)
 }
 
+// TestKVAsync_AllOptionsMethods_InvalidOptionFieldType_RejectsPromise verifies that kv async all options methods invalid option field type kv async all options methods invalid option field type rejects its promise.
 func TestKVAsync_AllOptionsMethods_InvalidOptionFieldType_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4691,13 +5213,23 @@ func TestKVAsync_AllOptionsMethods_InvalidOptionFieldType_RejectsPromise(t *test
 			expectInvalidOptions(__kv.exportJSONL({ fileName: 100 }), "exportJSONL.fileName"),
 			expectInvalidOptions(__kv.exportJSONL({ fileName: "./x.jsonl", prefix: true }), "exportJSONL.prefix"),
 			expectInvalidOptions(__kv.exportJSONL({ fileName: "./x.jsonl", limit: "10" }), "exportJSONL.limit"),
+			expectInvalidOptions(__kv.exportCSV({ fileName: 100, columns: ["status"] }), "exportCSV.fileName"),
+			expectInvalidOptions(__kv.exportCSV({ fileName: "./x.csv", columns: "bad" }), "exportCSV.columns"),
+			expectInvalidOptions(
+				__kv.exportCSV({ fileName: "./x.csv", columns: ["status"], delimiter: 1 }),
+				"exportCSV.delimiter"
+			),
 			expectInvalidOptions(__kv.importJSONL({ fileName: 100 }), "importJSONL.fileName"),
 			expectInvalidOptions(__kv.importJSONL({ fileName: "./x.jsonl", limit: "10" }), "importJSONL.limit"),
 			expectInvalidOptions(__kv.importJSONL({ fileName: "./x.jsonl", batchSize: "10" }), "importJSONL.batchSize"),
+			expectInvalidOptions(__kv.validateJSONL({ fileName: 100 }), "validateJSONL.fileName"),
+			expectInvalidOptions(__kv.validateCSV({ fileName: 100 }), "validateCSV.fileName"),
+			expectInvalidOptions(__kv.validateCSV({ fileName: "./x.csv", delimiter: 1 }), "validateCSV.delimiter"),
 			expectInvalidOptions(__kv.deleteByPrefix({ prefix: true, limit: 1 }), "deleteByPrefix.prefix"),
 			expectInvalidOptions(__kv.deleteByPrefix({ prefix: "tmp:", limit: "10" }), "deleteByPrefix.limit"),
 			expectInvalidOptions(__kv.randomKey({ prefix: 7 }), "randomKey.prefix"),
 			expectInvalidOptions(__kv.count({ prefix: 7 }), "count.prefix"),
+			expectInvalidOptions(__kv.allocationStats({ prefix: 7 }), "allocationStats.prefix"),
 			expectInvalidOptions(__kv.backup({ fileName: 100 }), "backup.fileName"),
 			expectInvalidOptions(__kv.backup({ allowConcurrentWrites: "true" }), "backup.allowConcurrentWrites"),
 			expectInvalidOptions(__kv.restore({ fileName: 100 }), "restore.fileName"),
@@ -4715,6 +5247,7 @@ func TestKVAsync_AllOptionsMethods_InvalidOptionFieldType_RejectsPromise(t *test
 	`)
 }
 
+// TestKVAsync_KeyMethods_InvalidKeyType_RejectsPromise verifies that kv async key methods invalid key type kv async key methods invalid key type rejects its promise.
 func TestKVAsync_KeyMethods_InvalidKeyType_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4752,6 +5285,7 @@ func TestKVAsync_KeyMethods_InvalidKeyType_RejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_KeyMethods_EmptyKey_RejectsPromise verifies that kv async key methods empty key kv async key methods empty key rejects its promise.
 func TestKVAsync_KeyMethods_EmptyKey_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -4792,6 +5326,7 @@ func TestKVAsync_KeyMethods_EmptyKey_RejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_Set_Concurrent_NoRaceOrPanic verifies that kv async set concurrent no race or panic.
 func TestKVAsync_Set_Concurrent_NoRaceOrPanic(t *testing.T) {
 	t.Parallel()
 
@@ -4829,6 +5364,7 @@ func TestKVAsync_Set_Concurrent_NoRaceOrPanic(t *testing.T) {
 	assert.EqualValues(t, operations, size, "all concurrent writes must be persisted")
 }
 
+// TestKVAsync_PopRandom_ResolvesEntry verifies that kv async pop random resolves entry.
 func TestKVAsync_PopRandom_ResolvesEntry(t *testing.T) {
 	t.Parallel()
 
@@ -4852,6 +5388,7 @@ func TestKVAsync_PopRandom_ResolvesEntry(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_PopRandom_EmptyResolvesNull verifies that kv async pop random empty resolves null.
 func TestKVAsync_PopRandom_EmptyResolvesNull(t *testing.T) {
 	t.Parallel()
 
@@ -4868,6 +5405,7 @@ func TestKVAsync_PopRandom_EmptyResolvesNull(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ClaimRandom_ResolvesClaim verifies that kv async claim random resolves claim.
 func TestKVAsync_ClaimRandom_ResolvesClaim(t *testing.T) {
 	t.Parallel()
 
@@ -4900,6 +5438,7 @@ func TestKVAsync_ClaimRandom_ResolvesClaim(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ClaimRandom_EmptyResolvesNull verifies that kv async claim random empty resolves null.
 func TestKVAsync_ClaimRandom_EmptyResolvesNull(t *testing.T) {
 	t.Parallel()
 
@@ -4916,6 +5455,7 @@ func TestKVAsync_ClaimRandom_EmptyResolvesNull(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ReleaseClaim_ReturnsTrue verifies that kv async release claim returns true.
 func TestKVAsync_ReleaseClaim_ReturnsTrue(t *testing.T) {
 	t.Parallel()
 
@@ -4939,6 +5479,7 @@ func TestKVAsync_ReleaseClaim_ReturnsTrue(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_CompleteClaim_ReturnsTrue verifies that kv async complete claim returns true.
 func TestKVAsync_CompleteClaim_ReturnsTrue(t *testing.T) {
 	t.Parallel()
 
@@ -4968,6 +5509,7 @@ func TestKVAsync_CompleteClaim_ReturnsTrue(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ClaimKey_ResolvesClaim verifies that kv async claim key resolves claim.
 func TestKVAsync_ClaimKey_ResolvesClaim(t *testing.T) {
 	t.Parallel()
 
@@ -4988,6 +5530,7 @@ func TestKVAsync_ClaimKey_ResolvesClaim(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ClaimRandomMany_ResolvesClaims verifies that kv async claim random many resolves claims.
 func TestKVAsync_ClaimRandomMany_ResolvesClaims(t *testing.T) {
 	t.Parallel()
 
@@ -5012,6 +5555,7 @@ func TestKVAsync_ClaimRandomMany_ResolvesClaims(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_PopRandomMany_ResolvesEntries verifies that kv async pop random many resolves entries.
 func TestKVAsync_PopRandomMany_ResolvesEntries(t *testing.T) {
 	t.Parallel()
 
@@ -5036,6 +5580,7 @@ func TestKVAsync_PopRandomMany_ResolvesEntries(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_RenewClaim_ReturnsTrue verifies that kv async renew claim returns true.
 func TestKVAsync_RenewClaim_ReturnsTrue(t *testing.T) {
 	t.Parallel()
 
@@ -5067,6 +5612,267 @@ func TestKVAsync_RenewClaim_ReturnsTrue(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_ReleaseClaims_ReturnsPartialResult verifies that kv async release claims returns partial result.
+func TestKVAsync_ReleaseClaims_ReturnsPartialResult(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", "Oleg")
+			.then(() => __kv.claimRandom({ prefix: "user:", ttl: 30000 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing claim");
+				}
+				return __kv.releaseClaims([claim, claim]);
+			})
+			.then((result) => {
+				if (result.attempted !== 2) {
+					throw new Error("wrong attempted");
+				}
+				if (result.released !== 1) {
+					throw new Error("wrong released");
+				}
+				if (!Array.isArray(result.failed) || result.failed.length !== 1) {
+					throw new Error("wrong failed length");
+				}
+				if (result.failed[0].name !== "ClaimNotUpdated") {
+					throw new Error("wrong failure name");
+				}
+				if (result.failed[0].index !== 1) {
+					throw new Error("wrong failure index");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_CompleteClaims_ReturnsPartialResult verifies that kv async complete claims returns partial result.
+func TestKVAsync_CompleteClaims_ReturnsPartialResult(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", "Oleg")
+			.then(() => __kv.claimRandom({ prefix: "user:", ttl: 30000 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing claim");
+				}
+				return __kv.completeClaims([claim, claim], { deleteKey: true });
+			})
+			.then((result) => {
+				if (result.attempted !== 2) {
+					throw new Error("wrong attempted");
+				}
+				if (result.completed !== 1) {
+					throw new Error("wrong completed");
+				}
+				if (!Array.isArray(result.failed) || result.failed.length !== 1) {
+					throw new Error("wrong failed length");
+				}
+				if (result.failed[0].name !== "ClaimNotUpdated") {
+					throw new Error("wrong failure name");
+				}
+				if (result.failed[0].index !== 1) {
+					throw new Error("wrong failure index");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_RenewClaims_ReturnsPartialResult verifies that kv async renew claims returns partial result.
+func TestKVAsync_RenewClaims_ReturnsPartialResult(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("user:1", "Oleg")
+			.then(() => __kv.claimRandom({ prefix: "user:", ttl: 30000 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing claim");
+				}
+				const stale = {
+					id: claim.id,
+					key: claim.key,
+					token: claim.token + 1
+				};
+				return __kv.renewClaims([claim, stale], { ttl: 30000 });
+			})
+			.then((result) => {
+				if (result.attempted !== 2) {
+					throw new Error("wrong attempted");
+				}
+				if (result.renewed !== 1) {
+					throw new Error("wrong renewed");
+				}
+				if (!Array.isArray(result.failed) || result.failed.length !== 1) {
+					throw new Error("wrong failed length");
+				}
+				if (result.failed[0].name !== "ClaimNotUpdated") {
+					throw new Error("wrong failure name");
+				}
+				if (result.failed[0].index !== 1) {
+					throw new Error("wrong failure index");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_ClaimKeys_ReportsClaimedBusyMissing verifies that kv async claim keys reports claimed busy missing.
+func TestKVAsync_ClaimKeys_ReportsClaimedBusyMissing(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		let busyClaim;
+		let claimKeysResult;
+
+		__kv.setMany({
+			"users:1": "u1",
+			"users:2": "u2"
+		})
+			.then(() => __kv.claimKey("users:2", { ttl: 30000 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing busy claim");
+				}
+				busyClaim = claim;
+				return __kv.claimKeys(["users:1", "users:2", "users:3"], { ttl: 30000 });
+			})
+			.then((result) => {
+				claimKeysResult = result;
+				if (!Array.isArray(result.claimed) || result.claimed.length !== 1) {
+					throw new Error("wrong claimed length");
+				}
+				if (!Array.isArray(result.busy) || result.busy.length !== 1 || result.busy[0] !== "users:2") {
+					throw new Error("wrong busy payload");
+				}
+				if (!Array.isArray(result.missing) || result.missing.length !== 1 || result.missing[0] !== "users:3") {
+					throw new Error("wrong missing payload");
+				}
+				return __kv.releaseClaim(busyClaim);
+			})
+			.then((releasedBusy) => {
+				if (releasedBusy !== true) {
+					throw new Error("busy claim must be released");
+				}
+				return Promise.all(claimKeysResult.claimed.map((claim) => __kv.releaseClaim(claim)));
+			});
+	`)
+}
+
+// TestKVAsync_ClaimKeys_AllOrNothingReleasesPartialClaims verifies that kv async claim keys all or nothing releases partial claims.
+func TestKVAsync_ClaimKeys_AllOrNothingReleasesPartialClaims(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		let followUpClaim;
+		let untouchedClaim;
+
+		__kv.setMany({
+			"users:1": "u1",
+			"users:2": "u2"
+		})
+			.then(() => __kv.claimKeys(["users:1", "users:missing", "users:2"], {
+				ttl: 30000,
+				allOrNothing: true
+			}))
+			.then((result) => {
+				if (!Array.isArray(result.claimed) || result.claimed.length !== 0) {
+					throw new Error("claimed must be empty when allOrNothing fails");
+				}
+				if (!Array.isArray(result.missing) || result.missing.length !== 1) {
+					throw new Error("missing must include unmatched key");
+				}
+				if (result.missing[0] !== "users:missing") {
+					throw new Error("missing must preserve first failing key");
+				}
+				return __kv.claimKey("users:2", { ttl: 30000 });
+			})
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("post-failure keys must remain claimable");
+				}
+				if (claim.token !== 2) {
+					throw new Error("allOrNothing must stop after first missing/busy key");
+				}
+				untouchedClaim = claim;
+				return __kv.claimKey("users:1", { ttl: 30000 });
+			})
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("allOrNothing rollback must release claimed keys");
+				}
+				followUpClaim = claim;
+				return Promise.all([
+					__kv.releaseClaim(untouchedClaim),
+					__kv.releaseClaim(followUpClaim)
+				]);
+			})
+			.then((released) => {
+				if (!Array.isArray(released) || released.length !== 2) {
+					throw new Error("release results must contain both follow-up claims");
+				}
+				if (released[0] !== true || released[1] !== true) {
+					throw new Error("follow-up claim must be releasable");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_BatchClaimLifecycle_InvalidPayloadRejectsPromise verifies that kv async batch claim lifecycle invalid payload rejects its promise.
+func TestKVAsync_BatchClaimLifecycle_InvalidPayloadRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		function expectInvalidOptions(promise, label) {
+			return promise
+				.then(() => {
+					throw new Error(label + ": expected rejection");
+				})
+				.catch((err) => {
+					if (!err || err.name !== "InvalidOptionsError") {
+						throw new Error(label + ": unexpected error class: " + String(err && err.name));
+					}
+				});
+		}
+
+		Promise.all([
+			expectInvalidOptions(__kv.releaseClaims(null), "releaseClaims.claims"),
+			expectInvalidOptions(__kv.releaseClaims("bad"), "releaseClaims.claims.type"),
+			expectInvalidOptions(__kv.releaseClaims([{}]), "releaseClaims.claims.item"),
+			expectInvalidOptions(__kv.completeClaims("bad"), "completeClaims.claims"),
+			expectInvalidOptions(
+				__kv.completeClaims([{ id: "c", key: "k", token: 1 }], "bad"),
+				"completeClaims.options"
+			),
+			expectInvalidOptions(__kv.renewClaims([{ id: "c", key: "k", token: 1 }], {}), "renewClaims.options.ttl"),
+			expectInvalidOptions(__kv.claimKeys(null), "claimKeys.keys"),
+			expectInvalidOptions(__kv.claimKeys("bad"), "claimKeys.keys.type"),
+			expectInvalidOptions(__kv.claimKeys([""], {}), "claimKeys.keys.empty"),
+			expectInvalidOptions(__kv.claimKeys(["users:1", "users:1"], {}), "claimKeys.keys.duplicate"),
+			expectInvalidOptions(__kv.claimKeys(["users:1"], { ttl: 0 }), "claimKeys.options.ttl"),
+			expectInvalidOptions(__kv.claimKeys(["users:1"], "bad"), "claimKeys.options")
+		]);
+	`)
+}
+
+// TestKVAsync_Claim_InvalidOptions_RejectsPromise verifies that kv async claim invalid options kv async claim invalid options rejects its promise.
 func TestKVAsync_Claim_InvalidOptions_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -5113,6 +5919,7 @@ func TestKVAsync_Claim_InvalidOptions_RejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_IncrementBy_FractionalDelta_RejectsPromise verifies that kv async increment by fractional delta kv async increment by fractional delta rejects its promise.
 func TestKVAsync_IncrementBy_FractionalDelta_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -5132,6 +5939,7 @@ func TestKVAsync_IncrementBy_FractionalDelta_RejectsPromise(t *testing.T) {
 	`)
 }
 
+// TestKVAsync_Scan_FractionalLimit_RejectsPromise verifies that kv async scan fractional limit kv async scan fractional limit rejects its promise.
 func TestKVAsync_Scan_FractionalLimit_RejectsPromise(t *testing.T) {
 	t.Parallel()
 
@@ -5151,6 +5959,7 @@ func TestKVAsync_Scan_FractionalLimit_RejectsPromise(t *testing.T) {
 	`)
 }
 
+// runKVScript runs kv script.
 func runKVScript(t *testing.T, runtime *modulestest.Runtime, kv *KV, script string) {
 	t.Helper()
 
@@ -5160,6 +5969,7 @@ func runKVScript(t *testing.T, runtime *modulestest.Runtime, kv *KV, script stri
 	require.NoError(t, err)
 }
 
+// attachOperationMetricsForTest attaches operation metrics for test for tests.
 func attachOperationMetricsForTest(t *testing.T, runtime *modulestest.Runtime, kv *KV) chan k6metrics.SampleContainer {
 	t.Helper()
 
@@ -5186,6 +5996,7 @@ func attachOperationMetricsForTest(t *testing.T, runtime *modulestest.Runtime, k
 	return samples
 }
 
+// assertOperationMetricsError asserts operation metrics error.
 func assertOperationMetricsError(
 	t *testing.T,
 	samples chan k6metrics.SampleContainer,
@@ -5251,21 +6062,92 @@ func assertOperationMetricsError(
 	assert.Zero(t, metricHits[metricKVEmptyResult])
 }
 
+// panicGetStore is a test double that stubs panic get store behavior.
 type panicGetStore struct {
 	store.Store
 }
 
+// panicGetStore implements Get for panic get store test scenarios.
 func (s panicGetStore) Get(_ string) (any, error) {
 	panic("boom")
 }
 
+// canceledGetStore is a test double that stubs canceled get store behavior.
+type canceledGetStore struct {
+	store.Store
+}
+
+// canceledGetStore implements Get for canceled get store test scenarios.
+func (s canceledGetStore) Get(_ string) (any, error) {
+	return nil, context.Canceled
+}
+
+// contextOverrideVU is a test VU wrapper for context override vu tests.
+type contextOverrideVU struct {
+	modules.VU
+	// ctx overrides the context returned by contextOverrideVU.
+	ctx context.Context
+}
+
+// contextOverrideVU returns the overridden context for context override vu.
+func (v contextOverrideVU) Context() context.Context {
+	return v.ctx
+}
+
+// cancelOnFirstSetManyStore is a test double that stubs cancel on first set many store behavior.
+type cancelOnFirstSetManyStore struct {
+	store.Store
+	// cancel cancels the test context from cancelOnFirstSetManyStore.
+	cancel context.CancelFunc
+	// alreadyFired tracks whether cancelOnFirstSetManyStore already triggered cancellation.
+	alreadyFired atomic.Bool
+}
+
+// cancelOnFirstSetManyStore implements SetMany for cancel on first set many store test scenarios.
+func (s *cancelOnFirstSetManyStore) SetMany(entries []store.Entry) (int64, error) {
+	if s.cancel != nil && s.alreadyFired.CompareAndSwap(false, true) {
+		s.cancel()
+	}
+
+	return s.Store.SetMany(entries)
+}
+
+// closeCountingStore is a test double that stubs close counting store behavior.
 type closeCountingStore struct {
 	store.Store
+	// closeCalls records close invocations for close counting store.
 	closeCalls atomic.Int64
 }
 
+// closeCountingStore implements Close for close counting store test scenarios.
 func (s *closeCountingStore) Close() error {
 	s.closeCalls.Add(1)
 
 	return s.Store.Close()
+}
+
+// blockingGetStore is a test double that stubs blocking get store behavior.
+type blockingGetStore struct {
+	store.Store
+	// started signals when blockingGetStore begins waiting in Get.
+	started chan struct{}
+	// unblock unblocks blockingGetStore when closed.
+	unblock chan struct{}
+}
+
+// blockingGetStore implements Get for blocking get store test scenarios.
+func (s *blockingGetStore) Get(key string) (any, error) {
+	if s.started != nil {
+		select {
+		case <-s.started:
+		default:
+			close(s.started)
+		}
+	}
+
+	if s.unblock != nil {
+		<-s.unblock
+	}
+
+	return s.Store.Get(key)
 }

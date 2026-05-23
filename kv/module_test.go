@@ -14,10 +14,12 @@ import (
 	k6metrics "go.k6.io/k6/metrics"
 )
 
+// initlessVU is a test VU wrapper for initless vu tests.
 type initlessVU struct {
 	modules.VU
 }
 
+// initlessVU.InitEnv implements InitEnv for initless vu test scenarios.
 func (v initlessVU) InitEnv() *k6common.InitEnvironment {
 	return nil
 }
@@ -117,6 +119,7 @@ func TestOpenKV_ConcurrentInitializationSharesStore(t *testing.T) {
 	})
 }
 
+// TestOpenKV_RejectsOutsideInitContext verifies that open kv rejects outside init context.
 func TestOpenKV_RejectsOutsideInitContext(t *testing.T) {
 	t.Parallel()
 
@@ -221,6 +224,7 @@ func TestOpenKV_AllowsEquivalentDiskPaths(t *testing.T) {
 	})
 }
 
+// TestOpenKV_MemoryPathDoesNotCauseConflict verifies that open kv memory path does not cause conflict.
 func TestOpenKV_MemoryPathDoesNotCauseConflict(t *testing.T) {
 	t.Parallel()
 
@@ -250,6 +254,7 @@ func TestOpenKV_MemoryPathDoesNotCauseConflict(t *testing.T) {
 	})
 }
 
+// TestOpenKV_DiskMemoryOptionsDoNotCauseConflict verifies that open kv disk memory options do not cause conflict.
 func TestOpenKV_DiskMemoryOptionsDoNotCauseConflict(t *testing.T) {
 	t.Parallel()
 
@@ -339,6 +344,7 @@ func TestOpenKV_ClearsStoreWhenStateMetricsInitFails(t *testing.T) {
 	require.Nil(t, moduleInstance.kv, "KV handle must not be created on metric init failure")
 }
 
+// TestOpenKV_InitializesOperationMetricsWhenEnabled verifies that open kv initializes operation metrics when enabled.
 func TestOpenKV_InitializesOperationMetricsWhenEnabled(t *testing.T) {
 	t.Parallel()
 
@@ -365,6 +371,7 @@ func TestOpenKV_InitializesOperationMetricsWhenEnabled(t *testing.T) {
 	require.NotNil(t, rootModule.operationMetrics, "root module must cache operation metrics emitter")
 }
 
+// TestOpenKV_RejectsConflictingMetricsOperationsOption verifies that open kv rejects conflicting metrics operations option.
 func TestOpenKV_RejectsConflictingMetricsOperationsOption(t *testing.T) {
 	t.Parallel()
 
@@ -396,6 +403,7 @@ func TestOpenKV_RejectsConflictingMetricsOperationsOption(t *testing.T) {
 	})
 }
 
+// TestOpenKV_ClearsStoreWhenOperationMetricsInitFails verifies that open kv clears store when operation metrics init fails.
 func TestOpenKV_ClearsStoreWhenOperationMetricsInitFails(t *testing.T) {
 	t.Parallel()
 
@@ -424,6 +432,7 @@ func TestOpenKV_ClearsStoreWhenOperationMetricsInitFails(t *testing.T) {
 	require.Nil(t, moduleInstance.kv, "KV handle must not be created on metric init failure")
 }
 
+// TestOpenKV_RejectsMetricsBooleanShortcut verifies that open kv rejects metrics boolean shortcut.
 func TestOpenKV_RejectsMetricsBooleanShortcut(t *testing.T) {
 	t.Parallel()
 

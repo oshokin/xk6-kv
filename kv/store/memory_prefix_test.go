@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestMemoryStore_DeleteByPrefix_RejectsEmptyPrefix verifies that memory store delete by prefix rejects empty prefix.
 func TestMemoryStore_DeleteByPrefix_RejectsEmptyPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -25,6 +26,7 @@ func TestMemoryStore_DeleteByPrefix_RejectsEmptyPrefix(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_DeleteByPrefix_RejectsInvalidLimit verifies that memory store delete by prefix rejects invalid limit.
 func TestMemoryStore_DeleteByPrefix_RejectsInvalidLimit(t *testing.T) {
 	t.Parallel()
 
@@ -44,6 +46,7 @@ func TestMemoryStore_DeleteByPrefix_RejectsInvalidLimit(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_DeleteByPrefix_DeletesLimitedBatchAndReportsNotDone verifies that memory store delete by prefix deletes limited batch and reports not done.
 func TestMemoryStore_DeleteByPrefix_DeletesLimitedBatchAndReportsNotDone(t *testing.T) {
 	t.Parallel()
 
@@ -77,6 +80,7 @@ func TestMemoryStore_DeleteByPrefix_DeletesLimitedBatchAndReportsNotDone(t *test
 	}
 }
 
+// TestMemoryStore_DeleteByPrefix_RepeatedCallsReportDone verifies that memory store delete by prefix repeated calls report done.
 func TestMemoryStore_DeleteByPrefix_RepeatedCallsReportDone(t *testing.T) {
 	t.Parallel()
 
@@ -111,6 +115,7 @@ func TestMemoryStore_DeleteByPrefix_RepeatedCallsReportDone(t *testing.T) {
 	}
 }
 
+// TestMemoryStore_DeleteByPrefix_DoesNotDeleteOtherPrefixes verifies that memory store delete by prefix does not delete other prefixes.
 func TestMemoryStore_DeleteByPrefix_DoesNotDeleteOtherPrefixes(t *testing.T) {
 	t.Parallel()
 
@@ -138,6 +143,7 @@ func TestMemoryStore_DeleteByPrefix_DoesNotDeleteOtherPrefixes(t *testing.T) {
 	assert.True(t, orderExists)
 }
 
+// TestMemoryStore_DeleteByPrefix_CleansClaims verifies that memory store delete by prefix cleans claims.
 func TestMemoryStore_DeleteByPrefix_CleansClaims(t *testing.T) {
 	t.Parallel()
 
@@ -166,6 +172,7 @@ func TestMemoryStore_DeleteByPrefix_CleansClaims(t *testing.T) {
 	assert.False(t, released)
 }
 
+// TestMemoryStore_DeleteByPrefix_UpdatesTracking verifies that memory store delete by prefix updates tracking.
 func TestMemoryStore_DeleteByPrefix_UpdatesTracking(t *testing.T) {
 	t.Parallel()
 

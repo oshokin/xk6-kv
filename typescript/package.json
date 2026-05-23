@@ -1,9 +1,10 @@
 {
-  "name": "my-k6-project",
-  "description": "Local starter example for xk6-kv TypeScript usage (not published package).",
+  "name": "xk6-kv-typescript-smoke",
+  "description": "Private TypeScript smoke tests for xk6-kv declarations.",
   "version": "0.0.1",
   "private": true,
   "scripts": {
+    "test": "npm run typecheck",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

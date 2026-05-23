@@ -960,6 +960,7 @@ func mustClearStore(t *testing.T, store Store) {
 	require.NoError(t, store.Clear(), "Clear() must succeed")
 }
 
+// totalKeysInStore is a test helper for total keys in store.
 func totalKeysInStore(store *MemoryStore) int {
 	var total int
 
@@ -972,6 +973,7 @@ func totalKeysInStore(store *MemoryStore) int {
 	return total
 }
 
+// totalTrackedKeys is a test helper for total tracked keys.
 func totalTrackedKeys(store *MemoryStore) int {
 	var total int
 
@@ -984,6 +986,7 @@ func totalTrackedKeys(store *MemoryStore) int {
 	return total
 }
 
+// keyTrackedInStore is a test helper for key tracked in store.
 func keyTrackedInStore(store *MemoryStore, key string) bool {
 	shard := store.getShardByKey(key)
 

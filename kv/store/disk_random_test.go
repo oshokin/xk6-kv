@@ -169,6 +169,7 @@ func TestDiskStore_RandomKey_WithPrefix_TrackingDisabled(t *testing.T) {
 	assert.Empty(t, key, "no-match prefix must return empty key")
 }
 
+// TestDiskStore_RandomKeys_EmptyStore_ReturnsEmptySlice verifies that disk store random keys empty store returns empty slice.
 func TestDiskStore_RandomKeys_EmptyStore_ReturnsEmptySlice(t *testing.T) {
 	t.Parallel()
 
@@ -194,6 +195,7 @@ func TestDiskStore_RandomKeys_EmptyStore_ReturnsEmptySlice(t *testing.T) {
 	}
 }
 
+// TestDiskStore_RandomKeys_CountAboveMaxReturnsError verifies that disk store random keys count above max returns error.
 func TestDiskStore_RandomKeys_CountAboveMaxReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -215,6 +217,7 @@ func TestDiskStore_RandomKeys_CountAboveMaxReturnsError(t *testing.T) {
 	}
 }
 
+// TestDiskStore_RandomKeys_PrefixFilter verifies that disk store random keys prefix filter.
 func TestDiskStore_RandomKeys_PrefixFilter(t *testing.T) {
 	t.Parallel()
 
@@ -244,6 +247,7 @@ func TestDiskStore_RandomKeys_PrefixFilter(t *testing.T) {
 	}
 }
 
+// TestDiskStore_RandomKeys_UniqueNoDuplicates verifies that disk store random keys unique no duplicates.
 func TestDiskStore_RandomKeys_UniqueNoDuplicates(t *testing.T) {
 	t.Parallel()
 
@@ -273,6 +277,7 @@ func TestDiskStore_RandomKeys_UniqueNoDuplicates(t *testing.T) {
 	}
 }
 
+// TestDiskStore_RandomKeys_UniqueCountLargerThanAvailableReturnsAll verifies that disk store random keys unique count larger than available returns all.
 func TestDiskStore_RandomKeys_UniqueCountLargerThanAvailableReturnsAll(t *testing.T) {
 	t.Parallel()
 
@@ -301,6 +306,7 @@ func TestDiskStore_RandomKeys_UniqueCountLargerThanAvailableReturnsAll(t *testin
 	}
 }
 
+// TestDiskStore_RandomKeys_NonUniqueSingleCandidateRepeats verifies that disk store random keys non unique single candidate repeats.
 func TestDiskStore_RandomKeys_NonUniqueSingleCandidateRepeats(t *testing.T) {
 	t.Parallel()
 
@@ -324,6 +330,7 @@ func TestDiskStore_RandomKeys_NonUniqueSingleCandidateRepeats(t *testing.T) {
 	}
 }
 
+// TestDiskStore_RandomKeys_ResultSubsetOfListKeys verifies that disk store random keys result subset of list keys.
 func TestDiskStore_RandomKeys_ResultSubsetOfListKeys(t *testing.T) {
 	t.Parallel()
 
@@ -367,6 +374,7 @@ func TestDiskStore_RandomKeys_ResultSubsetOfListKeys(t *testing.T) {
 	}
 }
 
+// TestDiskStore_RandomKeys_AfterDeleteManyDoesNotReturnDeletedKeys verifies that disk store random keys after delete many does not return deleted keys.
 func TestDiskStore_RandomKeys_AfterDeleteManyDoesNotReturnDeletedKeys(t *testing.T) {
 	t.Parallel()
 
@@ -398,6 +406,7 @@ func TestDiskStore_RandomKeys_AfterDeleteManyDoesNotReturnDeletedKeys(t *testing
 	}
 }
 
+// TestDiskStore_RandomKeys_AfterDeleteByPrefixDoesNotReturnDeletedKeys verifies that disk store random keys after delete by prefix does not return deleted keys.
 func TestDiskStore_RandomKeys_AfterDeleteByPrefixDoesNotReturnDeletedKeys(t *testing.T) {
 	t.Parallel()
 
@@ -431,6 +440,7 @@ func TestDiskStore_RandomKeys_AfterDeleteByPrefixDoesNotReturnDeletedKeys(t *tes
 	}
 }
 
+// TestShouldFallbackToCursorRandomKeys verifies that should fallback to cursor random keys.
 func TestShouldFallbackToCursorRandomKeys(t *testing.T) {
 	t.Parallel()
 
@@ -504,6 +514,7 @@ func TestShouldFallbackToCursorRandomKeys(t *testing.T) {
 	}
 }
 
+// TestDiskStore_RandomKeys_TrackedNearFullUnique_ReturnsAvailableKeys verifies that disk store random keys tracked near full unique returns available keys.
 func TestDiskStore_RandomKeys_TrackedNearFullUnique_ReturnsAvailableKeys(t *testing.T) {
 	t.Parallel()
 

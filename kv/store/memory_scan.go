@@ -23,12 +23,18 @@ type (
 	// OST indexes by copying bounded batches while holding a read lock.
 	// This avoids holding locks for the entire scan duration, improving concurrency.
 	untrackedShardIterator struct {
-		shard     *memoryShard
-		prefix    string
+		// shard is the shard being scanned.
+		shard *memoryShard
+		// prefix limits keys returned to those with this prefix.
+		prefix string
+		// nextAfter resumes iteration strictly after this key.
 		nextAfter string
 
-		buffer    []Entry
+		// buffer holds the current batch of entries copied under lock.
+		buffer []Entry
+		// bufferIdx is the next index to read from buffer.
 		bufferIdx int
+		// exhausted reports whether the shard iterator has no more entries.
 		exhausted bool
 	}
 
@@ -63,12 +69,18 @@ type (
 	// untrackedKeyShardIterator streams keys from shards that do not maintain
 	// OST indexes by copying bounded batches while holding a read lock.
 	untrackedKeyShardIterator struct {
-		shard     *memoryShard
-		prefix    string
+		// shard is the shard being scanned.
+		shard *memoryShard
+		// prefix limits keys returned to those with this prefix.
+		prefix string
+		// nextAfter resumes iteration strictly after this key.
 		nextAfter string
 
-		buffer    []string
+		// buffer holds the current batch of keys copied under lock.
+		buffer []string
+		// bufferIdx is the next index to read from buffer.
 		bufferIdx int
+		// exhausted reports whether the shard iterator has no more keys.
 		exhausted bool
 	}
 
@@ -610,6 +622,7 @@ func (it *untrackedKeyShardIterator) Next() (string, bool) {
 	}
 }
 
+// initialPageCapacity returns the preallocated scan page size for a limit.
 func initialPageCapacity(limit int64) int {
 	if limit <= 0 {
 		return 0

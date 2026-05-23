@@ -24,6 +24,11 @@ func (s *SerializedStore) Stats() (*StatsSnapshot, error) {
 	return snapshot, nil
 }
 
+// AllocationStats delegates prefix-scoped allocation diagnostics to the underlying store.
+func (s *SerializedStore) AllocationStats(prefix string) (*AllocationStats, error) {
+	return s.store.AllocationStats(prefix)
+}
+
 // Backup streams the underlying store contents into a bbolt snapshot.
 func (s *SerializedStore) Backup(opts *BackupOptions) (*BackupSummary, error) {
 	return s.store.Backup(opts)

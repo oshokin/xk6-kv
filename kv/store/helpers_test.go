@@ -27,8 +27,11 @@ const (
 	shortModeStressScaleDivisor = 4
 )
 
+// testEntry is a test type used by test entry tests.
 type testEntry struct {
-	key   string
+	// key holds test state for test entry.
+	key string
+	// value holds test state for test entry.
 	value string
 }
 

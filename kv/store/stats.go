@@ -1,10 +1,14 @@
 package store
 
 const (
+	// backendMemoryName is the StatsSnapshot backend label for memory stores.
 	backendMemoryName = "memory"
-	backendDiskName   = "disk"
+	// backendDiskName is the StatsSnapshot backend label for disk stores.
+	backendDiskName = "disk"
 
-	serializationJSONName   = "json"
+	// serializationJSONName is the StatsSnapshot serialization label for JSON mode.
+	serializationJSONName = "json"
+	// serializationStringName is the StatsSnapshot serialization label for string mode.
 	serializationStringName = "string"
 )
 
@@ -57,5 +61,32 @@ type (
 		SizeBytes int64 `js:"sizeBytes"`
 		// ReadOnly reports whether the store is configured read-only.
 		ReadOnly bool `js:"readOnly"`
+	}
+
+	// AllocationStats is a prefix-scoped claimability snapshot for allocation flows.
+	//
+	// For disk stores with trackKeys=true on writable handles, counters may represent
+	// the operational tracked allocation-index view used by claim APIs, not a
+	// forensic durable bbolt rescan after out-of-band database mutation.
+	AllocationStats struct {
+		// Prefix is the prefix filter used to build this snapshot.
+		Prefix string `js:"prefix"`
+		// Total is the number of matching allocation entries visible to the stats source.
+		//
+		// For memory stores and disk trackKeys=false/read-only paths this is counted
+		// from stored keys. For writable disk trackKeys=true stores this is counted
+		// from the operational tracked allocation index.
+		Total int64 `js:"total"`
+		// Claimable is the number of matching entries claimable now.
+		// Entries blocked only by expired claims are included.
+		Claimable int64 `js:"claimable"`
+		// ClaimedLive is the number of matching entries blocked by live claims.
+		ClaimedLive int64 `js:"claimedLive"`
+		// ClaimedExpired is the number of matching entries with expired claims.
+		ClaimedExpired int64 `js:"claimedExpired"`
+		// Backend is the active backend ("memory" or "disk").
+		Backend string `js:"backend"`
+		// TrackKeys reports whether key tracking indexes are enabled.
+		TrackKeys bool `js:"trackKeys"`
 	}
 )
