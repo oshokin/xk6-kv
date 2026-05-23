@@ -14,6 +14,10 @@ import (
 // rename. Callers should treat this as a crash-safer strategy than direct
 // overwrite, not as a portable transactional primitive.
 func ReplaceFile(tempPath, targetPath string) error {
+	if err := validateReplaceTarget(targetPath); err != nil {
+		return err
+	}
+
 	//nolint:forbidigo // file I/O is required for replacement.
 	if err := os.Rename(tempPath, targetPath); err == nil {
 		return nil
