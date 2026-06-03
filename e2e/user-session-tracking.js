@@ -7,7 +7,7 @@ import { VUS, ITERATIONS, createKv, createSetup, createTeardown } from './common
 // =============================================================================
 //
 // This test simulates a web application session management system where we need
-// to track user activity, page views, and manage session lifecycle. 
+// to track user activity, page views, and manage session lifecycle.
 // This is a common pattern in:
 //
 // - E-commerce websites (tracking user shopping sessions).
@@ -68,7 +68,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // userSessionTrackingTest simulates users returning to their sessions across
 // multiple page views, tracking activity, and eventually cleaning up.

@@ -1,5 +1,4 @@
 import { openKv } from 'k6/x/kv';
-import file from 'k6/x/file';
 
 // Storage backend to use: 'memory' (default) or 'disk'.
 export const BACKEND = __ENV.KV_BACKEND || 'memory';
@@ -64,45 +63,14 @@ export function createSetup(kv) {
   };
 }
 
-// createTeardown returns standard teardown function that always closes KV handle
-// and, for disk backend, removes test-specific database file.
-// Optionally removes snapshot file if snapshotPath is provided.
-// testName: Test name for database path isolation.
-// snapshotPath: Optional snapshot file path to clean up (if not provided, snapshot file is preserved).
-export function createTeardown(kv, testName, snapshotPath) {
+// createTeardown returns standard teardown function that closes the KV handle.
+export function createTeardown(kv) {
   return async function teardown() {
-    let closeError = null;
     try {
       kv.close();
     } catch (err) {
       console.error(`close failed: ${err && err.message ? err.message : err}`);
-      closeError = err;
-    }
-
-    if (BACKEND === 'disk') {
-
-      // Clean up test-specific database file if test name was provided.
-      if (testName) {
-        const dbPath = getTestPath(testName);
-        try {
-          file.deleteFile(dbPath);
-        } catch (err) {
-          // Ignore errors if file doesn't exist or is already deleted.
-        }
-      }
-
-      // Clean up snapshot file if snapshot path was explicitly provided.
-      if (snapshotPath) {
-        try {
-          file.deleteFile(snapshotPath);
-        } catch (err) {
-          // Ignore errors if file doesn't exist or is already deleted.
-        }
-      }
-    }
-
-    if (closeError) {
-      throw closeError;
+      throw err;
     }
   };
 }

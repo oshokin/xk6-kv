@@ -80,7 +80,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // claimFencingStaleToken validates that stale claim tokens are rejected and
 // only the fresh token can complete the current live claim.

@@ -65,7 +65,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // orphanResourceClaim simulates workers racing to claim orphaned resources from a pool.
 // Multiple claimers try deleteIfExists() concurrently while observers monitor with exists().

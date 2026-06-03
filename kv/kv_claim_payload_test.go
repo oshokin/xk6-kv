@@ -7,7 +7,7 @@ import (
 	"github.com/grafana/sobek"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.k6.io/k6/js/modulestest"
+	"go.k6.io/k6/v2/js/modulestest"
 
 	"github.com/oshokin/xk6-kv/kv/store"
 )

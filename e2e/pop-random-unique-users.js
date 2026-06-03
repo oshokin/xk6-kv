@@ -68,7 +68,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // popRandomUniqueUsers atomically allocates unique users until the pool is exhausted,
 // then treats exhaustion as a normal terminal state.

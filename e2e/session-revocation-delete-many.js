@@ -64,7 +64,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // sessionRevocationDeleteMany validates explicit bulk-delete behavior.
 export default async function sessionRevocationDeleteMany() {

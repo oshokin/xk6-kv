@@ -96,7 +96,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // collectPageStartCursors retrieves page-start cursors through public APIs so
 // tests never rely on internal cursor encoding details.

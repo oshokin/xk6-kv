@@ -31,13 +31,11 @@ vars:
   # Linting tool version.
   GOLANGCI_TAG: "v2.12.2"
   # k6 extension builder version.
-  XK6_TAG: "v1.4.1"
-  # xk6-file extension version used by local e2e builds.
-  XK6_FILE_TAG: "v1.6.1"
+  XK6_TAG: "v1.4.4"
   # Go vulnerability scanner version.
   GOVULNCHECK_TAG: "v1.3.0"
   # Go toolchain version used by security checks (must match go.mod).
-  GO_VERSION: "1.25.10"
+  GO_VERSION: "1.25.11"
 
   # -------------------------------
   # Tool Binaries
@@ -119,21 +117,14 @@ tasks:
   # Version Management
   # -------------------------------
 
-  fetch-tags:
-    desc: "Fetch tags from origin"
-    cmds:
-      - |
-        echo "Fetching tags from origin..."
-        git fetch --tags
-
   version-check:
     desc: "Check what the next version would be based on commits"
-    deps: [fetch-tags]
     cmds:
+      - git fetch --tags
       - |
         echo "Analyzing commits for version bump..."
         {{if eq OS "windows"}}
-          powershell -ExecutionPolicy Bypass -File "{{.SCRIPTS_DIR}}{{.PS}}semver_next.ps1"
+          powershell.exe -ExecutionPolicy Bypass -File "{{.SCRIPTS_DIR}}{{.PS}}semver_next.ps1"
         {{else}}
           bash "{{.SCRIPTS_DIR}}{{.PS}}semver_next.sh"
         {{end}}
@@ -147,14 +138,14 @@ tasks:
   # Tool Installation
   # -------------------------------
 
-  _ensure-bin:
+  ensure-bin:
     internal: true
     cmds:
       - "{{.MKDIR}} '{{.BIN_DIR}}'{{.MKDIR_END}}"
 
   install-lint:
-    desc: "Install golangci-lint into ./bin"
-    deps: [_ensure-bin]
+    internal: true
+    deps: [ensure-bin]
     cmds:
       - |
         # Only install if current version doesn't match desired version.
@@ -170,8 +161,8 @@ tasks:
       GOBIN: "{{.BIN_DIR}}"
 
   install-xk6:
-    desc: "Install xk6 into ./bin"
-    deps: [_ensure-bin]
+    internal: true
+    deps: [ensure-bin]
     cmds:
       - |
         # Only install if current version doesn't match desired version.
@@ -187,8 +178,8 @@ tasks:
       GOBIN: "{{.BIN_DIR}}"
 
   install-govulncheck:
-    desc: "Install govulncheck into ./bin"
-    deps: [_ensure-bin]
+    internal: true
+    deps: [ensure-bin]
     cmds:
       - |
         # Only install if current version doesn't match desired version.
@@ -212,17 +203,17 @@ tasks:
   # -------------------------------
 
   build-k6:
-    desc: "Build k6 with local xk6-kv and xk6-file extensions into ./bin/k6"
-    deps: [install-xk6, _ensure-bin]
+    desc: "Build k6 with the local xk6-kv extension into ./bin/k6"
+    deps: [install-xk6, ensure-bin]
     cmds:
       - |
         {{if eq OS "windows"}}
           echo "Note: Building k6 requires CGO. If this fails, install gcc (MinGW-w64) or use WSL."
-          powershell.exe -Command "\$env:CGO_ENABLED = '1'; \$MODULE_NAME = go list -m; Write-Host \"Building k6 with local \$MODULE_NAME and xk6-file {{.XK6_FILE_TAG}}...\"; & '{{.XK6_BIN}}' build --with \"\$MODULE_NAME=.\" --with \"github.com/avitalique/xk6-file@{{.XK6_FILE_TAG}}\" -o '{{.K6_BIN}}'"
+          powershell.exe -Command "\$env:CGO_ENABLED = '1'; \$MODULE_NAME = go list -m; Write-Host \"Building k6 with local \$MODULE_NAME...\"; & '{{.XK6_BIN}}' build --with \"\$MODULE_NAME=.\" -o '{{.K6_BIN}}'"
         {{else}}
           MODULE_NAME=$(go list -m)
-          echo "Building k6 with local $MODULE_NAME and xk6-file {{.XK6_FILE_TAG}}..."
-          "{{.XK6_BIN}}" build --with "$MODULE_NAME=." --with "github.com/avitalique/xk6-file@{{.XK6_FILE_TAG}}" -o "{{.K6_BIN}}"
+          echo "Building k6 with local $MODULE_NAME..."
+          "{{.XK6_BIN}}" build --with "$MODULE_NAME=." -o "{{.K6_BIN}}"
         {{end}}
     env:
       CGO_ENABLED: "1"
@@ -326,66 +317,22 @@ tasks:
         vars: { E2E_SCENARIO: "{{.ITEM}}" }
 
   test-e2e-single:
-    desc: "Run single E2E scenario (all backend + key tracking combinations)"
+    desc: "Run one E2E scenario across backend and key-tracking combinations"
     cmds:
-      # Validate required scenario input before running k6.
       - |
         {{if eq OS "windows"}}
-          powershell.exe -Command "if ([string]::IsNullOrWhiteSpace('{{.E2E_SCENARIO}}')) { Write-Host 'Error: E2E_SCENARIO is required.'; Write-Host 'Example: task test-e2e-single E2E_SCENARIO=tenant-prefix-count-window'; exit 1 }"
+          powershell.exe -ExecutionPolicy Bypass \
+            -File "{{.SCRIPTS_DIR}}{{.PS}}run_e2e_scenario.ps1" \
+            -Scenario "{{.E2E_SCENARIO}}" \
+            -K6Bin "{{.K6_BIN}}" \
+            -Vus "{{.VUS}}" \
+            -Iterations "{{.ITERATIONS}}"
         {{else}}
-          if [ -z "{{.E2E_SCENARIO}}" ]; then
-            echo "Error: E2E_SCENARIO is required."
-            echo "Example: task test-e2e-single E2E_SCENARIO=tenant-prefix-count-window"
-            exit 1
-          fi
-        {{end}}
-
-      # Validate that requested scenario file exists.
-      - |
-        {{if eq OS "windows"}}
-          powershell.exe -Command "if (-not (Test-Path 'e2e/{{.E2E_SCENARIO}}.js')) { Write-Host 'Error: E2E scenario not found: e2e/{{.E2E_SCENARIO}}.js'; Write-Host 'Example: task test-e2e-single E2E_SCENARIO=tenant-prefix-count-window'; exit 1 }"
-        {{else}}
-          if [ ! -f "e2e/{{.E2E_SCENARIO}}.js" ]; then
-            echo "Error: E2E scenario not found: e2e/{{.E2E_SCENARIO}}.js"
-            echo "Example: task test-e2e-single E2E_SCENARIO=tenant-prefix-count-window"
-            exit 1
-          fi
-        {{end}}
-
-      # Memory backend with key tracking enabled.
-      - echo "Testing {{.E2E_SCENARIO}} - Memory backend, trackKeys=true"
-      - |
-        {{if eq OS "windows"}}
-          powershell.exe -Command "\$env:KV_BACKEND = 'memory'; \$env:KV_TRACK_KEYS = 'true'; \$env:VUS = '{{.VUS}}'; \$env:ITERATIONS = '{{.ITERATIONS}}'; & '{{.K6_BIN}}' run 'e2e/{{.E2E_SCENARIO}}.js'"
-        {{else}}
-          KV_BACKEND=memory KV_TRACK_KEYS=true VUS={{.VUS}} ITERATIONS={{.ITERATIONS}} "{{.K6_BIN}}" run "e2e/{{.E2E_SCENARIO}}.js"
-        {{end}}
-      
-      # Memory backend with key tracking disabled.
-      - echo "Testing {{.E2E_SCENARIO}} - Memory backend, trackKeys=false"
-      - |
-        {{if eq OS "windows"}}
-          powershell.exe -Command "\$env:KV_BACKEND = 'memory'; \$env:KV_TRACK_KEYS = 'false'; \$env:VUS = '{{.VUS}}'; \$env:ITERATIONS = '{{.ITERATIONS}}'; & '{{.K6_BIN}}' run 'e2e/{{.E2E_SCENARIO}}.js'"
-        {{else}}
-          KV_BACKEND=memory KV_TRACK_KEYS=false VUS={{.VUS}} ITERATIONS={{.ITERATIONS}} "{{.K6_BIN}}" run "e2e/{{.E2E_SCENARIO}}.js"
-        {{end}}
-      
-      # Disk backend with key tracking enabled.
-      - echo "Testing {{.E2E_SCENARIO}} - Disk backend, trackKeys=true"
-      - |
-        {{if eq OS "windows"}}
-          powershell.exe -Command "\$env:KV_BACKEND = 'disk'; \$env:KV_TRACK_KEYS = 'true'; \$env:VUS = '{{.VUS}}'; \$env:ITERATIONS = '{{.ITERATIONS}}'; & '{{.K6_BIN}}' run 'e2e/{{.E2E_SCENARIO}}.js'"
-        {{else}}
-          KV_BACKEND=disk KV_TRACK_KEYS=true VUS={{.VUS}} ITERATIONS={{.ITERATIONS}} "{{.K6_BIN}}" run "e2e/{{.E2E_SCENARIO}}.js"
-        {{end}}
-      
-      # Disk backend with key tracking disabled.
-      - echo "Testing {{.E2E_SCENARIO}} - Disk backend, trackKeys=false"
-      - |
-        {{if eq OS "windows"}}
-          powershell.exe -Command "\$env:KV_BACKEND = 'disk'; \$env:KV_TRACK_KEYS = 'false'; \$env:VUS = '{{.VUS}}'; \$env:ITERATIONS = '{{.ITERATIONS}}'; & '{{.K6_BIN}}' run 'e2e/{{.E2E_SCENARIO}}.js'"
-        {{else}}
-          KV_BACKEND=disk KV_TRACK_KEYS=false VUS={{.VUS}} ITERATIONS={{.ITERATIONS}} "{{.K6_BIN}}" run "e2e/{{.E2E_SCENARIO}}.js"
+          bash "{{.SCRIPTS_DIR}}{{.PS}}run_e2e_scenario.sh" \
+            "{{.E2E_SCENARIO}}" \
+            "{{.K6_BIN}}" \
+            "{{.VUS}}" \
+            "{{.ITERATIONS}}"
         {{end}}
 
   # -------------------------------
@@ -393,8 +340,8 @@ tasks:
   # -------------------------------
 
   clean:
-    desc: "Remove binaries and temporary files"
+    desc: "Remove generated binaries and repository-local temporary artifacts"
     cmds:
       - "{{.RMRF}} '{{.BIN_DIR}}'{{.RMRF_END}}"
-      - "{{.RMRF}} tmp/e2e{{.RMRF_END}}"
+      - "{{.RMRF}} tmp{{.RMRF_END}}"
       - "{{.RMRF}} .k6.kv{{.RMRF_END}}"

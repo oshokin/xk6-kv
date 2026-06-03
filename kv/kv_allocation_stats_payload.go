@@ -2,7 +2,7 @@ package kv
 
 import (
 	"github.com/grafana/sobek"
-	"go.k6.io/k6/js/common"
+	"go.k6.io/k6/v2/js/common"
 )
 
 // allocationStatsOptions holds parsed options for the corresponding KV method.

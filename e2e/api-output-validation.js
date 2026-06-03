@@ -1,5 +1,4 @@
 import { check, sleep } from 'k6';
-import file from 'k6/x/file';
 import { getSnapshotPath, createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
@@ -7,7 +6,7 @@ import { getSnapshotPath, createKv, createSetup, createTeardown } from './common
 // =============================================================================
 //
 // This test validates that all xk6-kv API methods return correctly structured
-// JavaScript objects with proper field names in camelCase. 
+// JavaScript objects with proper field names in camelCase.
 // This is critical for:
 //
 // - API contract validation (ensuring JS consumers get expected shapes).
@@ -290,44 +289,8 @@ export const options = {
 // setup initializes the store with test data.
 export const setup = createSetup(kv);
 
-// baseTeardown is the base teardown function that 
-// closes the store and removes the test-specific database file.
-const baseTeardown = createTeardown(kv, TEST_NAME);
-
-// teardown closes stores and removes generated export artifacts.
-export async function teardown() {
-  await baseTeardown();
-
-  try {
-    file.deleteFile(EXPORT_JSONL_PATH);
-  } catch (err) {
-    // Ignore cleanup errors if the file doesn't exist or is already deleted.
-  }
-
-  try {
-    file.deleteFile(IMPORT_JSONL_PATH);
-  } catch (err) {
-    // Ignore cleanup errors if the file doesn't exist or is already deleted.
-  }
-
-  try {
-    file.deleteFile(EXPORT_CSV_PATH);
-  } catch (err) {
-    // Ignore cleanup errors if the file doesn't exist or is already deleted.
-  }
-
-  try {
-    file.deleteFile(EXPORT_CSV_LIMIT_PATH);
-  } catch (err) {
-    // Ignore cleanup errors if the file doesn't exist or is already deleted.
-  }
-
-  try {
-    file.deleteFile(EXPORT_CSV_MISSING_COLUMN_PATH);
-  } catch (err) {
-    // Ignore cleanup errors if the file doesn't exist or is already deleted.
-  }
-}
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
 // apiOutputValidationTest validates that all API outputs use camelCase field names
 // and that Go-to-JavaScript marshalling preserves all value types correctly.

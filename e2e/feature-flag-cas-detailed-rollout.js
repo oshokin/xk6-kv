@@ -56,7 +56,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // featureFlagCasDetailedRollout exercises compareAndSwapDetailed() shape invariants,
 // a single-winner CAS storm from identical snapshots, and setIfAbsent() under

@@ -68,7 +68,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // orderClaimingTest atomically claims an order, verifies the claim, then releases
 // it so future iterations can re-claim (simulates continuous workload).

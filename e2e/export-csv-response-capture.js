@@ -1,5 +1,4 @@
 import { check } from 'k6';
-import file from 'k6/x/file';
 import { createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
@@ -59,26 +58,8 @@ export const options = {
 // setup clears previous state before export checks start.
 export const setup = createSetup(kv);
 
-// baseTeardown is the base teardown function that 
-// closes the store and removes the test-specific database file.
-const baseTeardown = createTeardown(kv, TEST_NAME);
-
-// teardown closes stores and removes generated CSV artifacts.
-export async function teardown() {
-  await baseTeardown();
-
-  try {
-    file.deleteFile(EXPORT_PATH);
-  } catch (err) {
-    // Ignore cleanup errors.
-  }
-
-  try {
-    file.deleteFile(EXPORT_LIMIT_PATH);
-  } catch (err) {
-    // Ignore cleanup errors.
-  }
-}
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
 // exportCSVResponseCapture validates portable CSV export summaries and guards.
 export default async function exportCSVResponseCapture() {

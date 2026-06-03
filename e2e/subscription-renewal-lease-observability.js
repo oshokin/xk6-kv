@@ -65,7 +65,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // subscriptionRenewalLeaseObservability claims one subscription lease and
 // releases it back to the pool after simulated processing.

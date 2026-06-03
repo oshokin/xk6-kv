@@ -95,7 +95,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // microserviceCacheManagementTest deterministically selects a product, updates its
 // cache entry, bumps the version via CAS, invalidates related data, and rebuilds

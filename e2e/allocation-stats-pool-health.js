@@ -52,7 +52,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes stores.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // allocationStatsPoolHealth validates prefix-scoped pool counters.
 export default async function allocationStatsPoolHealth() {

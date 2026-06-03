@@ -63,7 +63,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // credentialPoolDrainObservability performs one allocation attempt per iteration
 // and tracks when the pool is exhausted.

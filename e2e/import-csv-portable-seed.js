@@ -74,8 +74,8 @@ export const options = {
 // setup clears previous state before import checks start.
 export const setup = createSetup(kv);
 
-// teardown closes stores.
-export const teardown = createTeardown(kv, TEST_NAME);
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
 // importCSVPortableSeed validates portable CSV import summaries and input guards.
 export default async function importCSVPortableSeed() {

@@ -49,7 +49,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // claimCleanupDeleteMany validates claim lifecycle after bulk deletions.
 export default async function claimCleanupDeleteMany() {
