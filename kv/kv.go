@@ -171,13 +171,18 @@ func (k *KV) runAsyncWithStoreAndObserver(
 		settleOnce sync.Once
 	)
 
+	// Finish worker-side accounting before enqueueing promise settlement.
+	// k6 considers a registered callback completed as soon as callback(fn)
+	// enqueues fn, so code executed after callback(fn) may race with the end
+	// of the event loop. Keep the deferred invocation as a defensive fallback.
+	finishAsync := sync.OnceFunc(k.beginAsyncOperation())
+
 	runOnEventLoop := func(fn func() error) {
 		settleOnce.Do(func() {
+			finishAsync()
 			callback(fn)
 		})
 	}
-
-	finishAsync := k.beginAsyncOperation()
 
 	go func() {
 		defer finishAsync()
