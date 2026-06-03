@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/grafana/sobek"
-	"go.k6.io/k6/js/common"
+	"go.k6.io/k6/v2/js/common"
 )
 
 // ensureOptionalObjectOptions validates that options is either nullish or a plain object.

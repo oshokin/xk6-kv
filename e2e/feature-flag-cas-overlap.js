@@ -65,7 +65,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // featureFlagCasOverlap launches Promise.all CAS operations and verifies they all
 // succeeded (unique version numbers recorded).

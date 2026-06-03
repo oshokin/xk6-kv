@@ -60,7 +60,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // prefixCleanupDeleteByPrefix validates bounded prefix-delete behavior.
 export default async function prefixCleanupDeleteByPrefix() {

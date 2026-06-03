@@ -76,7 +76,7 @@ export function createOverflowScenario(serialization = 'json') {
   // openKv must run in init context; createKv() is evaluated while building the scenario.
   const kv = createKv(scenarioName, { serialization });
   const setup = createSetup(kv);
-  const teardown = createTeardown(kv, scenarioName);
+  const teardown = createTeardown(kv);
 
   return async function runOverflowScenario() {
     await setup();

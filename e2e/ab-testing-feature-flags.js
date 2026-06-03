@@ -85,7 +85,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // abTestingFeatureFlagsTest emulates a user checking gates, recording usage, and
 // occasionally acting as an admin to change rollout percentages.
@@ -141,7 +141,7 @@ export default async function abTestingFeatureFlagsTest() {
   });
 }
 
-// buildDefaultFlag constructs a baseline configuration for each feature 
+// buildDefaultFlag constructs a baseline configuration for each feature
 // so getOrSet() has a deterministic payload to insert on first use.
 function buildDefaultFlag(name) {
   return {
@@ -159,7 +159,7 @@ async function updateFlagRollout(flagKey, initialFlag, vuId) {
   let snapshot = initialFlag;
 
   for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
-    // Increment rollout by 1, wrapping at 100. 
+    // Increment rollout by 1, wrapping at 100.
     const proposed = {
       ...snapshot,
       rollout: (snapshot.rollout + 1) % BUCKET_COUNT,

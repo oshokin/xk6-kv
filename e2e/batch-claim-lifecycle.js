@@ -54,7 +54,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes stores.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // batchClaimLifecycle validates batch renewal/completion/release semantics.
 export default async function batchClaimLifecycle() {

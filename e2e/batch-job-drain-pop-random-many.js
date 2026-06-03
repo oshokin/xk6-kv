@@ -88,7 +88,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // batchJobDrainPopRandomMany drains work in bounded batches while respecting
 // one temporarily reserved item claimed at the start of the iteration.

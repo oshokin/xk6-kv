@@ -65,7 +65,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // apiRateLimitingTest represents a single API call: increment usage counter,
 // and reset when threshold is reached using compareAndSwap.

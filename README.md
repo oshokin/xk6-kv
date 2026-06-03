@@ -141,12 +141,12 @@ Download k6 binaries with xk6-kv from the [Releases page](https://github.com/osh
 
 Release artifacts are named `xk6-kv_<version>_<os>_<arch>.tar.gz` for Linux/macOS and
 `xk6-kv_<version>_<os>_<arch>.zip` for Windows. Set `VERSION` to the release you want
-to install, for example `v1.4.29` (replace with the [latest release](https://github.com/oshokin/xk6-kv/releases/latest)).
+to install (replace with the [latest release](https://github.com/oshokin/xk6-kv/releases/latest)), for example `<XK6_KV_VERSION>`.
 
 **Linux:**
 
 ```bash
-VERSION=v1.4.29
+VERSION=<XK6_KV_VERSION>
 curl -L "https://github.com/oshokin/xk6-kv/releases/download/${VERSION}/xk6-kv_${VERSION}_linux_amd64.tar.gz" -o k6.tar.gz
 tar -xzf k6.tar.gz && chmod +x k6
 ./k6 version
@@ -155,7 +155,7 @@ tar -xzf k6.tar.gz && chmod +x k6
 **macOS:**
 
 ```bash
-VERSION=v1.4.29
+VERSION=<XK6_KV_VERSION>
 curl -L "https://github.com/oshokin/xk6-kv/releases/download/${VERSION}/xk6-kv_${VERSION}_darwin_arm64.tar.gz" -o k6.tar.gz
 tar -xzf k6.tar.gz && chmod +x k6
 ./k6 version
@@ -164,7 +164,7 @@ tar -xzf k6.tar.gz && chmod +x k6
 **Windows (PowerShell):**
 
 ```powershell
-$VERSION = "v1.4.29"
+$VERSION = "<XK6_KV_VERSION>"
 Invoke-WebRequest -Uri "https://github.com/oshokin/xk6-kv/releases/download/$VERSION/xk6-kv_${VERSION}_windows_amd64.zip" -OutFile k6.zip
 Expand-Archive -Path k6.zip -DestinationPath .
 .\k6.exe version
@@ -175,7 +175,7 @@ Expand-Archive -Path k6.zip -DestinationPath .
 1. Install [xk6](https://github.com/grafana/xk6):
 
 ```bash
-go install go.k6.io/xk6/cmd/xk6@latest
+go install go.k6.io/xk6/cmd/xk6@v1.4.1
 ```
 
 1. Build k6 with xk6-kv:
@@ -184,8 +184,11 @@ go install go.k6.io/xk6/cmd/xk6@latest
 # Latest version
 xk6 build --with github.com/oshokin/xk6-kv@latest
 
-# Specific version
-xk6 build --with github.com/oshokin/xk6-kv@v1.4.29
+# Pin a specific release
+xk6 build --with github.com/oshokin/xk6-kv@<XK6_KV_VERSION>
+
+# k6 v1.7.x legacy line (frozen at v1.4.31)
+xk6 build --with github.com/oshokin/xk6-kv@v1.4.31
 ```
 
 1. Verify:
@@ -194,13 +197,28 @@ xk6 build --with github.com/oshokin/xk6-kv@v1.4.29
 ./k6 version
 ```
 
-> **Requirements**: Go 1.25 or higher.
+> **Requirements**: Go 1.25.11 or higher.
 
 ## Compatibility
 
-This release targets k6 v1.7.x and the `go.k6.io/k6` v1 Go module path.
+Current development targets **k6 v2.0.x** (`go.k6.io/k6/v2`). The JavaScript import is unchanged:
 
-k6 v2 compatibility is intentionally tracked separately because k6 v2 changed the Go module path to `go.k6.io/k6/v2` and is still a release candidate.
+```javascript
+import { openKv } from "k6/x/kv";
+```
+
+Use **xk6 v1.4.1** or newer when building this extension from source; xk6 resolves the required k6 major version from the extension dependency graph.
+
+| xk6-kv version | k6 core version | Notes |
+| --- | --- | --- |
+| v1.5.0+ | v2.0.x | Current supported line |
+| v1.4.31 | v1.7.x | Frozen legacy line; pin this tag when building against k6 v1 |
+
+Projects that still require k6 v1.7.x should pin the extension explicitly:
+
+```bash
+xk6 build --with github.com/oshokin/xk6-kv@v1.4.31
+```
 
 ## Quick Start
 
@@ -1246,19 +1264,15 @@ task build-k6
 
 ### Available Tasks
 
-The Taskfile includes one internal helper (`_ensure-bin`) plus user-facing tasks below.
+The Taskfile includes internal helpers (`ensure-bin`, tool installers) plus user-facing tasks below.
 
 | Command | What it does |
 | --- | --- |
 | `task` | Show common tasks (`task -l`). |
 | `task install-githooks` | Configure local commit hooks (`.githooks`). |
 | `task remove-githooks` | Disable local commit hooks for this repository. |
-| `task fetch-tags` | Fetch tags from origin. |
 | `task version-check` | Predict next semantic version from commits. |
 | `task pin-tool-versions` | Sync pinned tool versions in CI/local files. |
-| `task install-lint` | Install pinned `golangci-lint` into `./bin`. |
-| `task install-xk6` | Install pinned `xk6` into `./bin`. |
-| `task install-govulncheck` | Install pinned `govulncheck` into `./bin`. |
 | `task install-tools` | Install all pinned dev tools (`golangci-lint`, `xk6`, `govulncheck`). |
 | `task lint-fix` | Run `golangci-lint` with autofix. |
 | `task lint` | Run `golangci-lint` checks. |
@@ -1268,16 +1282,17 @@ The Taskfile includes one internal helper (`_ensure-bin`) plus user-facing tasks
 | `task test-race` | Run unit tests with race detector. |
 | `task test-typescript` | Run TypeScript declaration smoke tests (`npm ci` + `npm test` in `typescript/`). |
 | `task release-check` | Run full release readiness checks (`lint`, `xk6-lint-community`, `test-race`, `test-typescript`, and E2E via `scripts/release_check_e2e.sh` / `scripts/release_check_e2e.ps1`). |
-| `task build-k6` | Build `./bin/k6` with local `xk6-kv` and pinned `xk6-file`. |
+| `task build-k6` | Build `./bin/k6` with the local `xk6-kv` extension. |
 | `task test-e2e-all` | Run all `e2e/*.js` scenarios across backend/key-tracking matrix. |
 | `task test-e2e-single E2E_SCENARIO=tenant-prefix-count-window` | Run one scenario across backend/key-tracking matrix. |
-| `task clean` | Remove generated artifacts (`./bin`, `./tmp/e2e`, `.k6.kv`). |
+| `task clean` | Remove generated binaries and repository-local temporary artifacts. |
 
 #### E2E recipe notes
 
 - `test-e2e-single` requires `E2E_SCENARIO`.
 - `test-e2e-all` and `test-e2e-single` support `VUS` and `ITERATIONS` overrides.
-- E2E scenarios require the Taskfile-built binary (`task build-k6`) because some tests import `k6/x/file` (`xk6-file` extension).
+- E2E scenarios require the Taskfile-built binary (`task build-k6`) because they exercise the local `k6/x/kv` extension.
+- Temporary E2E database, snapshot, CSV, and JSONL artifacts are removed by `scripts/run_e2e_scenario.sh` / `scripts/run_e2e_scenario.ps1`; `task clean` removes all repository-local scratch files under `tmp/`.
 - Example: `task test-e2e-single E2E_SCENARIO=tenant-prefix-count-window VUS=20 ITERATIONS=200`.
 
 ### Code Quality

@@ -1,5 +1,4 @@
 import { check } from 'k6';
-import file from 'k6/x/file';
 import { createKv, createSetup, createTeardown } from './common.js';
 
 // =============================================================================
@@ -56,30 +55,8 @@ export const options = {
 // setup clears previous state before export checks start.
 export const setup = createSetup(kv);
 
-// teardown closes stores and removes generated JSONL artifacts.
-const baseTeardown = createTeardown(kv, TEST_NAME);
-
-export async function teardown() {
-  await baseTeardown();
-
-  try {
-    file.deleteFile(EXPORT_ALL_PATH);
-  } catch (err) {
-    // Ignore cleanup errors if the file does not exist or is already deleted.
-  }
-
-  try {
-    file.deleteFile(EXPORT_LIMITED_PATH);
-  } catch (err) {
-    // Ignore cleanup errors if the file does not exist or is already deleted.
-  }
-
-  try {
-    file.deleteFile(EXPORT_EMPTY_PATH);
-  } catch (err) {
-    // Ignore cleanup errors if the file does not exist or is already deleted.
-  }
-}
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
 // exportJSONLPortableSeed validates portable export summaries and input guards.
 export default async function exportJSONLPortableSeed() {

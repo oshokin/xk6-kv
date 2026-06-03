@@ -221,6 +221,6 @@ export async function teardown() {
     console.log(`final blocking backup summary: ${JSON.stringify(finalSummary)}`);
 
     // Close disk backend cleanly to prevent file handle leaks.
-    const standardTeardown = createTeardown(kv, TEST_NAME);
+    const standardTeardown = createTeardown(kv);
     await standardTeardown();
 }

@@ -74,7 +74,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME)
+export const teardown = createTeardown(kv)
 
 // claimRandomDefaultTTL claims one random task without explicit ttl and verifies
 // that the returned lease duration uses the documented 30s default.

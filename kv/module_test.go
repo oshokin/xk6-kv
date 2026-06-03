@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	k6common "go.k6.io/k6/js/common"
-	"go.k6.io/k6/js/modules"
-	"go.k6.io/k6/js/modulestest"
-	k6metrics "go.k6.io/k6/metrics"
+	k6common "go.k6.io/k6/v2/js/common"
+	"go.k6.io/k6/v2/js/modules"
+	"go.k6.io/k6/v2/js/modulestest"
+	k6metrics "go.k6.io/k6/v2/metrics"
 )
 
 // initlessVU is a test VU wrapper for initless vu tests.

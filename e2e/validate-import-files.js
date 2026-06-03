@@ -53,8 +53,8 @@ export const options = {
 // setup clears previous state before validation checks start.
 export const setup = createSetup(kv);
 
-// teardown closes stores.
-export const teardown = createTeardown(kv, TEST_NAME);
+// teardown closes disk stores so repeated runs do not collide.
+export const teardown = createTeardown(kv);
 
 // validateImportFiles verifies read-only file preflight behavior.
 export default async function validateImportFiles() {

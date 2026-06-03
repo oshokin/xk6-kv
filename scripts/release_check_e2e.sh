@@ -27,7 +27,7 @@ set -e
 
 # Search for threshold/check failures in k6 output.
 # The single required marker for release-check is "✗".
-failure_lines="$(rg -n '✗' "${artifact_file}" || true)"
+failure_lines="$(grep -n '✗' "${artifact_file}" || true)"
 
 # Treat either non-zero task exit or any failure marker as a failed release-check.
 if [ "${task_exit_code}" -ne 0 ] || [ -n "${failure_lines}" ]; then

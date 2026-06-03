@@ -74,7 +74,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // randomKeysBatchHydration validates random key sampling contract and batch hydration flow.
 export default async function randomKeysBatchHydration() {

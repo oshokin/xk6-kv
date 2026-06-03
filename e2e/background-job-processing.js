@@ -89,7 +89,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // backgroundJobProcessingTest claims slots, simulates work, recycles the job, and
 // emits health metrics-touching every atomic helper the queue exposes.

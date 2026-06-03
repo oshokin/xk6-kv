@@ -88,7 +88,7 @@ export async function setup() {
 }
 
 // teardown closes disk stores so repeated runs do not collide.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // scanPaginatedSessions performs repeated scans until `done` is true, verifying
 // prefix ordering invariants.

@@ -47,7 +47,7 @@ export const options = {
 export const setup = createSetup(kv);
 
 // teardown closes stores.
-export const teardown = createTeardown(kv, TEST_NAME);
+export const teardown = createTeardown(kv);
 
 // claimKeysExplicitFixtures validates explicit fixture lease behavior.
 export default async function claimKeysExplicitFixtures() {

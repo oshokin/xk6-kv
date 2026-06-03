@@ -23,8 +23,6 @@ type (
 	resolvedInputs struct {
 		// XK6 stores the module metadata used for xk6 version pins.
 		XK6 *moduleInfo
-		// XK6File stores the module metadata used for xk6-file version pins.
-		XK6File *moduleInfo
 		// Lint stores the module metadata used for golangci-lint pins.
 		Lint *moduleInfo
 		// GoVersion stores the local go.mod Go directive used for Go version pins.
@@ -80,8 +78,6 @@ const (
 
 	// xk6LatestModuleQuery asks Go to resolve the latest xk6 module version.
 	xk6LatestModuleQuery = "go.k6.io/xk6@latest"
-	// xk6FileLatestModuleQuery asks Go to resolve the latest xk6-file module version.
-	xk6FileLatestModuleQuery = "github.com/avitalique/xk6-file@latest"
 	// golangCILintLatestModuleQuery asks Go to resolve the latest golangci-lint module version.
 	golangCILintLatestModuleQuery = "github.com/golangci/golangci-lint/v2@latest"
 	// goModFileName marks the repository root for this script.
@@ -130,8 +126,6 @@ const (
 	taskfileGoVersionPattern = `(?m)^  GO_VERSION: ".*"$`
 	// taskfileXK6TagPattern matches the taskfile xk6 tag.
 	taskfileXK6TagPattern = `(?m)^  XK6_TAG: ".*"$`
-	// taskfileXK6FileTagPattern matches the taskfile xk6-file tag.
-	taskfileXK6FileTagPattern = `(?m)^  XK6_FILE_TAG: ".*"$`
 	// devcontainerGoVersionPattern matches the Go feature version in devcontainer.json.
 	devcontainerGoVersionPattern = `(?m)^			"version": ".*"$`
 
@@ -153,8 +147,6 @@ const (
 	taskfileGoVersionLine = `  GO_VERSION: "%s"`
 	// taskfileXK6TagLine renders the taskfile xk6 tag.
 	taskfileXK6TagLine = `  XK6_TAG: "%s"`
-	// taskfileXK6FileTagLine renders the taskfile xk6-file tag.
-	taskfileXK6FileTagLine = `  XK6_FILE_TAG: "%s"`
 	// devcontainerGoVersionLine renders the Go feature version in devcontainer.json.
 	devcontainerGoVersionLine = `			"version": "%s"`
 )
@@ -195,11 +187,6 @@ func resolveInputs(files afero.Fs, rootInput string, dryRun bool) (*resolvedInpu
 		return nil, err
 	}
 
-	xk6File, err := goListModule(xk6FileLatestModuleQuery)
-	if err != nil {
-		return nil, err
-	}
-
 	lint, err := goListModule(golangCILintLatestModuleQuery)
 	if err != nil {
 		return nil, err
@@ -209,22 +196,17 @@ func resolveInputs(files afero.Fs, rootInput string, dryRun bool) (*resolvedInpu
 		return nil, fmt.Errorf("go list returned empty xk6 version (query=%q)", xk6.Query)
 	}
 
-	if xk6File.Version == "" {
-		return nil, fmt.Errorf("go list returned empty xk6-file version (query=%q)", xk6File.Query)
-	}
-
 	if lint.Version == "" {
 		return nil, fmt.Errorf("go list returned empty golangci-lint version (query=%q)", lint.Query)
 	}
 
-	goVersion, err := reconcileGoModVersion(files, root, []*moduleInfo{xk6, xk6File, lint}, dryRun)
+	goVersion, err := reconcileGoModVersion(files, root, []*moduleInfo{xk6, lint}, dryRun)
 	if err != nil {
 		return nil, err
 	}
 
 	return &resolvedInputs{
 		XK6:       xk6,
-		XK6File:   xk6File,
 		Lint:      lint,
 		GoVersion: goVersion,
 		Root:      root,
@@ -234,7 +216,6 @@ func resolveInputs(files afero.Fs, rootInput string, dryRun bool) (*resolvedInpu
 // printResolvedVersions writes the version lookup summary for the operator.
 func printResolvedVersions(inputs *resolvedInputs) {
 	fmt.Printf("Resolved xk6@latest -> %s\n", inputs.XK6.Version)
-	fmt.Printf("Resolved xk6-file@latest -> %s\n", inputs.XK6File.Version)
 	fmt.Printf("Resolved go.mod Go version -> %s\n", inputs.GoVersion)
 	fmt.Printf("Resolved golangci-lint@latest -> %s\n", inputs.Lint.Version)
 	fmt.Println()
@@ -299,11 +280,6 @@ func buildUpdates(inputs *resolvedInputs) []*fileUpdate {
 				{
 					Re:   regexp.MustCompile(taskfileXK6TagPattern),
 					With: fmt.Sprintf(taskfileXK6TagLine, inputs.XK6.Version),
-					Want: expectedSingleReplacement,
-				},
-				{
-					Re:   regexp.MustCompile(taskfileXK6FileTagPattern),
-					With: fmt.Sprintf(taskfileXK6FileTagLine, inputs.XK6File.Version),
 					Want: expectedSingleReplacement,
 				},
 			},
