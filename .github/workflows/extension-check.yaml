@@ -27,7 +27,7 @@ env:
   # Tool versions.
   GOLANGCI_LINT_VERSION: "v2.12.2"
   GO_VERSION: "1.25.11"
-  XK6_VERSION: "v1.4.4"
+  XK6_VERSION: "v1.4.6"
 
   # Test configuration.
   TEST_TIMEOUT: "600s"

@@ -18,7 +18,7 @@ runs:
       run: |
         # Tool versions.
         echo "GO_VERSION=1.25.11" >> $GITHUB_ENV
-        echo "XK6_VERSION=v1.4.4" >> $GITHUB_ENV
+        echo "XK6_VERSION=v1.4.6" >> $GITHUB_ENV
         
         # Git configuration for automated commits.
         echo "GIT_BOT_NAME=github-actions[bot]" >> $GITHUB_ENV

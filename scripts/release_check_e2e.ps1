@@ -19,7 +19,9 @@ $artifact = Join-Path $artifactDir ("release-check-" + $timestamp + ".log")
 Write-Host ("release-check e2e artifact: " + $artifact)
 
 # Run E2E suite and always capture output to the artifact.
-& task test-e2e-all *> $artifact
+# Use cmd redirection to avoid PowerShell NativeCommandError promotion
+# when the underlying command emits benign stderr output.
+cmd.exe /c "task test-e2e-all > `"$artifact`" 2>&1"
 $taskExitCode = $LASTEXITCODE
 
 # Search for threshold/check failures in k6 output.

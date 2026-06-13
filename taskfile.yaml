@@ -31,7 +31,7 @@ vars:
   # Linting tool version.
   GOLANGCI_TAG: "v2.12.2"
   # k6 extension builder version.
-  XK6_TAG: "v1.4.4"
+  XK6_TAG: "v1.4.6"
   # Go vulnerability scanner version.
   GOVULNCHECK_TAG: "v1.3.0"
   # Go toolchain version used by security checks (must match go.mod).
@@ -52,7 +52,7 @@ vars:
 
   # Commands to check current versions of installed tools.
   GOLANGCI_CURRENT_TAG:
-    sh: '{{if eq OS "windows"}}powershell -Command "try { if (Test-Path ''{{.GOLANGCI_BIN}}'') { $output = & ''{{.GOLANGCI_BIN}}'' version; if ($output -match ''version v?([0-9]+\.[0-9]+\.[0-9A-Za-z.-]+)'') { ''v'' + $Matches[1] } } } catch { }; exit 0"{{else}}"{{.GOLANGCI_BIN}}" version 2> /dev/null | sed -nE ''s/.*version v?([0-9]+\.[0-9]+\.[0-9A-Za-z.-]+).*/v\1/p'' | head -n1 || true{{end}}'
+    sh: '{{if eq OS "windows"}}powershell -Command "try { if (Test-Path ''{{.GOLANGCI_BIN}}'') { \$output = & ''{{.GOLANGCI_BIN}}'' version; if (\$output -match ''version v?([0-9]+\.[0-9]+\.[0-9A-Za-z.-]+)'') { ''v'' + \$Matches[1] } } } catch { }; exit 0"{{else}}"{{.GOLANGCI_BIN}}" version 2> /dev/null | sed -nE ''s/.*version v?([0-9]+\.[0-9]+\.[0-9A-Za-z.-]+).*/v\1/p'' | head -n1 || true{{end}}'
   XK6_VERSION_OUTPUT:
     sh: '{{if eq OS "windows"}}powershell -Command "try { if (Test-Path ''{{.XK6_BIN}}'') { & ''{{.XK6_BIN}}'' version } } catch { }; exit 0"{{else}}"{{.XK6_BIN}}" version 2> /dev/null || true{{end}}'
   GOVULNCHECK_VERSION_OUTPUT:
@@ -74,7 +74,7 @@ vars:
   E2E_SCENARIOS:
     sh: |
       {{if eq OS "windows"}}
-        powershell.exe -Command "Get-ChildItem e2e\*.js | Where-Object { $_.BaseName -notlike 'common*' } | Select-Object -ExpandProperty BaseName"
+        powershell.exe -Command "Get-ChildItem e2e\*.js | Where-Object { \$_.BaseName -notlike 'common*' } | Select-Object -ExpandProperty BaseName"
       {{else}}
         ls e2e/*.js | xargs -n1 basename -s .js | grep -v '^common'
       {{end}}
@@ -120,7 +120,12 @@ tasks:
   version-check:
     desc: "Check what the next version would be based on commits"
     cmds:
-      - git fetch --tags
+      - |
+        {{if eq OS "windows"}}
+          powershell.exe -Command "git fetch --tags; if (\$LASTEXITCODE -ne 0) { Write-Host 'Warning: git fetch --tags failed; using local tags only.'; exit 0 }"
+        {{else}}
+          git fetch --tags || echo "Warning: git fetch --tags failed; using local tags only."
+        {{end}}
       - |
         echo "Analyzing commits for version bump..."
         {{if eq OS "windows"}}
@@ -275,8 +280,7 @@ tasks:
     cmds:
       - |
         {{if eq OS "windows"}}
-          echo "Note: Race detector requires CGO. If this fails, install gcc (MinGW-w64) or use WSL."
-          powershell.exe -Command "\$env:CGO_ENABLED = '1'; go test -race -v ./..."
+          powershell.exe -Command "if (Get-Command gcc -ErrorAction SilentlyContinue) { \$env:CGO_ENABLED = '1'; go test -race -v ./... } else { Write-Host 'Warning: gcc not found on Windows; running non-race tests instead.'; \$env:CGO_ENABLED = '0'; go test -v ./... }"
         {{else}}
           go test -race -v ./...
         {{end}}
@@ -287,8 +291,13 @@ tasks:
     desc: "Run TypeScript declaration smoke tests"
     dir: typescript
     cmds:
-      - npm ci
-      - npm test
+      - |
+        {{if eq OS "windows"}}
+          powershell.exe -Command "\$npmCmd = ''; \$npmPath = (Get-Command npm -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue); if (\$npmPath) { \$npmCmd = \$npmPath }; if (-not \$npmCmd) { \$candidate = Join-Path \$env:ProgramFiles 'nodejs\npm.cmd'; if (Test-Path \$candidate) { \$npmCmd = \$candidate } }; if (-not \$npmCmd) { throw 'npm not found. Install Node.js LTS and ensure npm is available.' }; \$nodeDir = Split-Path -Parent \$npmCmd; \$env:PATH = \"\$nodeDir;\$env:PATH\"; & \$npmCmd ci; if (\$LASTEXITCODE -ne 0) { exit \$LASTEXITCODE }; & \$npmCmd test; exit \$LASTEXITCODE"
+        {{else}}
+          npm ci
+          npm test
+        {{end}}
 
   release-check:
     desc: "Run full release readiness checks"
@@ -318,6 +327,8 @@ tasks:
 
   test-e2e-single:
     desc: "Run one E2E scenario across backend and key-tracking combinations"
+    vars:
+      E2E_SCENARIO: "{{.E2E_SCENARIO | default `api-output-validation`}}"
     cmds:
       - |
         {{if eq OS "windows"}}
