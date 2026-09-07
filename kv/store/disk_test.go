@@ -433,6 +433,13 @@ func TestDiskStore_Open_ReadOnlyMissingBucketFails(t *testing.T) {
 func TestDiskStore_OpenLockedFileTimesOut(t *testing.T) {
 	t.Parallel()
 
+	if runtime.GOOS == "windows" {
+		// On Windows, opening the same DB file from the same process can fail
+		// at OS-open time with a sharing violation before bbolt's flock timeout
+		// path is exercised. The timeout error chain is covered on non-Windows.
+		t.Skip("platform-specific file sharing semantics")
+	}
+
 	dbPath := filepath.Join(t.TempDir(), "locked.db")
 
 	first, err := NewDiskStore(false, dbPath, nil)
