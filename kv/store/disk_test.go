@@ -459,8 +459,8 @@ func TestDiskStore_OpenLockedFileTimesOut(t *testing.T) {
 
 	require.Error(t, err)
 
-	assert.ErrorIs(t, err, ErrDiskStoreOpenFailed)
-	assert.ErrorIs(t, err, boltErrors.ErrTimeout)
+	require.ErrorIs(t, err, ErrDiskStoreOpenFailed)
+	require.ErrorIs(t, err, boltErrors.ErrTimeout)
 
 	assert.Contains(t, err.Error(), "timeout waiting for file lock")
 	assert.Contains(t, err.Error(), "another k6 process may be using the same database file")

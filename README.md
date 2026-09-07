@@ -197,7 +197,7 @@ xk6 build --with github.com/oshokin/xk6-kv@v1.4.31
 ./k6 version
 ```
 
-> **Requirements**: Go 1.25.11 or higher.
+> **Requirements**: Go 1.25.13 or higher.
 
 ## Compatibility
 

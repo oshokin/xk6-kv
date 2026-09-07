@@ -118,6 +118,8 @@ func NewDiskStore(trackKeys bool, path string, cfg *DiskConfig) (*DiskStore, err
 
 // Open initializes the underlying bbolt handle when needed and increments the
 // reference counter for each caller. It is safe for concurrent use.
+//
+//nolint:funlen // open lifecycle, bucket bootstrap, and tracked-index rebuild are intentionally explicit in one critical section.
 func (s *DiskStore) Open() error {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()

@@ -268,7 +268,7 @@ func benchmarkWriteSerializedPtr(entries []*benchSetManySerializedEntry) int {
 func BenchmarkSetManyArgBuild_ValueSlice(b *testing.B) {
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		benchSinkEntriesValue = benchmarkBuildValueEntries()
 	}
 }
@@ -277,7 +277,7 @@ func BenchmarkSetManyArgBuild_ValueSlice(b *testing.B) {
 func BenchmarkSetManyArgBuild_PointerSlice(b *testing.B) {
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		benchSinkEntriesPtr = benchmarkBuildPointerEntries()
 	}
 }
@@ -286,7 +286,7 @@ func BenchmarkSetManyArgBuild_PointerSlice(b *testing.B) {
 func BenchmarkSetManyErrorListBuild_ValueSlice(b *testing.B) {
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		benchSinkDetailsValue = benchmarkBuildValueErrorDetails()
 	}
 }
@@ -295,7 +295,7 @@ func BenchmarkSetManyErrorListBuild_ValueSlice(b *testing.B) {
 func BenchmarkSetManyErrorListBuild_PointerSlice(b *testing.B) {
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		benchSinkDetailsPtr = benchmarkBuildPointerErrorDetails()
 	}
 }
@@ -307,9 +307,8 @@ func BenchmarkSetManyEndToEndSuccess_ValueSlices(b *testing.B) {
 	input := benchSetManyInputValues
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		parsed, parseErrors := benchmarkImportEntriesValue(keys, input)
 		if len(parseErrors) > 0 {
 			b.Fatal("unexpected parse errors")
@@ -331,9 +330,8 @@ func BenchmarkSetManyEndToEndSuccess_PointerSlices(b *testing.B) {
 	input := benchSetManyInputValues
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		parsed, parseErrors := benchmarkImportEntriesPtr(keys, input)
 		if len(parseErrors) > 0 {
 			b.Fatal("unexpected parse errors")
@@ -355,9 +353,8 @@ func BenchmarkSetManyEndToEndSerializeError_ValueSlices(b *testing.B) {
 	input := benchSetManyInputValuesWithFail
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		parsed, parseErrors := benchmarkImportEntriesValue(keys, input)
 		if len(parseErrors) > 0 {
 			b.Fatal("unexpected parse errors")
@@ -375,9 +372,8 @@ func BenchmarkSetManyEndToEndSerializeError_PointerSlices(b *testing.B) {
 	input := benchSetManyInputValuesWithFail
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		parsed, parseErrors := benchmarkImportEntriesPtr(keys, input)
 		if len(parseErrors) > 0 {
 			b.Fatal("unexpected parse errors")
