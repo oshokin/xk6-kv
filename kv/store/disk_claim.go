@@ -571,6 +571,7 @@ func (s *DiskStore) claimRandomManyBolt(opts *ClaimManyOptions) ([]*EntryClaim, 
 			return nil
 		}
 
+		//nolint:gosec // math/rand/v2 is intentional for non-cryptographic key sampling in k6 allocation flows.
 		rand.Shuffle(len(candidates), func(i, j int) {
 			candidates[i], candidates[j] = candidates[j], candidates[i]
 		})

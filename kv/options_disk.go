@@ -21,9 +21,11 @@ import (
 type DiskOptions struct {
 	// Timeout controls how long bbolt waits to acquire the file lock.
 	//
-	// When zero, bbolt waits indefinitely. In k6 tests this can cause hangs
-	// if another process holds the DB lock. Setting a finite timeout makes
-	// misconfiguration fail fast instead.
+	// When omitted, xk6-kv uses DefaultDiskStoreOpenTimeout (5 seconds) so a
+	// second process fails fast instead of hanging indefinitely.
+	//
+	// An explicitly configured zero duration restores bbolt's native behavior
+	// and waits indefinitely.
 	//
 	// Accepted types:
 	//   - number: milliseconds.

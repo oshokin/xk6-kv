@@ -76,6 +76,8 @@ func (s *MemoryStore) PopRandom(prefix string) (*Entry, error) {
 
 // PopRandomMany claims up to count random free matching entries and removes each claimed key.
 // Completed deletes are not rolled back if a later completion fails.
+//
+//nolint:gosec // math/rand/v2 is intentional for non-cryptographic key sampling in k6 allocation flows.
 func (s *MemoryStore) PopRandomMany(prefix string, count int64) ([]*Entry, error) {
 	release, err := s.guardMutation()
 	if err != nil {
@@ -221,6 +223,8 @@ func (s *MemoryStore) ClaimKey(key string, opts *ClaimOptions) (*EntryClaim, err
 }
 
 // ClaimRandomMany leases up to Count unique random free matching entries.
+//
+//nolint:gosec // math/rand/v2 is intentional for non-cryptographic key sampling in k6 allocation flows.
 func (s *MemoryStore) ClaimRandomMany(opts *ClaimManyOptions) ([]*EntryClaim, error) {
 	release, err := s.guardMutation()
 	if err != nil {

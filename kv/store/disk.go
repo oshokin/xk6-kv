@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"sync/atomic"
 
 	bolt "go.etcd.io/bbolt"
+	boltErrors "go.etcd.io/bbolt/errors"
 )
 
 // DiskStore is a persistent key-value store backed by bbolt. It optionally
@@ -26,7 +28,8 @@ type DiskStore struct {
 	path string
 	// handle is the underlying bbolt handle.
 	handle *bolt.DB
-	// boltOptions holds user-provided bbolt options (nil when defaults are used).
+	// boltOptions holds the effective bbolt options, including xk6-kv defaults
+	// and any user-provided disk overrides.
 	boltOptions *bolt.Options
 	// bucket is the internal bbolt bucket name.
 	bucket []byte
@@ -115,6 +118,8 @@ func NewDiskStore(trackKeys bool, path string, cfg *DiskConfig) (*DiskStore, err
 
 // Open initializes the underlying bbolt handle when needed and increments the
 // reference counter for each caller. It is safe for concurrent use.
+//
+//nolint:funlen // open lifecycle, bucket bootstrap, and tracked-index rebuild are intentionally explicit in one critical section.
 func (s *DiskStore) Open() error {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
@@ -140,6 +145,16 @@ func (s *DiskStore) Open() error {
 	// Open the database file.
 	handler, err := bolt.Open(s.path, 0o600, s.boltOptions)
 	if err != nil {
+		if errors.Is(err, boltErrors.ErrTimeout) {
+			return fmt.Errorf(
+				"%w: %q: timeout waiting for file lock "+
+					"(another k6 process may be using the same database file): %w",
+				ErrDiskStoreOpenFailed,
+				s.path,
+				err,
+			)
+		}
+
 		return fmt.Errorf("%w: %w", ErrDiskStoreOpenFailed, err)
 	}
 

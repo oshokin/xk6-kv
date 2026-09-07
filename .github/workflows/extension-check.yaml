@@ -25,9 +25,9 @@ permissions:
 # Environment variables (constants for configuration).
 env:
   # Tool versions.
-  GOLANGCI_LINT_VERSION: "v2.12.2"
-  GO_VERSION: "1.25.11"
-  XK6_VERSION: "v1.4.6"
+  GOLANGCI_LINT_VERSION: "v2.13.2"
+  GO_VERSION: "1.25.13"
+  XK6_VERSION: "v1.4.12"
 
   # Test configuration.
   TEST_TIMEOUT: "600s"
@@ -93,7 +93,7 @@ jobs:
       fail-fast: false
       # Create a matrix of 2 jobs: the supported Go version × 2 platforms.
       matrix:
-        go-version: ["1.25.11"]
+        go-version: ["1.25.13"]
         platform: [ubuntu-latest, windows-latest]
     steps:
       # Checkout the repository code.

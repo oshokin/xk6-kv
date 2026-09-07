@@ -80,6 +80,8 @@ func sampleUniqueKeys(keys []string, count int64) []string {
 }
 
 // shuffleKeys returns keys in a uniformly random order.
+//
+//nolint:gosec // math/rand/v2 is intentional for non-cryptographic key sampling in k6 allocation flows.
 func shuffleKeys(keys []string) []string {
 	if len(keys) == 0 {
 		return []string{}
