@@ -134,9 +134,13 @@ declare module 'k6/x/kv' {
    */
   export interface DiskOptions {
     /**
-     * How long to wait for the file lock.
-     * - number: milliseconds (e.g., 250, 1000).
-     * - string: Go duration with units like "ms", "s", "m", "h" (e.g., "500ms", "1s", "2m", "1h15m").
+     * How long to wait for the bbolt database file lock.
+     *
+     * - number: milliseconds (e.g. 250, 1000).
+     * - string: Go duration such as "500ms", "1s", "2m".
+     * - an explicit zero value requests bbolt's indefinite wait behavior.
+     *
+     * @default "5s"
      */
     timeout?: number | string;
     /**

@@ -201,7 +201,7 @@ xk6 build --with github.com/oshokin/xk6-kv@v1.4.31
 
 ## Compatibility
 
-Current development targets **k6 v2.0.x** (`go.k6.io/k6/v2`). The JavaScript import is unchanged:
+Current development targets **k6 v2.1.x** (`go.k6.io/k6/v2`). The JavaScript import is unchanged:
 
 ```javascript
 import { openKv } from "k6/x/kv";
@@ -211,7 +211,8 @@ Use **xk6 v1.4.1** or newer when building this extension from source; xk6 resolv
 
 | xk6-kv version | k6 core version | Notes |
 | --- | --- | --- |
-| v1.5.0+ | v2.0.x | Current supported line |
+| current development | v2.1.x | Current supported line |
+| v1.5.0-v1.5.1 | v2.0.x | Previous k6 v2 line |
 | v1.4.31 | v1.7.x | Frozen legacy line; pin this tag when building against k6 v1 |
 
 Projects that still require k6 v1.7.x should pin the extension explicitly:
@@ -385,7 +386,7 @@ interface OpenKvOptions {
     // when omitted: defaults are applied
   }
   disk?: {
-    timeout?: number | string         // wait for file lock; number=ms, string=Go duration (e.g. "1s"); default 1s
+    timeout?: number | string         // file-lock wait; number=ms, string=Go duration; default 5s; explicit 0 waits indefinitely
     noSync?: boolean                  // disable fsync on commit; default false
     noGrowSync?: boolean              // skip fsync on growth; default false
     noFreelistSync?: boolean          // rebuild freelist on open; default false
@@ -409,7 +410,7 @@ interface OpenKvOptions {
 - `trackKeys`: Enable in-memory key indexing for faster `randomKey()`/`randomKeys()` selection (see Performance & Complexity)
 - `path`: (Disk only) Override bbolt file location
 - `memory.shardCount`: (Memory only) Number of shards for concurrent performance. If `<= 0` or omitted, defaults to `runtime.NumCPU()` (automatic, recommended). If `> 65536`, automatically capped at 65536. Ignored by disk backend. When `memory` is omitted, defaults are applied.
-- `disk`: (Disk only) Optional bbolt tuning. When `disk` is omitted, bbolt defaults apply (1s lock timeout, syncs enabled, array freelist, etc.).
+- `disk`: (Disk only) Optional bbolt tuning. When `disk` is omitted, xk6-kv uses bbolt defaults for the exposed tuning options except for the file-lock timeout: xk6-kv defaults it to 5 seconds so opening a DB already locked by another process fails instead of hanging indefinitely. Set `disk.timeout` explicitly to `0` to request bbolt's native indefinite-wait behavior.
 - `disk.readOnly`: Requires the bbolt file (and `k6` bucket) to already exist; opening in read-only mode cannot create the bucket and will fail if the file is missing or empty.
 - `metrics.operations`: Enables automatic per-method metrics (`xk6_kv_operations_total`, `xk6_kv_operation_duration`, `xk6_kv_operation_failed`, `xk6_kv_errors_total`, `xk6_kv_empty_result`).
 

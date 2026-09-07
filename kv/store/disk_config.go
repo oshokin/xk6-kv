@@ -8,10 +8,26 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+const (
+	// DefaultDiskStoreOpenTimeout is the maximum amount of time xk6-kv waits
+	// for the bbolt file lock when disk.timeout is omitted.
+	//
+	// bbolt itself defaults to Timeout == 0, which means waiting indefinitely.
+	// A finite extension-level default prevents a k6 process from hanging when
+	// another process already holds the database file lock.
+	//
+	// Users can explicitly set disk.timeout to 0 to opt back into bbolt's
+	// indefinite-wait behavior.
+	DefaultDiskStoreOpenTimeout = 5 * time.Second
+)
+
 // DiskConfig holds validated bbolt-specific tuning knobs parsed at the JS layer.
 type DiskConfig struct {
 	// Timeout is the amount of time to wait to obtain a file lock.
-	// When set to zero it will wait indefinitely.
+	//
+	// A nil Timeout uses DefaultDiskStoreOpenTimeout.
+	// An explicitly configured zero duration waits indefinitely, matching
+	// bbolt semantics.
 	Timeout *time.Duration
 	// NoSync sets the initial value of DB.NoSync. Normally this can just be
 	// set directly on the DB itself when returned from Open(), but this option
@@ -68,23 +84,26 @@ func (cfg *DiskConfig) validate() error {
 	return nil
 }
 
-// buildBBoltOptions builds bolt.Options from DiskConfig.
-// If cfg is nil, returns default bolt.Options.
 func buildBBoltOptions(cfg *DiskConfig) (*bolt.Options, error) {
+	// Start from bbolt defaults so fields that xk6-kv does not expose continue
+	// to follow the dependency defaults.
+	opts := *bolt.DefaultOptions
+
+	// bbolt's default Timeout is zero, which means waiting indefinitely for
+	// the database file lock. xk6-kv intentionally overrides only this one
+	// default so a second k6 process fails fast instead of hanging forever.
+	opts.Timeout = DefaultDiskStoreOpenTimeout
+
 	if cfg == nil {
-		// Returning nil lets bbolt use its own default options (1s lock timeout, etc.).
-		//nolint:nilnil // it's a valid here since we need default options.
-		return nil, nil
+		return &opts, nil
 	}
 
-	err := cfg.validate()
-	if err != nil {
+	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 
-	// Start from bbolt's defaults to avoid changing behavior when new fields are added.
-	opts := *bolt.DefaultOptions
-
+	// An explicitly provided timeout wins over the xk6-kv default.
+	// In particular, an explicit zero restores bbolt's indefinite wait.
 	if cfg.Timeout != nil {
 		opts.Timeout = *cfg.Timeout
 	}

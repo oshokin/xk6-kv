@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
@@ -427,6 +428,53 @@ func TestDiskStore_Open_ReadOnlyMissingBucketFails(t *testing.T) {
 	err = store.Open()
 	require.Error(t, err, "read-only open must fail when bucket is absent")
 	require.ErrorIs(t, err, ErrBucketNotFound)
+}
+
+func TestDiskStore_OpenLockedFileTimesOut(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "locked.db")
+
+	first, err := NewDiskStore(false, dbPath, nil)
+	require.NoError(t, err)
+	require.NoError(t, first.Open())
+
+	t.Cleanup(func() {
+		_ = first.Close()
+	})
+
+	// Keep the integration test fast. Default 5-second behavior is covered
+	// separately by buildBBoltOptions tests; here we verify that bbolt timeout
+	// is surfaced through DiskStore.Open with the expected error chain.
+	timeout := 100 * time.Millisecond
+
+	second, err := NewDiskStore(false, dbPath, &DiskConfig{
+		Timeout: &timeout,
+	})
+	require.NoError(t, err)
+
+	startedAt := time.Now()
+	err = second.Open()
+	elapsed := time.Since(startedAt)
+
+	require.Error(t, err)
+
+	assert.ErrorIs(t, err, ErrDiskStoreOpenFailed)
+	assert.ErrorIs(t, err, boltErrors.ErrTimeout)
+
+	assert.Contains(t, err.Error(), "timeout waiting for file lock")
+	assert.Contains(t, err.Error(), "another k6 process may be using the same database file")
+	assert.Contains(t, err.Error(), dbPath)
+
+	// Avoid a fragile millisecond-exact assertion. We only need evidence that
+	// the open attempt is bounded and did not hang indefinitely.
+	assert.Less(t, elapsed, 2*time.Second)
+
+	assert.False(t, second.opened.Load())
+	assert.EqualValues(t, 0, second.refCount.Load())
+
+	// Close must stay safe even though Open never completed.
+	assert.NoError(t, second.Close())
 }
 
 // TestDiskStore_GetSet_RoundtripAndTypes validates:

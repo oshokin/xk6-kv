@@ -9,14 +9,39 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// TestBuildBBoltOptions_NilConfig_UsesDefaults tests that when the disk config is nil,
-// the default bbolt options are used.
-func TestBuildBBoltOptions_NilConfig_UsesDefaults(t *testing.T) {
+func TestBuildBBoltOptions_NilConfig_UsesSafeLockTimeout(t *testing.T) {
 	t.Parallel()
 
 	opts, err := buildBBoltOptions(nil)
 	require.NoError(t, err)
-	assert.Nil(t, opts, "nil config should defer to bbolt defaults")
+	require.NotNil(t, opts)
+
+	assert.Equal(t, DefaultDiskStoreOpenTimeout, opts.Timeout)
+
+	// Apart from the intentional lock-timeout override, keep the bbolt
+	// defaults for the tuning knobs exposed by xk6-kv.
+	assert.Equal(t, bolt.DefaultOptions.NoSync, opts.NoSync)
+	assert.Equal(t, bolt.DefaultOptions.NoGrowSync, opts.NoGrowSync)
+	assert.Equal(t, bolt.DefaultOptions.NoFreelistSync, opts.NoFreelistSync)
+	assert.Equal(t, bolt.DefaultOptions.PreLoadFreelist, opts.PreLoadFreelist)
+	assert.Equal(t, bolt.DefaultOptions.FreelistType, opts.FreelistType)
+	assert.Equal(t, bolt.DefaultOptions.ReadOnly, opts.ReadOnly)
+	assert.Equal(t, bolt.DefaultOptions.InitialMmapSize, opts.InitialMmapSize)
+	assert.Equal(t, bolt.DefaultOptions.Mlock, opts.Mlock)
+}
+
+func TestBuildBBoltOptions_ExplicitZeroTimeoutDisablesFailFastDefault(t *testing.T) {
+	t.Parallel()
+
+	zero := time.Duration(0)
+
+	opts, err := buildBBoltOptions(&DiskConfig{
+		Timeout: &zero,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, opts)
+
+	assert.Zero(t, opts.Timeout)
 }
 
 // TestBuildBBoltOptions_AppliesDefaultsThenOverrides tests that the bbolt options are applied correctly.
