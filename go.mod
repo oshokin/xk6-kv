@@ -3,9 +3,9 @@ module github.com/oleiade/xk6-kv
 go 1.25.0
 
 require (
-	github.com/grafana/sobek v0.0.0-20260727142017-0cda331c65fd
+	github.com/grafana/sobek v0.0.0-20260727154728-7781506a890f
 	go.etcd.io/bbolt v1.5.0
-	go.k6.io/k6/v2 v2.1.0
+	go.k6.io/k6/v2 v2.2.0
 )
 
 require (
@@ -42,7 +42,7 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260724162435-b2f20204f0df // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260724162435-b2f20204f0df // indirect
-	google.golang.org/grpc v1.82.1 // indirect
+	google.golang.org/grpc v1.83.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/guregu/null.v3 v3.5.0 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
