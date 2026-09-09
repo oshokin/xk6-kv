@@ -63,6 +63,15 @@ type DiskStore struct {
 	testRestoreHook func()
 	// claimToken is a process-local monotonically increasing token for claims.
 	claimToken atomic.Int64
+	// ownerBindings stores process-local sticky ClaimForOwner bindings.
+	//
+	// It is intentionally not persisted in bbolt because claims themselves are
+	// local runtime leases and writable Open resets durable claim state.
+	ownerBindings *claimOwnerBindingRegistry
+	// circularCursors stores process-local reusable circular positions.
+	//
+	// This state is intentionally not persisted in bbolt or snapshots.
+	circularCursors *circularCursorRegistry
 	// claimsCleanupMu serializes throttled full scans of expired claim records.
 	claimsCleanupMu sync.Mutex
 	// lastClaimsCleanupUnixMilli records when the last full expired-claims scan succeeded.
@@ -102,17 +111,19 @@ func NewDiskStore(trackKeys bool, path string, cfg *DiskConfig) (*DiskStore, err
 	}
 
 	return &DiskStore{
-		path:        diskPath,
-		handle:      new(bolt.DB),
-		boltOptions: boltOpts,
-		opened:      atomic.Bool{},
-		refCount:    atomic.Int64{},
-		lock:        sync.Mutex{},
-		trackKeys:   trackKeys,
-		keysMap:     make(map[string]int),
-		keysList:    []string{},
-		keysLock:    sync.RWMutex{},
-		ost:         idx,
+		path:            diskPath,
+		handle:          new(bolt.DB),
+		boltOptions:     boltOpts,
+		opened:          atomic.Bool{},
+		refCount:        atomic.Int64{},
+		lock:            sync.Mutex{},
+		trackKeys:       trackKeys,
+		keysMap:         make(map[string]int),
+		keysList:        []string{},
+		keysLock:        sync.RWMutex{},
+		ost:             idx,
+		ownerBindings:   &claimOwnerBindingRegistry{},
+		circularCursors: &circularCursorRegistry{},
 	}, nil
 }
 
@@ -763,6 +774,8 @@ func (s *DiskStore) Clear() error {
 
 		s.resetTrackedClaimsLocked()
 	}
+
+	s.circularCursors.resetAll()
 
 	return nil
 }

@@ -216,6 +216,29 @@ func TestDiskStoreReadOnlyRejectsMutations(t *testing.T) {
 						return err
 					},
 				},
+				{
+					name: "claim_next",
+					run: func(s *DiskStore) error {
+						_, err := s.ClaimNext(&ClaimOptions{
+							Prefix: "seed:",
+							TTLMs:  10_000,
+						})
+
+						return err
+					},
+				},
+				{
+					name: "claim_for_owner",
+					run: func(s *DiskStore) error {
+						_, err := s.ClaimForOwner(&ClaimOptions{
+							Prefix: "seed:",
+							Owner:  "readonly:vu:1",
+							TTLMs:  10_000,
+						})
+
+						return err
+					},
+				},
 			}
 
 			for _, tt := range testCases {
@@ -243,6 +266,23 @@ func TestDiskStoreReadOnlyRejectsClaims(t *testing.T) {
 			require.Error(t, err)
 			require.ErrorIs(t, err, ErrDiskStoreReadOnly)
 			assert.False(t, released)
+
+			stickyClaim, err := store.ClaimForOwner(&ClaimOptions{
+				Prefix: "seed:",
+				Owner:  "readonly:vu:1",
+				TTLMs:  10_000,
+			})
+			require.Error(t, err)
+			require.ErrorIs(t, err, ErrDiskStoreReadOnly)
+			assert.Nil(t, stickyClaim)
+
+			nextClaim, err := store.ClaimNext(&ClaimOptions{
+				Prefix: "seed:",
+				TTLMs:  10_000,
+			})
+			require.Error(t, err)
+			require.ErrorIs(t, err, ErrDiskStoreReadOnly)
+			assert.Nil(t, nextClaim)
 
 			completed, err := store.CompleteClaim(claimRef, nil)
 			require.Error(t, err)

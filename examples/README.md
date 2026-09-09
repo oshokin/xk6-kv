@@ -2,7 +2,7 @@
 
 This directory contains runnable k6 scripts that exercise every major `kv.*` API surface. They double as integration tests and living documentation.
 
-**Suggested first runs** (also listed in the root [README](../README.md#start-here-existing-scripts)): `claim-random-default-ttl.js`, `pop-random-unique-users.js`, `import-csv.js`, `export-jsonl.js`.
+**Suggested first runs** (also listed in the root [README](../README.md#start-here-existing-scripts)): `claim-random-default-ttl.js`, `claim-for-owner.js`, `next-circular-reusable-data.js`, `pop-random-unique-users.js`, `import-csv.js`, `export-jsonl.js`.
 
 ## Recipe index
 
@@ -10,6 +10,9 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
 | --- | --- | --- | --- |
 | Export captured responses to CSV | `export-csv.js` | `setMany`, `exportCSV` | When response payloads are flat object rows and you need handoff/report files. |
 | Prefix pool diagnostics for claim availability | `allocation-stats.js` | `claimRandomMany`, `allocationStats`, `releaseClaim` | When allocation pools are separated by key prefix and you need operational pool-health checks. |
+| Sticky per-owner user leasing | `claim-for-owner.js` | `claimForOwner`, `renewClaim` | When one logical VU/scenario owner must keep the same live leased user across iterations. |
+| Reusable circular dataset | `next-circular-reusable-data.js` | `setMany`, `nextCircular` | Reuse a small dataset across more VU iterations than there are records. |
+| Concurrent recoverable ordered work queue | `concurrent-producer-consumer.js` | `incrementBy`, `set`, `claimNext`, `completeClaim`, `releaseClaim` | When multiple consumers must atomically reserve the next work item without duplicate processing. |
 | Cleanup many claims safely | `claim-batch-lifecycle.js` | `claimRandomMany`, `renewClaims`, `completeClaims`, `releaseClaims` | When one VU holds multiple leases and you need partial-success lifecycle cleanup. |
 | Reserve explicit fixtures | `claim-keys.js` | `claimKeys`, `releaseClaims` | When test steps need a known fixture set by exact keys. |
 | Validate seed files before import | `validate-import-files.js` | `validateCSV`, `validateJSONL`, `importCSV` | When you want fast preflight checks before long imports. |
@@ -31,7 +34,19 @@ This directory contains runnable k6 scripts that exercise every major `kv.*` API
    k6 run examples/claim-random-default-ttl.js
    ```
 
-   That script also demonstrates claim lifecycle handling:
+   For sticky per-owner allocation, try:
+
+   ```bash
+   k6 run examples/claim-for-owner.js
+   ```
+
+   For reusable circular fixtures with wrap-around, try:
+
+   ```bash
+   k6 run examples/next-circular-reusable-data.js
+   ```
+
+   The claim-for-owner script also demonstrates claim lifecycle handling:
    `completeClaim()` on success and `releaseClaim()` on failure.
 
    For one-time unique allocation via atomic pop, try:

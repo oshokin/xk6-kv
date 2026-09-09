@@ -10,6 +10,7 @@
 Use **xk6-kv** when your k6 test needs writable shared state inside one k6 process:
 
 - give each VU a **unique user or credential** without races;
+- iterate reusable fixtures in **shared circular key order** with `nextCircular`;
 - **claim** or **pop** rows from a local pool (CSV/JSONL import, `setMany`, or runtime writes);
 - build **task queues** and producer/consumer flows;
 - share **mutable** state between scenarios;
@@ -19,7 +20,7 @@ Use **xk6-kv** when your k6 test needs writable shared state inside one k6 proce
 
 [`SharedArray`](https://grafana.com/docs/k6/latest/javascript-api/k6-data/sharedarray/) is read-only after initialization and is not meant for communication between VUs. **xk6-kv** adds a process-local, concurrency-safe store with:
 
-- lease-based allocation: `claimRandom`, `claimKey`, `claimKeys`, `claimRandomMany`;
+- lease-based allocation: `claimRandom`, `claimNext`, `claimForOwner`, `claimKey`, `claimKeys`, `claimRandomMany`;
 - one-shot drains: `popRandom`, `popRandomMany`;
 - streaming seed import: `importCSV`, `importJSONL`;
 - portable export: `exportJSONL`, `exportCSV`, `backup`, `restore`;
@@ -31,7 +32,8 @@ Use **xk6-kv** when your k6 test needs writable shared state inside one k6 proce
 | --- | --- | --- |
 | Read-only shared fixtures | `SharedArray` | yes (import once, read many) |
 | Mutable shared state across VUs | no | yes (memory or disk backend) |
-| Unique credential / user allocation | manual indexing / external store | `claimRandom`, `claimKey`, `claimKeys`, `claimRandomMany` |
+| Reusable ordered dataset with wrap-around | manual modulo/indexing | `nextCircular` |
+| Unique credential / user allocation | manual indexing / external store | `claimRandom`, `claimNext`, `claimForOwner`, `claimKey`, `claimKeys`, `claimRandomMany` |
 | One-shot task queue (consume once) | manual | `popRandom`, `popRandomMany` |
 | Large CSV/JSONL seed files | load in `setup` yourself | `importCSV`, `importJSONL` |
 | Response capture to file | `handleSummary` / custom scripts | `exportJSONL`, `exportCSV`, `backup` / `restore` |
@@ -58,6 +60,15 @@ From the repo root, with a k6 binary that includes this extension:
 # Lease-based unique allocation (complete on success, release on failure)
 k6 run examples/claim-random-default-ttl.js
 
+# Sticky per-VU owner allocation (same live claim per owner/prefix)
+k6 run examples/claim-for-owner.js
+
+# Reusable circular dataset (records wrap and are reused)
+k6 run examples/next-circular-reusable-data.js
+
+# Ordered recoverable queue consumers (claimNext + complete/release)
+k6 run examples/concurrent-producer-consumer.js
+
 # One-time user pool drain (no duplicate allocation)
 k6 run examples/pop-random-unique-users.js
 
@@ -79,7 +90,8 @@ This project is **GNU AGPL v3.0** (fork of [oleiade/xk6-kv](https://github.com/o
 
 ## Core features
 
-- **Unique allocation:** `claimRandom`, `claimKey`, `claimKeys`, `claimRandomMany`, `renewClaim`, `releaseClaim`, `completeClaim`, `renewClaims`, `releaseClaims`, `completeClaims`.
+- **Unique allocation:** `claimRandom`, `claimNext`, `claimForOwner`, `claimKey`, `claimKeys`, `claimRandomMany`, `renewClaim`, `releaseClaim`, `completeClaim`, `renewClaims`, `releaseClaims`, `completeClaims`.
+- **Reusable circular data:** `nextCircular` (shared per-prefix lexical cursor with wrap-around).
 - **One-shot queues:** `popRandom`, `popRandomMany` (each successful pop removes the key).
 - **Large seed files:** streaming `importCSV` and `importJSONL`.
 - **Response capture & handoff:** `exportJSONL`, `exportCSV`, `validateCSV`, `validateJSONL`, `backup` / `restore`, disk backend.
@@ -128,6 +140,248 @@ export default async function () {
     await kv.releaseClaim(claim);
     throw err;
   }
+}
+```
+
+## Reusable circular data with `nextCircular()`
+
+Use `nextCircular()` when records are reusable and you want deterministic
+lexicographic progression with automatic wrap-around.
+
+```javascript
+const query = await kv.nextCircular({
+  prefix: "search:",
+});
+
+if (query !== null) {
+  console.log(query.key, query.value);
+}
+```
+
+For hot reusable circular workloads in memory, prefer tracked keys:
+
+```javascript
+const kv = openKv({
+  backend: "memory",
+  // Recommended for repeated nextCircular() on medium/large datasets.
+  trackKeys: true,
+});
+```
+
+`nextCircular()` semantics:
+
+- one shared process-local cursor per exact prefix (`"users:"` and `"users:a"` are different cursors);
+- key order is lexicographic KV key order (`item:1`, `item:10`, `item:2`);
+- after the last matching key, it wraps to the first matching key;
+- returns `null` only when the prefix currently has no matching keys;
+- non-exclusive by design: live claims are ignored and keys remain reusable.
+
+Use stable, bounded dataset prefixes with `nextCircular()`. Avoid generating a
+new prefix per request/iteration because cursor slots are intentionally kept for
+the store lifetime.
+
+`nextCircular()` coordinates only VUs sharing the same local `xk6-kv` store
+instance in one k6 process. It is not a distributed feeder.
+
+If two workers must not process the same item concurrently, use claim APIs:
+
+```javascript
+// Reusable circular dataset.
+const query = await kv.nextCircular({
+  prefix: "search:",
+});
+
+// Exclusive ordered work item.
+const job = await kv.claimNext({
+  prefix: "jobs:",
+  ttl: 30_000,
+});
+```
+
+| API | order | exclusive | reuse |
+| --- | --- | --- | --- |
+| `nextCircular` | lexical | no | yes, wraps |
+| `claimNext` | lexical free-key head | yes | after release/expiry |
+| `claimRandom` | random free key | yes | after release/expiry |
+| `claimForOwner` | sticky hit, otherwise random free key | yes | sticky while live |
+| `randomKey` | random | no | always reusable |
+
+Concurrency caveat for reusable feeders: with dataset `A, B`, concurrent calls
+can produce `A, B, A, B` while earlier callers are still processing values. If
+that overlap is unacceptable, use `claimNext()`.
+
+## Ordered allocation with `claimNext()`
+
+Use `claimNext()` when consumers must lease the lexicographically smallest free key in a prefix.
+
+| API | Selection | Reuse semantics |
+| --- | --- | --- |
+| `claimRandom()` | random free key | ordinary lease |
+| `claimNext()` | lexicographically-first free key | ordinary lease |
+| `claimForOwner()` | existing sticky owner binding, otherwise random free key | sticky while claim is live |
+
+```javascript
+const job = await kv.claimNext({
+  prefix: "jobs:",
+  owner: `worker:${workerId}`,
+  ttl: 30_000,
+});
+
+if (job === null) {
+  return;
+}
+
+try {
+  await processJob(job.entry.value);
+
+  const completed = await kv.completeClaim(job, {
+    deleteKey: true,
+  });
+
+  if (!completed) {
+    throw new Error(`claim ${job.id} expired before completion`);
+  }
+} catch (err) {
+  await kv.releaseClaim(job);
+  throw err;
+}
+```
+
+Lifecycle behavior is the same as other claim APIs:
+
+- `releaseClaim()` keeps the key in KV, so it becomes eligible for `claimNext()` again.
+- `completeClaim({ deleteKey: false })` removes only the claim; the key is eligible again.
+- `completeClaim({ deleteKey: true })` removes the key permanently and advances the queue.
+- Expired claims become eligible again.
+- `renewClaim()` keeps the same key unavailable for longer by extending the lease.
+
+> ⚠️ `claimNext()` orders by KV key string, not insertion timestamp or original CSV row order.
+> Use sortable keys such as `task:000001`, `task:000002`, `task:000003` when numeric order matters.
+
+## Sticky user allocation with `claimForOwner()`
+
+Use `claimForOwner()` when one logical owner (for example one VU in one scenario)
+must keep reusing the same live leased record across iterations.
+
+```javascript
+import exec from "k6/execution";
+import { openKv } from "k6/x/kv";
+
+const users = openKv({
+  backend: "memory",
+  trackKeys: true,
+});
+
+function owner() {
+  return `${exec.scenario.name}:vu:${exec.vu.idInInstance}`;
+}
+
+export default async function () {
+  const user = await users.claimForOwner({
+    prefix: "users:",
+    owner: owner(),
+    ttl: 10 * 60_000,
+  });
+
+  if (user === null) {
+    throw new Error(`No free user available for ${owner()}`);
+  }
+
+  // Same exact (prefix, owner) reuses the same live claim identity.
+  // user.id / user.key / user.token stay stable while lease is live.
+  const credentials = user.entry.value;
+  console.log(credentials.username);
+}
+```
+
+`claimForOwner()` itself never renews a lease. Renew explicitly:
+
+```javascript
+const user = await users.claimForOwner({
+  prefix: "users:",
+  owner: owner(),
+  ttl: 5 * 60_000,
+});
+
+if (user && user.expiresAt - Date.now() < 60_000) {
+  const renewed = await users.renewClaim(user, {
+    ttl: 5 * 60_000,
+  });
+
+  if (!renewed) {
+    throw new Error("User claim expired before renewal");
+  }
+}
+```
+
+`owner` means different things across allocation APIs:
+
+| API | owner meaning | reuse behavior |
+| --- | --- | --- |
+| `claimRandom({ owner })` | diagnostic metadata only | every call may allocate a different free entry |
+| `claimNext({ owner })` | diagnostic metadata only | every call may allocate a different free entry |
+| `claimForOwner({ owner })` | sticky lookup identity | same exact `(prefix, owner)` reuses one live claim |
+
+Claim allocation APIs (`claimRandom()`, `claimNext()`, `claimForOwner()`, `claimKey()`) are
+**local store/process coordination only**. They do not
+coordinate across separate k6 processes, pods, machines, or distributed workers.
+`owner` is an opaque logical identity, not authentication and not a distributed
+lock owner.
+
+Use stable bounded-cardinality owners (good: `scenario:checkout:vu:17`).
+Do not generate owners per request/iteration/timestamp, because sticky owner
+bindings are intentionally kept process-local for the store lifetime.
+
+Owner values are never emitted as xk6-kv metric labels.
+
+Multi-scenario sticky owner example:
+
+```javascript
+import exec from "k6/execution";
+import { openKv } from "k6/x/kv";
+
+const users = openKv({
+  backend: "memory",
+  trackKeys: true,
+});
+
+export const options = {
+  scenarios: {
+    browse: {
+      executor: "constant-vus",
+      vus: 20,
+      duration: "5m",
+      exec: "browse",
+    },
+    checkout: {
+      executor: "constant-vus",
+      vus: 10,
+      duration: "5m",
+      exec: "checkout",
+    },
+  },
+};
+
+function owner() {
+  return `${exec.scenario.name}:vu:${exec.vu.idInInstance}`;
+}
+
+export async function browse() {
+  const user = await users.claimForOwner({
+    prefix: "browse-users:",
+    owner: owner(),
+    ttl: 10 * 60_000,
+  });
+  if (!user) throw new Error("browse user pool exhausted");
+}
+
+export async function checkout() {
+  const user = await users.claimForOwner({
+    prefix: "checkout-users:",
+    owner: owner(),
+    ttl: 10 * 60_000,
+  });
+  if (!user) throw new Error("checkout user pool exhausted");
 }
 ```
 
@@ -354,7 +608,8 @@ See [`typescript/README.md`](./typescript/README.md) for complete setup instruct
 
 | Area | Methods |
 | --- | --- |
-| **Allocation** | `claimRandom`, `claimKey`, `claimKeys`, `claimRandomMany`, `releaseClaim`, `releaseClaims`, `renewClaim`, `renewClaims`, `completeClaim`, `completeClaims`, `popRandom`, `popRandomMany` |
+| **Allocation** | `claimRandom`, `claimNext`, `claimForOwner`, `claimKey`, `claimKeys`, `claimRandomMany`, `releaseClaim`, `releaseClaims`, `renewClaim`, `renewClaims`, `completeClaim`, `completeClaims`, `popRandom`, `popRandomMany` |
+| **Reusable feeder** | `nextCircular` |
 | **Import / export** | `importCSV`, `importJSONL`, `exportJSONL`, `exportCSV`, `validateCSV`, `validateJSONL`, `backup`, `restore`, `rebuildKeyList` |
 | **Batch** | `setMany`, `getMany`, `deleteMany` |
 | **Query** | `get`, `set`, `delete`, `exists`, `list`, `listKeys`, `scan`, `scanKeys`, `count`, `size`, `randomKey`, `randomKeys`, `clear`, `close` |
@@ -564,7 +819,7 @@ Backend note:
   Treat `cursor` as an opaque continuation token. Do not parse, modify, or construct it manually.
   Use a cursor only with the same logical scan options that produced it, especially the same `prefix`.
   Pagination is cursor-based, but it is not a long-lived snapshot. If keys are inserted or deleted between page calls, later pages may reflect those changes.
-  For exclusive allocation workflows, use `claimRandom()` or `popRandom()` instead of scan/list pagination.
+  For exclusive allocation workflows, use `claimRandom()`, `claimNext()`, or `popRandom()` instead of scan/list pagination.
 
   ```javascript
   let cursor = "";
@@ -658,11 +913,30 @@ Backend note:
   `randomKeys()` returns keys only. It does not clone, deserialize, or return values.
   `count` is capped at `1000000` to protect the k6 process from unbounded allocations.
   When `unique` is `true` and fewer matching keys exist than requested, all available matching keys are returned in random order.
-  Use `claimRandom()`, `claimKey()`, `claimRandomMany()`, `popRandom()`, or `popRandomMany()` when you need exclusive allocation.
+  Use `claimRandom()`, `claimNext()`, `claimForOwner()`, `claimKey()`, `claimRandomMany()`, `popRandom()`, or `popRandomMany()` when you need exclusive allocation.
+
+- **`nextCircular(options?: { prefix?: string }): Promise<{ key: string, value: any } | null>`** - Returns reusable entries in ascending lexicographic key order and wraps to the first matching key after reaching EOF for that prefix.
+
+  `nextCircular()` details:
+
+  - shared process-local cursor per exact prefix;
+  - non-exclusive and claim-blind (live claims do not hide keys);
+  - returns `null` only when no matching key currently exists;
+  - ordering is by KV key string, not insertion order or CSV row order;
+  - cursor state is process-local only (not persisted to disk/snapshots).
+
+  Use zero-padded keys when numeric-like ordering matters:
+  `item:000001`, `item:000002`, `item:000003`.
+
+  For stable memory usage, use bounded stable prefixes (for example `users:`, `products:`), not one unique prefix per request.
 
 - **`popRandom(options?: { prefix?: string }): Promise<{ key: string, value: any } | null>`** - Claims one random free matching entry and removes it. Resolves to `null` when no match exists.
 
 - **`claimRandom(options?: { prefix?: string, owner?: string, ttl?: number }): Promise<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } } | null>`** - Leases one random matching free entry. Live claims are excluded from later `claimRandom()` and `popRandom()` calls until released/completed or expired. If `ttl` is omitted, the default lease is **30000ms (30 seconds)**. `ttl` must be a positive integer and is capped at **86400000ms (24 hours)**. `owner` is optional diagnostic metadata capped at **256 bytes** and is not emitted as a metrics label.
+
+- **`claimNext(options?: { prefix?: string, owner?: string, ttl?: number }): Promise<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } } | null>`** - Leases the lexicographically smallest currently free matching entry. Resolves to `null` when no free match exists. This is key-string order only (for example, `job:1`, `job:10`, `job:2`); use zero-padded suffixes when numeric order matters (for example, `job:000001`). Release/expiry/`completeClaim({ deleteKey: false })` make the key eligible again; `completeClaim({ deleteKey: true })` consumes it permanently.
+
+- **`claimForOwner(options: { owner: string, prefix?: string, ttl?: number }): Promise<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } } | null>`** - Returns the existing live claim for the exact `(prefix, owner)` pair, or allocates a new random free matching entry when no live binding exists. `owner` is required, must be non-empty, and is capped at **256 bytes**. `ttl` applies only when allocating a new claim and is capped at **86400000ms (24 hours)**; existing sticky hits are not renewed implicitly. Sticky identity lasts only while the claim remains live.
 
 - **`claimKey(key: string, options?: { owner?: string, ttl?: number }): Promise<{ id: string, key: string, token: number, owner?: string, expiresAt: number, entry: { key: string, value: any } } | null>`** - Leases one specific key. Resolves to `null` when the key is missing or already live-claimed.
 
@@ -712,7 +986,7 @@ Backend note:
   }
   ```
 
-> ⚠️ Claim APIs (`claimRandom`, `claimKey`, `claimKeys`, `claimRandomMany`, `releaseClaim`, `releaseClaims`, `renewClaim`, `renewClaims`, `completeClaim`, `completeClaims`, `popRandom`, `popRandomMany`) are local coordination primitives for VUs sharing the same `xk6-kv` process/store. They are not distributed lock services.
+> ⚠️ Claim APIs (`claimRandom`, `claimNext`, `claimForOwner`, `claimKey`, `claimKeys`, `claimRandomMany`, `releaseClaim`, `releaseClaims`, `renewClaim`, `renewClaims`, `completeClaim`, `completeClaims`, `popRandom`, `popRandomMany`) are local coordination primitives for VUs sharing the same `xk6-kv` process/store. They are not distributed lock services.
 > `claimRandom()` and `popRandom()` are random allocation helpers optimized for low/moderate live-claim occupancy. Under very high live-claim occupancy, fallback selection can be biased toward scan order, but exclusivity is still preserved.
 > `claim.token` is exposed as a JavaScript number. It should not approach `Number.MAX_SAFE_INTEGER` in practical k6 runs; if that ever becomes realistic, a future major API should expose it as a string.
 
@@ -802,7 +1076,7 @@ Backend note:
   - `xk6_kv_operation_duration` (Trend in milliseconds, tags: `op`, `backend`, `status`, `track_keys`, `serialization`)
   - `xk6_kv_operation_failed` (Rate, tags: `op`, `backend`, `track_keys`, `serialization`)
   - `xk6_kv_errors_total` (Counter, tags: `op`, `backend`, `error_type`, `track_keys`, `serialization`)
-  - `xk6_kv_empty_result` (Rate for `random_key`/`random_keys`/`pop_random`/`claim_random`/`claim_key`/`claim_random_many`/`pop_random_many`, tags: `op`, `backend`, `track_keys`, `serialization`)
+  - `xk6_kv_empty_result` (Rate for `random_key`/`random_keys`/`next_circular`/`pop_random`/`claim_random`/`claim_next`/`claim_for_owner`/`claim_key`/`claim_random_many`/`pop_random_many`, tags: `op`, `backend`, `track_keys`, `serialization`)
   - `xk6_kv_async_in_flight` (Gauge for async store operations currently running, tags: `backend`, `track_keys`, `serialization`)
 
   Batch lifecycle helpers (`releaseClaims` / `completeClaims` / `renewClaims`) can resolve with item-level `failed[]` entries without promise rejection. Those partial outcomes are returned in API results and are not emitted as operation-level error metrics unless the promise itself rejects on a technical storage error.
@@ -1113,9 +1387,10 @@ Validation semantics (`validateCSV()` / `validateJSONL()`):
   Achieving tracked-path speeds means keys are mirrored in memory helper structures, so large datasets consume more RAM and index slices/maps do not shrink automatically. Budget for that footprint or rebuild indexes periodically.
 - **Random key workloads:** Calling `randomKey()` repeatedly with `trackKeys: false` (especially on the disk backend) keeps a read transaction open while it counts and selects keys, which can stall the lone bbolt writer until the call finishes. Turn on `trackKeys` (for O(1)/O(log n) sampling) or throttle/redesign these workloads to avoid head-of-line blocking.
 - **`randomKeys()` complexity by backend:** With `trackKeys: true`, both backends use key indexes for small samples; memory first builds shard ranges (O(shards * log n)) and then selects sampled keys by rank, while disk may fall back to cursor scan for near-full unique samples. With `trackKeys: false`, it collects candidates via `scanKeys()` and samples in memory (linear in matching keys).
+- **`nextCircular()` performance:** `nextCircular()` intentionally reuses ordered `scan()` semantics (`scan(prefix, lastKey, 1)`) for backend parity and correctness. For repeated/hot circular access on medium or large **memory** datasets, prefer `trackKeys: true`. With `trackKeys: false`, memory must discover the next lexicographic key through untracked shard-map scanning, so latency/allocations can grow with keyspace size. `trackKeys: true` trades additional RAM for significantly faster ordered iteration.
 - **Memory `trackKeys: false` scan/list costs:** `scan()`, `scanKeys()`, `list()`, and `listKeys()` use untracked shard-map iteration. On large keyspaces, repeated pagination can become expensive; if these operations are hot, prefer `trackKeys: true`.
 - **Disk backend and `trackKeys`:** bbolt is the persistent source of truth. With `trackKeys: true`, the disk backend maintains an exact derived in-memory key index rebuilt from bbolt on open/restore and updated after successful mutations. That index accelerates `randomKey()`, `randomKeys()`, and `count()`, while cursor-style key reads (`scanKeys()` and `listKeys()`) still read from bbolt.
-- **Disk claim allocation:** with `trackKeys: true`, claim metadata is stored in process-local in-memory OST metadata (not bbolt). `claimRandom()`, `claimKey()`, `claimRandomMany()`, `releaseClaim()`, `renewClaim()`, and `completeClaim({ deleteKey: false })` stay on the in-memory path; only durable key deletes (`popRandom()`, `popRandomMany()`, `completeClaim({ deleteKey: true })`) require bbolt `Update()`. With `trackKeys: false`, claim metadata remains in the bbolt claims-bucket fallback path, and batch random claim allocation may scan/materialize a large candidate set. For high-throughput disk random allocation, prefer `trackKeys: true`.
+- **Disk claim allocation:** with `trackKeys: true`, claim metadata is stored in process-local in-memory OST metadata (not bbolt). `claimRandom()`, `claimNext()`, `claimKey()`, `claimRandomMany()`, `releaseClaim()`, `renewClaim()`, and `completeClaim({ deleteKey: false })` stay on the in-memory path; only durable key deletes (`popRandom()`, `popRandomMany()`, `completeClaim({ deleteKey: true })`) require bbolt `Update()`. With `trackKeys: false`, claim metadata remains in the bbolt claims-bucket fallback path, and random/ordered claim allocation may scan keys before finding a free candidate. For high-throughput disk allocation, prefer `trackKeys: true`.
 
 #### AllocationStats Benchmark Matrix
 
@@ -1178,6 +1453,7 @@ Observability-focused scripts:
 - E2E lease-worker observability scenario: [`e2e/subscription-renewal-lease-observability.js`](./e2e/subscription-renewal-lease-observability.js)
 - E2E credential pool drain scenario: [`e2e/credential-pool-drain-observability.js`](./e2e/credential-pool-drain-observability.js)
 - Batch claim allocation example: [`examples/claim-random-many.js`](./examples/claim-random-many.js)
+- Sticky owner allocation example: [`examples/claim-for-owner.js`](./examples/claim-for-owner.js)
 - Batch claim lifecycle example: [`examples/claim-batch-lifecycle.js`](./examples/claim-batch-lifecycle.js)
 - Explicit fixture reservation example: [`examples/claim-keys.js`](./examples/claim-keys.js)
 - Batch pop allocation example: [`examples/pop-random-many.js`](./examples/pop-random-many.js)
@@ -1186,13 +1462,16 @@ Observability-focused scripts:
 - Allocation diagnostics example: [`examples/allocation-stats.js`](./examples/allocation-stats.js)
 - Import preflight validation example: [`examples/validate-import-files.js`](./examples/validate-import-files.js)
 - E2E batch lifecycle scenario: [`e2e/batch-claim-lifecycle.js`](./e2e/batch-claim-lifecycle.js)
+- E2E sticky owner scenario: [`e2e/claim-for-owner-sticky-users.js`](./e2e/claim-for-owner-sticky-users.js)
+- E2E ordered consumers scenario: [`e2e/claim-next-ordered-consumers.js`](./e2e/claim-next-ordered-consumers.js)
 - E2E explicit fixture reservation scenario: [`e2e/claim-keys-explicit-fixtures.js`](./e2e/claim-keys-explicit-fixtures.js)
 - E2E allocation diagnostics scenario: [`e2e/allocation-stats-pool-health.js`](./e2e/allocation-stats-pool-health.js)
 - E2E CSV export scenario: [`e2e/export-csv-response-capture.js`](./e2e/export-csv-response-capture.js)
 
 ### Allocation Recipes
 
-- **Unique users:** import a user pool (`importCSV()` or `setMany()`), allocate with `claimRandom()` / `claimRandomMany()`, then `completeClaim()` / `completeClaims()` on success or `releaseClaim()` / `releaseClaims()` on failure.
+- **Unique users:** import a user pool (`importCSV()` or `setMany()`), allocate with `claimRandom()`, `claimNext()`, or `claimRandomMany()`, then `completeClaim()` / `completeClaims()` on success or `releaseClaim()` / `releaseClaims()` on failure.
+- **Sticky users per VU/scenario:** allocate with `claimForOwner({ prefix, owner })` using stable owner IDs such as `${scenario.name}:vu:${vu.idInInstance}` and renew explicitly via `renewClaim()` for long-running leases.
 - **Credential pool:** fetch exact credentials with `claimKey()` / `claimKeys()`, extend long-running work with `renewClaim()` / `renewClaims()`, and always release stale/failed attempts.
 - **Response capture:** write response envelopes with `kv.set("responses:<id>", payload)` during the run, then `exportJSONL()` or `exportCSV()` in teardown/summary.
 - **Pool diagnostics:** use global `stats()` for store-wide health and `allocationStats({ prefix })` for prefix-scoped claimability snapshots.
@@ -1201,22 +1480,33 @@ Observability-focused scripts:
 ### Producer / Consumer
 
 ```javascript
+import exec from "k6/execution";
 import { openKv } from "k6/x/kv";
 
 const kv = openKv({ backend: "memory", trackKeys: true });
+const JOB_PREFIX = "jobs:";
 
 export async function producer() {
-    const id = (await kv.get("latest-id")) || 0;
-    await kv.set(`token-${id}`, "value");
-    await kv.set("latest-id", id + 1);
+  const id = await kv.incrementBy("latest-id", 1);
+  const key = `${JOB_PREFIX}${String(id).padStart(6, "0")}`;
+  await kv.set(key, { id });
 }
 
 export async function consumer() {
-    const key = await kv.randomKey({ prefix: "token-" });
-    if (key) {
-        await kv.get(key);
-        await kv.delete(key);
-    }
+  const claim = await kv.claimNext({
+    prefix: JOB_PREFIX,
+    owner: `scenario:${exec.scenario.name}:vu:${exec.vu.idInInstance}`,
+    ttl: 30_000,
+  });
+  if (!claim) return;
+
+  try {
+    await processJob(claim.entry.value);
+    await kv.completeClaim(claim, { deleteKey: true });
+  } catch (err) {
+    await kv.releaseClaim(claim);
+    throw err;
+  }
 }
 ```
 

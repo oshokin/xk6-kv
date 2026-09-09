@@ -61,6 +61,7 @@ func TestNewDiskStore(t *testing.T) {
 	require.NoError(t, pathErr, "failed to resolve default disk path")
 	assert.Equal(t, absDefault, store.path, "unexpected default path")
 	require.NotNil(t, store.handle, "handle placeholder must be non-nil before open")
+	require.NotNil(t, store.circularCursors, "circular cursor registry pointer must be allocated")
 
 	assert.False(t, store.opened.Load(), "store must not be marked opened initially")
 	assert.EqualValues(t, 0, store.refCount.Load(), "initial refCount must be zero")

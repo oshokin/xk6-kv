@@ -75,6 +75,70 @@ func BenchmarkDiskStore_ClaimRandom_AllocationMatrix(b *testing.B) {
 	}
 }
 
+// BenchmarkDiskStore_ClaimNext_AllocationMatrix measures ClaimNext latency
+// across trackKeys, prefix, and head-claimed density.
+func BenchmarkDiskStore_ClaimNext_AllocationMatrix(b *testing.B) {
+	trackKeysModes := []bool{true, false}
+	cases := claimNextAllocationBenchmarkCases()
+
+	for trackKeysIndex := range trackKeysModes {
+		trackKeys := trackKeysModes[trackKeysIndex]
+
+		b.Run(fmt.Sprintf("trackKeys=%v", trackKeys), func(b *testing.B) {
+			for caseIndex := range cases {
+				benchmarkCase := cases[caseIndex]
+
+				b.Run(benchmarkCase.name(), func(b *testing.B) {
+					b.ReportAllocs()
+
+					store := newBenchmarkDiskStore(b, trackKeys, "diskstore-bench-claim-next-allocation-*.db")
+
+					b.StopTimer()
+					seedOrderedClaimBenchmarkDiskStore(b, store)
+					preclaimOrderedHeadDensity(
+						b,
+						store,
+						benchmarkCase.prefix,
+						benchmarkCase.headClaimedDensity,
+					)
+
+					claimOptions := &ClaimOptions{
+						Prefix: benchmarkCase.prefix,
+						TTLMs:  claimAllocationBenchTTLMs,
+					}
+
+					b.StartTimer()
+					b.ResetTimer()
+
+					for b.Loop() {
+						claim, err := store.ClaimNext(claimOptions)
+						if err != nil {
+							b.Fatalf("ClaimNext failed: %v", err)
+						}
+
+						if claim == nil {
+							b.Fatalf("ClaimNext returned nil for case %s", benchmarkCase.name())
+						}
+
+						b.StopTimer()
+
+						released, err := store.ReleaseClaim(claim.Ref())
+						if err != nil {
+							b.Fatalf("ReleaseClaim failed: %v", err)
+						}
+
+						if !released {
+							b.Fatalf("ReleaseClaim returned false for claim %s", claim.ID)
+						}
+
+						b.StartTimer()
+					}
+				})
+			}
+		})
+	}
+}
+
 // BenchmarkDiskStore_ClaimRandom_ExpiredClaims measures allocation latency when
 // many stale leases exist and full cleanup is throttled out of the hot path.
 func BenchmarkDiskStore_ClaimRandom_ExpiredClaims(b *testing.B) {
@@ -309,6 +373,23 @@ func seedClaimBenchmarkDiskStore(b *testing.B, s *DiskStore) {
 
 	seedDiskStore(b, s, claimAllocationBenchUserKeys, "user:")
 	seedDiskStore(b, s, claimAllocationBenchOtherKeys, "order:")
+}
+
+// seedOrderedClaimBenchmarkDiskStore seeds sortable keys for ordered claim benchmarks.
+func seedOrderedClaimBenchmarkDiskStore(b *testing.B, s *DiskStore) {
+	b.Helper()
+
+	for index := range claimAllocationBenchUserKeys {
+		key := fmt.Sprintf("user:%06d", index+1)
+		value := fmt.Sprintf("value-%06d", index+1)
+		require.NoErrorf(b, s.Set(key, value), "seed Set(%q) must succeed", key)
+	}
+
+	for index := range claimAllocationBenchOtherKeys {
+		key := fmt.Sprintf("order:%06d", index+1)
+		value := fmt.Sprintf("value-%06d", index+1)
+		require.NoErrorf(b, s.Set(key, value), "seed Set(%q) must succeed", key)
+	}
 }
 
 // seedExpiredClaimBenchmarkDiskStore seeds the benchmark disk store with expired claims.

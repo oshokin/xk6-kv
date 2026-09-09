@@ -24,6 +24,7 @@ func TestNewMemoryStore(t *testing.T) {
 	require.NotNil(t, store, "NewMemoryStore() must not return nil")
 	require.NotNil(t, store.shards, "shards slice must be allocated")
 	require.Len(t, store.shards, store.shardCount, "shards slice must match shardCount")
+	require.NotNil(t, store.circularCursors, "circular cursor registry pointer must be allocated")
 
 	firstShard := store.shards[0]
 	require.NotNil(t, firstShard.container, "shard container map must be allocated")

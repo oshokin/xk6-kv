@@ -40,8 +40,28 @@ type MemoryStore struct {
 	// testRestoreHook is a test-only synchronization hook invoked in Restore()
 	// after mutation blocking is active and before snapshot I/O begins.
 	testRestoreHook func()
+	// testSnapshotChunkObserver is a test-only hook for observing streamed
+	// snapshot chunk sizes on this store instance.
+	testSnapshotChunkObserver func(chunkLen int)
 	// claimToken is a process-local monotonically increasing token for claims.
 	claimToken atomic.Int64
+	// ownerBindings stores process-local sticky ClaimForOwner bindings.
+	//
+	// It intentionally tracks only bindings created through ClaimForOwner;
+	// owner metadata supplied to ordinary claim methods remains diagnostic.
+	ownerBindings *claimOwnerBindingRegistry
+	// claimNextMu serializes ordered ClaimNext allocation.
+	//
+	// Ordered queue allocation has one logical head. Serializing only ClaimNext
+	// calls avoids a thundering herd where many VUs repeatedly discover and race
+	// for the same smallest key.
+	//
+	// Other KV/claim operations do not acquire this mutex and retain normal shard
+	// concurrency.
+	claimNextMu sync.Mutex
+	// circularCursors stores process-local reusable circular positions,
+	// one slot per exact prefix used by NextCircular.
+	circularCursors *circularCursorRegistry
 }
 
 // NewMemoryStore creates a MemoryStore with the provided memory configuration.
@@ -53,10 +73,12 @@ func NewMemoryStore(memoryCfg *MemoryConfig) *MemoryStore {
 	shardCount := memoryCfg.GetShardCount()
 
 	store := &MemoryStore{
-		shardCount: shardCount,
-		trackKeys:  memoryCfg.TrackKeys,
-		shards:     make([]*memoryShard, shardCount),
-		hashFn:     selectShardHashFunc(defaultShardHashStrategy),
+		shardCount:      shardCount,
+		trackKeys:       memoryCfg.TrackKeys,
+		shards:          make([]*memoryShard, shardCount),
+		hashFn:          selectShardHashFunc(defaultShardHashStrategy),
+		ownerBindings:   &claimOwnerBindingRegistry{},
+		circularCursors: &circularCursorRegistry{},
 	}
 
 	for i := range store.shards {
@@ -322,6 +344,7 @@ func (s *MemoryStore) Clear() error {
 	defer release()
 
 	s.clearAllShardsUnsafe()
+	s.circularCursors.resetAll()
 
 	return nil
 }

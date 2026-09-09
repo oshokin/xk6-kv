@@ -40,6 +40,64 @@ async function typecheckSmoke(): Promise<void> {
     void claimedName;
   }
 
+  const orderedClaim = await kv.claimNext<{
+    id: number;
+  }>({
+    prefix: 'jobs:',
+    owner: 'worker:1',
+    ttl: 60_000
+  });
+  if (orderedClaim !== null) {
+    const id: string = orderedClaim.id;
+    const key: string = orderedClaim.key;
+    const token: number = orderedClaim.token;
+    const expiresAt: number = orderedClaim.expiresAt;
+    const valueId: number = orderedClaim.entry.value.id;
+    void id;
+    void key;
+    void token;
+    void expiresAt;
+    void valueId;
+  }
+
+  const circularEntry = await kv.nextCircular<{
+    id: number;
+    query: string;
+  }>({
+    prefix: 'search:',
+  });
+  if (circularEntry !== null) {
+    const key: string = circularEntry.key;
+    const id: number = circularEntry.value.id;
+    const query: string = circularEntry.value.query;
+    void key;
+    void id;
+    void query;
+  }
+
+  const sticky = await kv.claimForOwner<{
+    username: string;
+    password: string;
+  }>({
+    prefix: 'users:',
+    owner: 'scenario:login:vu:1',
+    ttl: 60000
+  });
+  if (sticky !== null) {
+    const id: string = sticky.id;
+    const key: string = sticky.key;
+    const token: number = sticky.token;
+    const owner: string | undefined = sticky.owner;
+    const expiresAt: number = sticky.expiresAt;
+    const username: string = sticky.entry.value.username;
+    void id;
+    void key;
+    void token;
+    void owner;
+    void expiresAt;
+    void username;
+  }
+
   const exportSummary = await kv.exportJSONL({
     fileName: '.k6.kv.typescript-smoke.jsonl',
     prefix: 'user:',

@@ -36,7 +36,7 @@ type (
 		selectable bool
 
 		// selectableSize is the number of selectable keys in this subtree.
-		// It backs allocation APIs such as claimRandom/claimKey/popRandom.
+		// It backs allocation APIs such as claimRandom/claimNext/claimKey/popRandom.
 		selectableSize int
 
 		// meta stores typed per-key metadata without forcing the tree to understand it.

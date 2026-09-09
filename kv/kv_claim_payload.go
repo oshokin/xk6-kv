@@ -25,13 +25,23 @@ type (
 		Count int64 `js:"count"`
 	}
 
-	// claimRandomOptions holds parsed options for the corresponding KV method.
-	claimRandomOptions struct {
+	// singleClaimAllocationOptions holds parsed options for single-claim allocation methods.
+	singleClaimAllocationOptions struct {
 		// Prefix selects only keys that start with the given string.
 		Prefix string `js:"prefix"`
 		// Owner is the claim owner identifier.
 		Owner string `js:"owner"`
 		// TTLMs is the claim lease duration in milliseconds.
+		TTLMs int64 `js:"ttl"`
+	}
+
+	// claimForOwnerOptions holds parsed options for sticky owner allocation.
+	claimForOwnerOptions struct {
+		// Prefix selects only keys that start with the given string.
+		Prefix string `js:"prefix"`
+		// Owner is the required stable sticky owner identifier.
+		Owner string `js:"owner"`
+		// TTLMs is the lease duration used when allocating a new claim.
 		TTLMs int64 `js:"ttl"`
 	}
 
@@ -225,12 +235,31 @@ func importPopRandomManyOptions(rt *sobek.Runtime, options sobek.Value) (*popRan
 }
 
 // importClaimRandomOptions parses Sobek options for the corresponding KV method.
-func importClaimRandomOptions(rt *sobek.Runtime, options sobek.Value) (*claimRandomOptions, error) {
-	if err := ensureOptionalObjectOptions("claimRandom", options); err != nil {
+func importClaimRandomOptions(
+	rt *sobek.Runtime,
+	options sobek.Value,
+) (*singleClaimAllocationOptions, error) {
+	return importSingleClaimAllocationOptions(rt, "claimRandom", options)
+}
+
+// importClaimNextOptions parses Sobek options for the corresponding KV method.
+func importClaimNextOptions(
+	rt *sobek.Runtime,
+	options sobek.Value,
+) (*singleClaimAllocationOptions, error) {
+	return importSingleClaimAllocationOptions(rt, "claimNext", options)
+}
+
+func importSingleClaimAllocationOptions(
+	rt *sobek.Runtime,
+	method string,
+	options sobek.Value,
+) (*singleClaimAllocationOptions, error) {
+	if err := ensureOptionalObjectOptions(method, options); err != nil {
 		return nil, err
 	}
 
-	result := &claimRandomOptions{
+	result := &singleClaimAllocationOptions{
 		TTLMs: store.DefaultClaimTTLMs,
 	}
 	if common.IsNullish(options) {
@@ -239,26 +268,27 @@ func importClaimRandomOptions(rt *sobek.Runtime, options sobek.Value) (*claimRan
 
 	optionsObj := options.ToObject(rt)
 
-	prefix, isSet, err := parseOptionalStringOption("claimRandom", "prefix", optionsObj.Get("prefix"))
+	prefix, prefixSet, err := parseOptionalStringOption(method, "prefix", optionsObj.Get("prefix"))
 	if err != nil {
 		return nil, err
 	}
 
-	if isSet {
+	if prefixSet {
 		result.Prefix = prefix
 	}
 
-	owner, isSet, err := parseOptionalStringOption("claimRandom", "owner", optionsObj.Get("owner"))
+	owner, ownerSet, err := parseOptionalStringOption(method, "owner", optionsObj.Get("owner"))
 	if err != nil {
 		return nil, err
 	}
 
-	if isSet {
+	if ownerSet {
 		if len(owner) > store.MaxClaimOwnerBytes {
 			return nil, NewError(
 				InvalidOptionsError,
 				fmt.Sprintf(
-					"claimRandom options.owner must be less than or equal to %d bytes",
+					"%s options.owner must be less than or equal to %d bytes",
+					method,
 					store.MaxClaimOwnerBytes,
 				),
 			)
@@ -267,20 +297,20 @@ func importClaimRandomOptions(rt *sobek.Runtime, options sobek.Value) (*claimRan
 		result.Owner = owner
 	}
 
-	ttl, isSet, err := parseOptionalInt64Option("claimRandom", "ttl", optionsObj.Get("ttl"))
+	ttl, ttlSet, err := parseOptionalInt64Option(method, "ttl", optionsObj.Get("ttl"))
 	if err != nil {
 		return nil, err
 	}
 
-	if isSet {
+	if ttlSet {
 		if ttl <= 0 {
 			return nil, NewError(
 				InvalidOptionsError,
-				"claimRandom options.ttl must be a positive integer",
+				method+" options.ttl must be a positive integer",
 			)
 		}
 
-		if err := rejectIfAbove("claimRandom", "ttl", ttl, store.MaxClaimTTLMs); err != nil {
+		if err := rejectIfAbove(method, "ttl", ttl, store.MaxClaimTTLMs); err != nil {
 			return nil, err
 		}
 
@@ -288,6 +318,134 @@ func importClaimRandomOptions(rt *sobek.Runtime, options sobek.Value) (*claimRan
 	}
 
 	return result, nil
+}
+
+// importClaimForOwnerOptions parses Sobek options for sticky owner allocation.
+func importClaimForOwnerOptions(
+	rt *sobek.Runtime,
+	options sobek.Value,
+) (*claimForOwnerOptions, error) {
+	if err := ensureOptionalObjectOptions("claimForOwner", options); err != nil {
+		return nil, err
+	}
+
+	if common.IsNullish(options) {
+		return nil, NewError(
+			InvalidOptionsError,
+			"claimForOwner options.owner is required",
+		)
+	}
+
+	result := &claimForOwnerOptions{
+		TTLMs: store.DefaultClaimTTLMs,
+	}
+
+	optionsObj := options.ToObject(rt)
+
+	owner, err := parseClaimForOwnerRequiredOwner(optionsObj)
+	if err != nil {
+		return nil, err
+	}
+
+	result.Owner = owner
+
+	if err := applyClaimForOwnerOptionalPrefix(result, optionsObj); err != nil {
+		return nil, err
+	}
+
+	if err := applyClaimForOwnerOptionalTTL(result, optionsObj); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func parseClaimForOwnerRequiredOwner(optionsObj *sobek.Object) (string, error) {
+	owner, ownerSet, err := parseOptionalStringOption(
+		"claimForOwner",
+		"owner",
+		optionsObj.Get("owner"),
+	)
+	if err != nil {
+		return "", err
+	}
+
+	if !ownerSet || owner == "" {
+		return "", NewError(
+			InvalidOptionsError,
+			"claimForOwner options.owner must be a non-empty string",
+		)
+	}
+
+	if len(owner) > store.MaxClaimOwnerBytes {
+		return "", NewError(
+			InvalidOptionsError,
+			fmt.Sprintf(
+				"claimForOwner options.owner must be less than or equal to %d bytes",
+				store.MaxClaimOwnerBytes,
+			),
+		)
+	}
+
+	return owner, nil
+}
+
+func applyClaimForOwnerOptionalPrefix(
+	result *claimForOwnerOptions,
+	optionsObj *sobek.Object,
+) error {
+	prefix, prefixSet, err := parseOptionalStringOption(
+		"claimForOwner",
+		"prefix",
+		optionsObj.Get("prefix"),
+	)
+	if err != nil {
+		return err
+	}
+
+	if prefixSet {
+		result.Prefix = prefix
+	}
+
+	return nil
+}
+
+func applyClaimForOwnerOptionalTTL(
+	result *claimForOwnerOptions,
+	optionsObj *sobek.Object,
+) error {
+	ttl, ttlSet, err := parseOptionalInt64Option(
+		"claimForOwner",
+		"ttl",
+		optionsObj.Get("ttl"),
+	)
+	if err != nil {
+		return err
+	}
+
+	if !ttlSet {
+		return nil
+	}
+
+	if ttl <= 0 {
+		return NewError(
+			InvalidOptionsError,
+			"claimForOwner options.ttl must be a positive integer",
+		)
+	}
+
+	if err := rejectIfAbove(
+		"claimForOwner",
+		"ttl",
+		ttl,
+		store.MaxClaimTTLMs,
+	); err != nil {
+		return err
+	}
+
+	result.TTLMs = ttl
+
+	return nil
 }
 
 // importClaimKeyOptions parses Sobek options for the corresponding KV method.

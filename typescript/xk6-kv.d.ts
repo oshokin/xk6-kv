@@ -332,6 +332,20 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Options for nextCircular().
+   */
+  export interface NextCircularOptions {
+    /**
+     * Filter by key prefix.
+     *
+     * The exact prefix also identifies the shared process-local circular cursor.
+     *
+     * @default ""
+     */
+    prefix?: string;
+  }
+
+  /**
    * Options for backing up a snapshot.
    */
   export interface BackupOptions {
@@ -835,9 +849,56 @@ declare module 'k6/x/kv' {
   }
 
   /**
+   * Options for claimForOwner().
+   */
+  export interface ClaimForOwnerOptions {
+    /**
+     * Required stable logical owner identity.
+     *
+     * The exact (prefix, owner) pair identifies one sticky claim binding
+     * within the local KV store instance.
+     *
+     * The owner is an opaque logical identifier, not a security principal
+     * and not a distributed lock identity.
+     *
+     * Use stable bounded-cardinality values such as a VU/scenario identity.
+     * Do not create a new owner for every iteration or request.
+     *
+     * Maximum size: 256 bytes.
+     */
+    owner: string;
+
+    /**
+     * Key prefix used when a new claim must be allocated.
+     *
+     * The exact prefix is part of the sticky binding identity.
+     * @default ""
+     */
+    prefix?: string;
+
+    /**
+     * Lease duration in milliseconds for a newly allocated claim.
+     *
+     * Returning an already-live owner binding does not renew the lease.
+     * Use renewClaim() explicitly when a longer lease is required.
+     *
+     * @default 30000
+     * @maximum 86400000
+     */
+    ttl?: number;
+  }
+
+  /**
    * Options for claimRandom().
    */
   export interface ClaimRandomOptions extends ClaimOptions {}
+
+  /**
+   * Options for claimNext().
+   *
+   * Uses the common claim allocation options.
+   */
+  export interface ClaimNextOptions extends ClaimOptions {}
 
   /**
    * Options for claimRandomMany().
@@ -1797,6 +1858,27 @@ declare module 'k6/x/kv' {
     randomKeys(options: RandomKeysOptions): Promise<string[]>;
 
     /**
+     * Returns reusable entries in ascending lexicographic key order and wraps back
+     * to the first matching key after reaching the end of the prefix range.
+     *
+     * All VUs sharing the same local KV store and exact prefix share one
+     * process-local circular cursor.
+     *
+     * This operation is non-exclusive and does not create or inspect claims.
+     * After wrap-around, multiple concurrent VUs can therefore receive the same
+     * record over time. Use claimNext() when exclusive ordered allocation is
+     * required.
+     *
+     * Ordering is based on KV keys, not insertion order or original CSV row order.
+     * Use zero-padded keys when numeric-like ordering matters.
+     *
+     * Resolves to null when no matching key exists.
+     *
+     * Cursor state is process-local and is not persisted to disk or snapshots.
+     */
+    nextCircular<T = any>(options?: NextCircularOptions): Promise<(Entry & { value: T }) | null>;
+
+    /**
      * Claims one random free matching entry and removes it.
      * Resolves to null when no matching entry exists.
      */
@@ -1821,6 +1903,55 @@ declare module 'k6/x/kv' {
      * The maximum lease duration is 86,400,000ms (24 hours).
      */
     claimRandom<T = any>(options?: ClaimRandomOptions): Promise<Claim<T> | null>;
+
+    /**
+     * Leases the lexicographically smallest currently free matching entry.
+     *
+     * Resolves to null when no free matching entry exists.
+     *
+     * This is an ordered lease operation, not an insertion-order or CSV-row-order
+     * iterator. Ordering is based exclusively on the KV key string.
+     *
+     * Example key order:
+     * `"job:1"`, `"job:10"`, `"job:2"`.
+     *
+     * Use zero-padded numeric suffixes when numeric order matters:
+     * `"job:000001"`, `"job:000002"`, ...
+     *
+     * A released or expired claim becomes eligible again and can therefore become
+     * the next result. completeClaim(claim, { deleteKey: true }) permanently
+     * consumes the key.
+     *
+     * Concurrent claimNext() callers never receive the same live claim.
+     * Which VU receives which key is scheduler-dependent.
+     *
+     * Other concurrent claim/mutation APIs can change which key is currently
+     * lexicographically first.
+     *
+     * This is local store/process coordination only.
+     */
+    claimNext<T = any>(options?: ClaimNextOptions): Promise<Claim<T> | null>;
+
+    /**
+     * Returns the same live claim for an exact (prefix, owner) pair.
+     *
+     * If no live binding exists, allocates a new random free matching entry.
+     * Resolves to null when no free matching entry exists.
+     *
+     * Sticky identity lasts only while the claim remains live. Release,
+     * completion, expiration, deletion, clear/restore, or store reopen can
+     * invalidate the binding.
+     *
+     * ttl applies only when a new claim is created; this method does not
+     * implicitly renew an existing claim.
+     *
+     * The claim id/key/token remain stable while the lease remains live.
+     * The returned entry value is a fresh snapshot and may reflect writes that
+     * happened after the original allocation.
+     *
+     * This is local store/process coordination only, not a distributed lock.
+     */
+    claimForOwner<T = any>(options: ClaimForOwnerOptions): Promise<Claim<T> | null>;
 
     /**
      * Leases a specific key.

@@ -1,37 +1,44 @@
-// Producer/consumer/random consumer example.
+// Concurrent producer/ordered-consumer example.
 //
-// Covered methods: list, get, set, delete, exists, randomKey.
+// Demonstrates an atomic recoverable work queue:
+//
+// producer:
+//   incrementBy -> set
+//
+// multiple consumers:
+//   claimNext -> process -> complete(deleteKey=true)
+//
+// processing failure:
+//   releaseClaim
+//
+// Unlike list -> get -> delete, claimNext prevents two concurrent consumers
+// from leasing the same live work item.
 
 import { sleep } from "k6";
+import exec from "k6/execution";
 import { openKv } from "k6/x/kv";
-import { expect } from "https://jslib.k6.io/k6-testing/0.5.0/index.js";
 
-export let options = {
+export const options = {
   scenarios: {
     producerScenario: {
       executor: "shared-iterations",
       vus: 1,
-      iterations: 10,
-      exec: "producer",
+      iterations: 20,
+      exec: "producerFunction",
     },
     consumerScenario: {
       executor: "shared-iterations",
-      vus: 1,
-      iterations: 10,
-      startTime: "5s",
+      vus: 4,
+      iterations: 80,
+      startTime: "500ms",
       exec: "consumerFunction",
-    },
-    randomConsumerScenario: {
-      executor: "shared-iterations",
-      vus: 1,
-      iterations: 10,
-      startTime: "2s",
-      exec: "randomConsumerFunction",
     },
   },
 };
 
-// Track keys to exercise fast random sampling.
+const TOKEN_PREFIX = "token:";
+const CLAIM_TTL_MS = 5_000;
+
 const kv = openKv({
   backend: "memory",
   trackKeys: true,
@@ -43,54 +50,67 @@ export async function setup() {
 }
 
 export async function producerFunction() {
-  // Read current sequence, then produce next token atomically via incrementBy.
   const nextId = await kv.incrementBy("latest-producer-id", 1);
-  const producedKey = `token:${nextId}`;
 
-  await kv.set(producedKey,
-    {
-      createdAt: Date.now(),
-      id: nextId
-    });
+  // Zero-padding makes lexicographic order match numeric sequence order.
+  const producedKey = `${TOKEN_PREFIX}${String(nextId).padStart(6, "0")}`;
+
+  await kv.set(producedKey, {
+    createdAt: Date.now(),
+    id: nextId,
+  });
+
   console.log(`[producer] produced ${producedKey}`);
 
-  // Let's simulate a delay between producing tokens.
-  sleep(1);
+  // Simulate work arriving over time.
+  sleep(0.05);
 }
 
 export async function consumerFunction() {
-  // Discover available tokens by prefix, then consume the lexicographically-first.
-  const entries = await kv.list({ prefix: "token:" });
-  if (entries.length > 0) {
-    const firstTokenKey = entries[0].key;
-    const tokenValue = await kv.get(firstTokenKey);
-    expect(tokenValue).toBeDefined();
+  const owner = `consumer:vu:${exec.vu.idInInstance}`;
 
-    await kv.delete(firstTokenKey);
-    console.log(`[consumer] consumed ${firstTokenKey}`);
-  } else {
-    console.log("[consumer] nothing to consume right now");
+  const claim = await kv.claimNext({
+    prefix: TOKEN_PREFIX,
+    owner,
+    ttl: CLAIM_TTL_MS,
+  });
+
+  if (claim === null) {
+    console.log(`[consumer ${owner}] nothing available right now`);
+    sleep(0.05);
+    return;
   }
 
-  // Let's simulate a delay between consuming tokens.
-  sleep(1);
-}
+  let completed = false;
 
-export async function randomConsumerFunction() {
-  // Pick a random key (O(1) when in-memory keys are tracked).
-  const ey = await kv.randomKey({ prefix: "token:" });
-  if (key) {
-    const tokenValue = await kv.get(key);
-    expect(tokenValue).toBeDefined();
+  try {
+    const token = claim.entry.value;
 
-    await kv.delete(key);
-    console.log(`[random-consumer] consumed ${key}`);
-  } else {
-    console.log("[random-consumer] no tokens available at this moment");
+    if (token === null || typeof token !== "object" || typeof token.id !== "number") {
+      throw new Error(`invalid token payload for ${claim.key}`);
+    }
+
+    // Simulate processing.
+    sleep(0.02);
+
+    completed = await kv.completeClaim(claim, { deleteKey: true });
+    if (!completed) {
+      throw new Error(`claim ${claim.id} expired or became stale before completion`);
+    }
+
+    console.log(`[consumer ${owner}] consumed ${claim.key}`);
+  } catch (err) {
+    // If completion did not happen, return the work item to the queue
+    // best-effort so another consumer can retry it.
+    if (!completed) {
+      const released = await kv.releaseClaim(claim);
+      if (!released) {
+        console.warn(`[consumer ${owner}] failed to release stale claim ${claim.id}`);
+      }
+    }
+
+    throw err;
   }
-
-  // Let's simulate a delay between consuming tokens.
-  sleep(1);
 }
 
 export function teardown() {

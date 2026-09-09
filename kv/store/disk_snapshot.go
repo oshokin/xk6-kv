@@ -234,6 +234,8 @@ func (s *DiskStore) writeDiskSnapshot(ctx context.Context, destination string) (
 
 // Restore replaces the disk store contents with entries from a snapshot file.
 // The restore is performed inside a single bbolt write transaction for atomicity.
+//
+//nolint:funlen // restore flow intentionally keeps lifecycle and recovery steps explicit.
 func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 	if opts == nil {
 		return nil, ErrRestoreOptionsNil
@@ -279,6 +281,8 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 	}
 
 	if selfRestoreResult.done {
+		s.circularCursors.resetAll()
+
 		return selfRestoreResult.summary, nil
 	}
 
@@ -314,6 +318,8 @@ func (s *DiskStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 
 		s.resetTrackedClaimsLocked()
 	}
+
+	s.circularCursors.resetAll()
 
 	return &RestoreSummary{
 		TotalEntries: totalEntries,

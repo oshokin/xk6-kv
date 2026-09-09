@@ -83,6 +83,62 @@ func (k *KV) ClaimRandom(options sobek.Value) *sobek.Promise {
 	)
 }
 
+// ClaimNext leases the lexicographically smallest matching free entry.
+// Resolves to null when no free entry exists.
+func (k *KV) ClaimNext(options sobek.Value) *sobek.Promise {
+	claimOptions, err := importClaimNextOptions(k.vu.Runtime(), options)
+	if err != nil {
+		return k.rejectedPromiseObserved(opClaimNext, err)
+	}
+
+	return k.runAsyncWithStoreObserved(
+		opClaimNext,
+		func(s store.Store) (any, error) {
+			return s.ClaimNext(&store.ClaimOptions{
+				Prefix: claimOptions.Prefix,
+				Owner:  claimOptions.Owner,
+				TTLMs:  claimOptions.TTLMs,
+			})
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			if result == nil {
+				return sobek.Null()
+			}
+
+			return rt.ToValue(result)
+		},
+	)
+}
+
+// ClaimForOwner returns the existing live claim for the exact
+// (prefix, owner) pair or allocates a new random matching free entry.
+//
+// Resolves to null when there is no live binding and no free matching entry.
+func (k *KV) ClaimForOwner(options sobek.Value) *sobek.Promise {
+	claimOptions, err := importClaimForOwnerOptions(k.vu.Runtime(), options)
+	if err != nil {
+		return k.rejectedPromiseObserved(opClaimForOwner, err)
+	}
+
+	return k.runAsyncWithStoreObserved(
+		opClaimForOwner,
+		func(s store.Store) (any, error) {
+			return s.ClaimForOwner(&store.ClaimOptions{
+				Prefix: claimOptions.Prefix,
+				Owner:  claimOptions.Owner,
+				TTLMs:  claimOptions.TTLMs,
+			})
+		},
+		func(rt *sobek.Runtime, result any) sobek.Value {
+			if result == nil {
+				return sobek.Null()
+			}
+
+			return rt.ToValue(result)
+		},
+	)
+}
+
 // ClaimKey leases a specific key.
 // Resolves to null when the key is missing or already live-claimed.
 func (k *KV) ClaimKey(key sobek.Value, options sobek.Value) *sobek.Promise {

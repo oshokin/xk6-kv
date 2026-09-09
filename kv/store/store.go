@@ -200,6 +200,23 @@ type (
 		// ListKeys is key-only and MUST NOT clone, serialize, deserialize, or return values.
 		ListKeys(prefix string, limit int64) ([]string, error)
 
+		// NextCircular returns the next reusable matching entry in ascending
+		// lexicographic key order and wraps to the first matching key after reaching
+		// the end of the prefix range.
+		//
+		// The exact prefix identifies one process-local shared circular cursor.
+		// Concurrent calls using the same prefix are serialized so each successful
+		// call advances that cursor exactly once.
+		//
+		// NextCircular is non-exclusive: it does not create or inspect claims and
+		// the same key may be returned to multiple callers after the cursor wraps.
+		// Use ClaimNext or ClaimForOwner when exclusive allocation is required.
+		//
+		// Returns nil, nil when no matching key exists.
+		//
+		// Cursor state is process-local and is not persisted to disk or snapshots.
+		NextCircular(prefix string) (*Entry, error)
+
 		// RandomKey returns a random key from the store. If prefix is non-empty,
 		// the random selection is restricted to keys that start with prefix.
 		//
@@ -231,6 +248,35 @@ type (
 		// ClaimRandom leases a random matching free entry.
 		// If no free (unclaimed or expired-claim) entry exists, it returns nil, nil.
 		ClaimRandom(opts *ClaimOptions) (*EntryClaim, error)
+
+		// ClaimNext leases the lexicographically smallest currently free entry
+		// matching opts.Prefix.
+		//
+		// The returned claim uses the same lease, owner, token, expiration, release,
+		// renewal, and completion semantics as ClaimRandom.
+		//
+		// Returns nil, nil when no free matching entry exists.
+		//
+		// When multiple ClaimNext calls overlap, each successfully returned key is
+		// claimed exclusively. Which caller receives which ordered key is scheduler-
+		// dependent, but the set of successful allocations advances through currently
+		// free keys in lexicographic order.
+		//
+		// Concurrent non-ClaimNext mutations may change which key is currently first.
+		ClaimNext(opts *ClaimOptions) (*EntryClaim, error)
+
+		// ClaimForOwner returns the existing live claim bound to the exact
+		// (Prefix, Owner) pair or allocates a new random free matching entry.
+		//
+		// Owner is required and identifies a process-local logical sticky binding.
+		// The binding exists only while the referenced claim remains live.
+		//
+		// TTLMs applies only when allocating a new claim. Returning an existing
+		// live claim does not renew its lease.
+		//
+		// Returns nil, nil when no live binding exists and no free matching entry
+		// can be allocated.
+		ClaimForOwner(opts *ClaimOptions) (*EntryClaim, error)
 
 		// ClaimKey leases a specific key.
 		// Returns nil, nil when the key is missing or already live-claimed.

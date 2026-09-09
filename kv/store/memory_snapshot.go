@@ -71,12 +71,6 @@ const (
 		"later updates may leak into the backup."
 )
 
-// streamSnapshotChunkObserver is a test hook that captures chunk sizes streamed
-// during AllowConcurrentWrites backups. Production code leaves this nil.
-//
-//nolint:gochecknoglobals // this is a test hook.
-var streamSnapshotChunkObserver func(chunkLen int)
-
 // Backup writes the entire memory store into a bbolt snapshot file.
 // When AllowConcurrentWrites is enabled the snapshot is best-effort: new writes that
 // arrive after the key snapshot are excluded and deletes committed after the snapshot
@@ -392,6 +386,7 @@ func (s *MemoryStore) Restore(opts *RestoreOptions) (*RestoreSummary, error) {
 	// Atomically replace entire store contents. This happens while mutations are blocked,
 	// ensuring no concurrent writes can interfere with the restore operation.
 	s.applySnapshot(builder)
+	s.circularCursors.resetAll()
 
 	summary := &RestoreSummary{
 		TotalEntries: int64(len(builder)),
@@ -560,8 +555,8 @@ func (s *MemoryStore) streamKeysWithClonedValues(
 			return
 		}
 
-		if streamSnapshotChunkObserver != nil {
-			streamSnapshotChunkObserver(chunkEntries)
+		if s.testSnapshotChunkObserver != nil {
+			s.testSnapshotChunkObserver(chunkEntries)
 		}
 
 		chunkEntries = 0

@@ -1,5 +1,7 @@
 package store
 
+import "fmt"
+
 // ScanKeys returns matching keys without cloning, deserializing, or returning values.
 func (s *SerializedStore) ScanKeys(prefix, afterKey string, limit int64) (*KeyScanPage, error) {
 	return s.store.ScanKeys(prefix, afterKey, limit)
@@ -8,6 +10,25 @@ func (s *SerializedStore) ScanKeys(prefix, afterKey string, limit int64) (*KeySc
 // ListKeys returns matching keys without cloning, deserializing, or returning values.
 func (s *SerializedStore) ListKeys(prefix string, limit int64) ([]string, error) {
 	return s.store.ListKeys(prefix, limit)
+}
+
+// NextCircular returns the next reusable circular entry and deserializes the
+// current value snapshot.
+func (s *SerializedStore) NextCircular(prefix string) (*Entry, error) {
+	entry, err := s.store.NextCircular(prefix)
+	if err != nil || entry == nil {
+		return entry, err
+	}
+
+	value, err := s.deserializeValue(entry.Value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: key %s: %w", ErrSerializerDecodeFailed, entry.Key, err)
+	}
+
+	return &Entry{
+		Key:   entry.Key,
+		Value: value,
+	}, nil
 }
 
 // Scan returns a page of key-value pairs, ordered lexicographically.

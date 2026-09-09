@@ -23,8 +23,8 @@ import { getSnapshotPath, createKv, createSetup, createTeardown } from './common
 // - Basic operations (get, getMany, set, setMany, delete, exists, clear, size).
 // - Atomic operations (incrementBy, getOrSet, swap, compareAndSwap variants,
 //   setIfAbsent, deleteIfExists, compareAndDelete variants).
-// - Query/coordination operations (list, scan, count, randomKey, randomKeys, popRandom,
-//   claimRandom, releaseClaim, completeClaim).
+// - Query/coordination operations (list, scan, count, randomKey, randomKeys, nextCircular,
+//   popRandom, claimRandom, claimNext, claimForOwner, releaseClaim, completeClaim).
 // - Observability/lifecycle (rebuildKeyList, stats, reportStats, close).
 // - Snapshot operations (backup, restore).
 
@@ -143,9 +143,20 @@ export const options = {
     'checks{api:compareAndDelete-success}': ['rate>0.999'],
     'checks{api:count-prefix}': ['rate>0.999'],
     'checks{api:count-total}': ['rate>0.999'],
+    'checks{api:nextCircular-structure}': ['rate>0.999'],
+    'checks{api:nextCircular-lexicographic-wrap}': ['rate>0.999'],
+    'checks{api:nextCircular-prefix-filter}': ['rate>0.999'],
+    'checks{api:nextCircular-empty-null}': ['rate>0.999'],
     'checks{api:popRandom-structure}': ['rate>0.999'],
     'checks{api:popRandom-deletes-key}': ['rate>0.999'],
     'checks{api:claimRandom-structure}': ['rate>0.999'],
+    'checks{api:claimNext-lexicographic-order}': ['rate>0.999'],
+    'checks{api:claimForOwner-structure}': ['rate>0.999'],
+    'checks{api:claimForOwner-sticky-hit}': ['rate>0.999'],
+    'checks{api:claimForOwner-no-implicit-renew}': ['rate>0.999'],
+    'checks{api:claimForOwner-prefix-scope}': ['rate>0.999'],
+    'checks{api:claimForOwner-release-rebind}': ['rate>0.999'],
+    'checks{api:claimForOwner-empty-null}': ['rate>0.999'],
     'checks{api:releaseClaim-success}': ['rate>0.999'],
     'checks{api:completeClaim-success}': ['rate>0.999'],
     'checks{api:completeClaim-deleteKey-false}': ['rate>0.999'],
@@ -612,6 +623,164 @@ export default async function apiOutputValidationTest() {
     'api:completeClaim-success': () => claimTwo && completedClaim === true,
     'api:completeClaim-deleteKey-false': () =>
       claimTwo && completedKeyExists === true
+  });
+
+  // claimNext(): Validate lexicographic ordered allocation contract payloads.
+  await kv.setMany({
+    'claim-next:000001': { id: 1, status: 'queued' },
+    'claim-next:000002': { id: 2, status: 'queued' },
+    'claim-next:000003': { id: 3, status: 'queued' }
+  });
+  const claimNextOne = await kv.claimNext({
+    prefix: 'claim-next:',
+    ttl: 60000
+  });
+  const claimNextTwo = await kv.claimNext({
+    prefix: 'claim-next:',
+    ttl: 60000
+  });
+  let claimNextOneCompleted = false;
+  let claimNextTwoCompleted = false;
+  if (claimNextOne !== null) {
+    claimNextOneCompleted = await kv.completeClaim(claimNextOne, { deleteKey: true });
+  }
+  if (claimNextTwo !== null) {
+    claimNextTwoCompleted = await kv.completeClaim(claimNextTwo, { deleteKey: true });
+  }
+  check(true, {
+    'api:claimNext-lexicographic-order': () =>
+      claimNextOne !== null &&
+      claimNextTwo !== null &&
+      claimNextOne.key === 'claim-next:000001' &&
+      claimNextTwo.key === 'claim-next:000002' &&
+      claimNextOneCompleted === true &&
+      claimNextTwoCompleted === true
+  });
+
+  // nextCircular(): Validate reusable lexicographic wrap-around for shared search fixtures.
+  await kv.setMany({
+    'next-circular:search:0003': { query: 'monitor' },
+    'next-circular:search:0001': { query: 'laptop' },
+    'next-circular:search:0002': { query: 'headphones' },
+    'next-circular:other:0001': { query: 'ignore' }
+  });
+
+  const circularOne = await kv.nextCircular({ prefix: 'next-circular:search:' });
+  const circularTwo = await kv.nextCircular({ prefix: 'next-circular:search:' });
+  const circularThree = await kv.nextCircular({ prefix: 'next-circular:search:' });
+  const circularFour = await kv.nextCircular({ prefix: 'next-circular:search:' });
+  const circularEmpty = await kv.nextCircular({ prefix: 'next-circular:missing:' });
+  const circularOneFields = circularOne === null ? [] : Object.keys(circularOne);
+
+  check(true, {
+    'api:nextCircular-structure': () =>
+      circularOne !== null &&
+      circularOneFields.includes('key') &&
+      circularOneFields.includes('value') &&
+      circularOneFields.length === 2 &&
+      typeof circularOne.key === 'string',
+    'api:nextCircular-lexicographic-wrap': () =>
+      circularOne !== null &&
+      circularTwo !== null &&
+      circularThree !== null &&
+      circularFour !== null &&
+      circularOne.key === 'next-circular:search:0001' &&
+      circularTwo.key === 'next-circular:search:0002' &&
+      circularThree.key === 'next-circular:search:0003' &&
+      circularFour.key === 'next-circular:search:0001',
+    'api:nextCircular-prefix-filter': () =>
+      circularOne !== null &&
+      circularTwo !== null &&
+      circularThree !== null &&
+      circularFour !== null &&
+      circularOne.key.startsWith('next-circular:search:') &&
+      circularTwo.key.startsWith('next-circular:search:') &&
+      circularThree.key.startsWith('next-circular:search:') &&
+      circularFour.key.startsWith('next-circular:search:') &&
+      circularOne.value.query === 'laptop' &&
+      circularTwo.value.query === 'headphones' &&
+      circularThree.value.query === 'monitor' &&
+      circularFour.value.query === 'laptop',
+    'api:nextCircular-empty-null': () => circularEmpty === null
+  });
+
+  // claimForOwner(): Validate sticky owner claim contract payloads.
+  await kv.setMany({
+    'claim:owner:users:1': { id: 1, role: 'user' },
+    'claim:owner:users:2': { id: 2, role: 'user' },
+    'claim:owner:admins:1': { id: 11, role: 'admin' }
+  });
+
+  const stickyOwner = 'api-output-validation:claimForOwner:owner:1';
+  const stickyFirst = await kv.claimForOwner({
+    prefix: 'claim:owner:users:',
+    owner: stickyOwner,
+    ttl: 30000
+  });
+  const stickySecond = await kv.claimForOwner({
+    prefix: 'claim:owner:users:',
+    owner: stickyOwner,
+    ttl: 60000
+  });
+  const stickyPrefixScoped = await kv.claimForOwner({
+    prefix: 'claim:owner:admins:',
+    owner: stickyOwner,
+    ttl: 30000
+  });
+  const stickyEmpty = await kv.claimForOwner({
+    prefix: 'missing:claim:owner:',
+    owner: 'api-output-validation:claimForOwner:owner:missing',
+    ttl: 30000
+  });
+
+  let stickyReleased = false;
+  let stickyRebound = null;
+  if (stickyFirst !== null) {
+    stickyReleased = await kv.releaseClaim(stickyFirst);
+    stickyRebound = await kv.claimForOwner({
+      prefix: 'claim:owner:users:',
+      owner: stickyOwner,
+      ttl: 30000
+    });
+  }
+
+  if (stickyPrefixScoped !== null) {
+    await kv.releaseClaim(stickyPrefixScoped);
+  }
+  if (stickyRebound !== null) {
+    await kv.releaseClaim(stickyRebound);
+  }
+
+  check(true, {
+    'api:claimForOwner-structure': () =>
+      stickyFirst !== null &&
+      typeof stickyFirst.id === 'string' &&
+      typeof stickyFirst.key === 'string' &&
+      typeof stickyFirst.token === 'number' &&
+      typeof stickyFirst.expiresAt === 'number' &&
+      stickyFirst.entry?.key === stickyFirst.key,
+    'api:claimForOwner-sticky-hit': () =>
+      stickyFirst !== null &&
+      stickySecond !== null &&
+      stickyFirst.id === stickySecond.id &&
+      stickyFirst.key === stickySecond.key &&
+      stickyFirst.token === stickySecond.token,
+    'api:claimForOwner-no-implicit-renew': () =>
+      stickyFirst !== null &&
+      stickySecond !== null &&
+      stickyFirst.expiresAt === stickySecond.expiresAt,
+    'api:claimForOwner-prefix-scope': () =>
+      stickyFirst !== null &&
+      stickyPrefixScoped !== null &&
+      stickyFirst.id !== stickyPrefixScoped.id &&
+      stickyFirst.key !== stickyPrefixScoped.key,
+    'api:claimForOwner-release-rebind': () =>
+      stickyFirst !== null &&
+      stickyReleased === true &&
+      stickyRebound !== null &&
+      stickyFirst.id !== stickyRebound.id &&
+      stickyFirst.token !== stickyRebound.token,
+    'api:claimForOwner-empty-null': () => stickyEmpty === null
   });
 
   await kv.set('claim:key:exact', { id: 1, queue: 'claim-key' });
@@ -2250,6 +2419,14 @@ export default async function apiOutputValidationTest() {
     () => kv.randomKey('bad'),
     'InvalidOptionsError'
   );
+  const validationNextCircularBadOptions = await expectErrorName(
+    () => kv.nextCircular('bad'),
+    'InvalidOptionsError'
+  );
+  const validationNextCircularBadPrefixType = await expectErrorName(
+    () => kv.nextCircular({ prefix: true }),
+    'InvalidOptionsError'
+  );
   const validationRandomKeysMissingCount = await expectErrorName(
     () => kv.randomKeys({ prefix: 'x' }),
     'InvalidOptionsError'
@@ -2268,6 +2445,10 @@ export default async function apiOutputValidationTest() {
   );
   const validationClaimRandomBadTTL = await expectErrorName(
     () => kv.claimRandom({ ttl: 0 }),
+    'InvalidOptionsError'
+  );
+  const validationClaimNextBadTTL = await expectErrorName(
+    () => kv.claimNext({ ttl: 0 }),
     'InvalidOptionsError'
   );
   const validationClaimKeyEmptyKey = await expectErrorName(
@@ -2446,6 +2627,8 @@ export default async function apiOutputValidationTest() {
       validationRenewClaimsBadClaims &&
       validationAllocationStatsBadOptions &&
       validationAllocationStatsBadPrefixType &&
+      validationNextCircularBadOptions &&
+      validationNextCircularBadPrefixType &&
       validationExportCSVMissingColumns &&
       validationExportCSVBadDelimiter &&
       validationExportCSVBadFileName &&
@@ -2486,11 +2669,14 @@ export default async function apiOutputValidationTest() {
       validationListKeysBadOptions &&
       validationCountBadOptions &&
       validationRandomKeyBadOptions &&
+      validationNextCircularBadOptions &&
+      validationNextCircularBadPrefixType &&
       validationRandomKeysMissingCount &&
       validationRandomKeysBadCount &&
       validationPopRandomBadOptions &&
       validationPopRandomManyBadOptions &&
       validationClaimRandomBadTTL &&
+      validationClaimNextBadTTL &&
       validationClaimKeyEmptyKey &&
       validationClaimRandomManyMissingCount &&
       validationReleaseClaimBadClaim &&
@@ -2522,6 +2708,11 @@ export default async function apiOutputValidationTest() {
     (await expectErrorName(() => kv.get('foo'), 'StoreClosedError')) &&
     (await expectErrorName(() => kv.set('post:close:key', 'value'), 'StoreClosedError')) &&
     (await expectErrorName(() => kv.claimRandom({ prefix: 'claim:key:' }), 'StoreClosedError')) &&
+    (await expectErrorName(() => kv.claimNext({ prefix: 'claim-next:' }), 'StoreClosedError')) &&
+    (await expectErrorName(
+      () => kv.nextCircular({ prefix: 'next-circular:search:' }),
+      'StoreClosedError'
+    )) &&
     (await expectErrorName(
       () => kv.popRandomMany({ prefix: 'pop:many:key:', count: 1 }),
       'StoreClosedError'

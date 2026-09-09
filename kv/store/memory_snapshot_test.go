@@ -217,14 +217,14 @@ func TestMemoryStore_Backup_AllowConcurrentWrites_StreamingMemoryFootprint(t *te
 
 	var maxChunk int
 
-	streamSnapshotChunkObserver = func(chunkLen int) {
+	store.testSnapshotChunkObserver = func(chunkLen int) {
 		if chunkLen > maxChunk {
 			maxChunk = chunkLen
 		}
 	}
 
 	defer func() {
-		streamSnapshotChunkObserver = nil
+		store.testSnapshotChunkObserver = nil
 	}()
 
 	tempFile := filepath.Join(t.TempDir(), "streamed.kv")

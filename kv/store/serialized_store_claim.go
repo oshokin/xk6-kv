@@ -135,6 +135,60 @@ func (s *SerializedStore) ClaimRandom(opts *ClaimOptions) (*EntryClaim, error) {
 	return claim, nil
 }
 
+// ClaimNext leases the lexicographically smallest free matching entry and
+// deserializes its value.
+func (s *SerializedStore) ClaimNext(opts *ClaimOptions) (*EntryClaim, error) {
+	claim, err := s.store.ClaimNext(opts)
+	if err != nil || claim == nil {
+		return claim, err
+	}
+
+	decoded, err := s.deserializeValue(claim.Entry.Value)
+	if err != nil {
+		released, releaseErr := s.store.ReleaseClaim(claim.Ref())
+		if releaseErr != nil {
+			return nil, errors.Join(err, releaseErr)
+		}
+
+		if !released {
+			return nil, fmt.Errorf("%w: claimNext release failed after decode error", err)
+		}
+
+		return nil, err
+	}
+
+	claim.Entry.Value = decoded
+
+	return claim, nil
+}
+
+// ClaimForOwner returns one sticky live claim for an owner and deserializes
+// its current value snapshot.
+func (s *SerializedStore) ClaimForOwner(opts *ClaimOptions) (*EntryClaim, error) {
+	claim, err := s.store.ClaimForOwner(opts)
+	if err != nil || claim == nil {
+		return claim, err
+	}
+
+	decoded, err := s.deserializeValue(claim.Entry.Value)
+	if err != nil {
+		released, releaseErr := s.store.ReleaseClaim(claim.Ref())
+		if releaseErr != nil {
+			return nil, errors.Join(err, releaseErr)
+		}
+
+		if !released {
+			return nil, fmt.Errorf("%w: claimForOwner claim release failed after decode error", err)
+		}
+
+		return nil, err
+	}
+
+	claim.Entry.Value = decoded
+
+	return claim, nil
+}
+
 // ClaimKey leases one specific free key and deserializes its value.
 func (s *SerializedStore) ClaimKey(key string, opts *ClaimOptions) (*EntryClaim, error) {
 	claim, err := s.store.ClaimKey(key, opts)

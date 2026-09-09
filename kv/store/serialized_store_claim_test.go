@@ -55,6 +55,58 @@ func TestSerializedStore_ClaimRandom_JSONDecodeErrorReleasesClaim(t *testing.T) 
 	}
 }
 
+// TestSerializedStore_ClaimNext_JSONDecodeErrorReleasesClaim verifies that serialized store claim next json decode error releases claim.
+func TestSerializedStore_ClaimNext_JSONDecodeErrorReleasesClaim(t *testing.T) {
+	t.Parallel()
+
+	for _, testCase := range serializedRawStoreCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			raw := testCase.newStore(t)
+			require.NoError(t, raw.Set(corruptJSONKey, []byte(corruptJSONValue)))
+
+			serialized := NewSerializedStore(raw, NewJSONSerializer())
+
+			claim, err := serialized.ClaimNext(&ClaimOptions{Prefix: "bad:"})
+			require.Nil(t, claim)
+			require.ErrorIs(t, err, ErrSerializerDecodeFailed)
+
+			stats, err := raw.AllocationStats("bad:")
+			require.NoError(t, err)
+			require.EqualValues(t, 1, stats.Claimable)
+			require.EqualValues(t, 0, stats.ClaimedLive)
+
+			requireRawCorruptJSONStillAvailable(t, raw)
+		})
+	}
+}
+
+// TestSerializedStore_ClaimForOwner_JSONDecodeErrorReleasesClaim verifies that serialized store claimForOwner json decode error releases claim.
+func TestSerializedStore_ClaimForOwner_JSONDecodeErrorReleasesClaim(t *testing.T) {
+	t.Parallel()
+
+	for _, testCase := range serializedRawStoreCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			raw := testCase.newStore(t)
+			require.NoError(t, raw.Set(corruptJSONKey, []byte(corruptJSONValue)))
+
+			serialized := NewSerializedStore(raw, NewJSONSerializer())
+
+			claim, err := serialized.ClaimForOwner(&ClaimOptions{
+				Prefix: "bad:",
+				Owner:  "scenario:login:vu:1",
+				TTLMs:  30_000,
+			})
+			require.Nil(t, claim)
+			require.ErrorIs(t, err, ErrSerializerDecodeFailed)
+			requireRawCorruptJSONStillAvailable(t, raw)
+		})
+	}
+}
+
 // TestSerializedStore_ClaimKey_JSONDecodeErrorReleasesClaim verifies that serialized store claim key json decode error releases claim.
 func TestSerializedStore_ClaimKey_JSONDecodeErrorReleasesClaim(t *testing.T) {
 	t.Parallel()

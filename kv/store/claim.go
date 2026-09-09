@@ -7,11 +7,11 @@ import (
 )
 
 const (
-	// DefaultClaimTTLMs is the default lease duration used by ClaimRandom.
+	// DefaultClaimTTLMs is the default lease duration used by claim allocation APIs.
 	DefaultClaimTTLMs int64 = 30_000
 	// MaxClaimTTLMs bounds claim leases to avoid accidental forever leases and timestamp overflow.
 	MaxClaimTTLMs int64 = 24 * 60 * 60 * 1000
-	// MaxClaimOwnerBytes bounds optional diagnostic owner metadata stored with claims.
+	// MaxClaimOwnerBytes bounds claim owner metadata and sticky owner identifiers.
 	MaxClaimOwnerBytes = 256
 	// popRandomClaimOwner tags internal popRandom/popRandomMany claims.
 	popRandomClaimOwner = "__xk6_kv_pop_random"
@@ -51,9 +51,9 @@ type (
 		Token int64
 	}
 
-	// ClaimOptions configures ClaimRandom selection and lease behavior.
+	// ClaimOptions configures single-claim allocation and lease behavior.
 	ClaimOptions struct {
-		// Prefix is the key prefix to filter for random selection.
+		// Prefix filters candidate keys for single-claim allocation.
 		Prefix string
 		// Owner is an optional logical owner identifier for diagnostics.
 		Owner string
@@ -154,6 +154,25 @@ func validateClaimOptions(opts *ClaimOptions) error {
 	}
 
 	return nil
+}
+
+// validateClaimForOwnerOptions validates sticky owner claim options.
+func validateClaimForOwnerOptions(opts *ClaimOptions) error {
+	if opts == nil {
+		return fmt.Errorf(
+			"%w: claimForOwner options are required",
+			ErrKVOptionsInvalid,
+		)
+	}
+
+	if opts.Owner == "" {
+		return fmt.Errorf(
+			"%w: claimForOwner owner must be non-empty",
+			ErrKVOptionsInvalid,
+		)
+	}
+
+	return validateClaimOptions(opts)
 }
 
 // validateRenewClaimOptions validates explicit claim renewal options.

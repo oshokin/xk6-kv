@@ -91,10 +91,16 @@ const (
 	opRandomKey = "random_key"
 	// opRandomKeys is the operation tag for random_keys.
 	opRandomKeys = "random_keys"
+	// opNextCircular is the operation tag for next_circular.
+	opNextCircular = "next_circular"
 	// opPopRandom is the operation tag for pop_random.
 	opPopRandom = "pop_random"
 	// opClaimRandom is the operation tag for claim_random.
 	opClaimRandom = "claim_random"
+	// opClaimNext is the operation tag for claim_next.
+	opClaimNext = "claim_next"
+	// opClaimForOwner is the operation tag for claim_for_owner.
+	opClaimForOwner = "claim_for_owner"
 	// opClaimKey is the operation tag for claim_key.
 	opClaimKey = "claim_key"
 	// opClaimRandomMany is the operation tag for claim_random_many.
@@ -354,7 +360,16 @@ func (s kvOperationSample) shouldEmitEmptyResult() bool {
 	}
 
 	switch s.operation {
-	case opRandomKey, opRandomKeys, opPopRandom, opClaimRandom, opClaimKey, opClaimRandomMany, opPopRandomMany:
+	case opRandomKey,
+		opRandomKeys,
+		opNextCircular,
+		opPopRandom,
+		opClaimRandom,
+		opClaimNext,
+		opClaimForOwner,
+		opClaimKey,
+		opClaimRandomMany,
+		opPopRandomMany:
 		return true
 	default:
 		return false
@@ -370,16 +385,30 @@ func isEmptyAllocationResult(op string, result any) bool {
 	case opRandomKeys:
 		keys, ok := result.([]string)
 		return ok && len(keys) == 0
-	case opPopRandom, opClaimRandom, opClaimKey:
-		return result == nil
+	case opNextCircular, opPopRandom, opClaimRandom, opClaimNext, opClaimForOwner, opClaimKey:
+		return isNilOperationResult(result)
 	case opClaimRandomMany, opPopRandomMany:
-		if result == nil {
+		if isNilOperationResult(result) {
 			return true
 		}
 
 		value := reflect.ValueOf(result)
 
 		return value.Kind() == reflect.Slice && value.Len() == 0
+	default:
+		return false
+	}
+}
+
+func isNilOperationResult(result any) bool {
+	if result == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(result)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
 	default:
 		return false
 	}

@@ -5159,6 +5159,9 @@ func TestKVAsync_AllOptionsMethods_InvalidOptionsType_RejectsPromise(t *testing.
 			expectInvalidOptions(__kv.list("bad"), "list"),
 			expectInvalidOptions(__kv.listKeys("bad"), "listKeys"),
 			expectInvalidOptions(__kv.randomKeys("bad"), "randomKeys"),
+			expectInvalidOptions(__kv.nextCircular("bad"), "nextCircular"),
+			expectInvalidOptions(__kv.claimNext("bad"), "claimNext"),
+			expectInvalidOptions(__kv.claimForOwner("bad"), "claimForOwner"),
 			expectInvalidOptions(__kv.exportJSONL("bad"), "exportJSONL"),
 			expectInvalidOptions(__kv.exportCSV("bad"), "exportCSV"),
 			expectInvalidOptions(__kv.importJSONL("bad"), "importJSONL"),
@@ -5208,8 +5211,15 @@ func TestKVAsync_AllOptionsMethods_InvalidOptionFieldType_RejectsPromise(t *test
 			expectInvalidOptions(__kv.listKeys({ prefix: true }), "listKeys.prefix"),
 			expectInvalidOptions(__kv.listKeys({ limit: "10" }), "listKeys.limit"),
 			expectInvalidOptions(__kv.randomKeys({ prefix: 7, count: 1 }), "randomKeys.prefix"),
+			expectInvalidOptions(__kv.nextCircular({ prefix: true }), "nextCircular.prefix"),
 			expectInvalidOptions(__kv.randomKeys({ count: "10" }), "randomKeys.count"),
 			expectInvalidOptions(__kv.randomKeys({ count: 1, unique: "yes" }), "randomKeys.unique"),
+			expectInvalidOptions(__kv.claimNext({ owner: 1 }), "claimNext.owner"),
+			expectInvalidOptions(__kv.claimNext({ prefix: true }), "claimNext.prefix"),
+			expectInvalidOptions(__kv.claimNext({ ttl: "10" }), "claimNext.ttl"),
+			expectInvalidOptions(__kv.claimForOwner({ owner: 1 }), "claimForOwner.owner"),
+			expectInvalidOptions(__kv.claimForOwner({ owner: "vu:1", prefix: true }), "claimForOwner.prefix"),
+			expectInvalidOptions(__kv.claimForOwner({ owner: "vu:1", ttl: "10" }), "claimForOwner.ttl"),
 			expectInvalidOptions(__kv.exportJSONL({ fileName: 100 }), "exportJSONL.fileName"),
 			expectInvalidOptions(__kv.exportJSONL({ fileName: "./x.jsonl", prefix: true }), "exportJSONL.prefix"),
 			expectInvalidOptions(__kv.exportJSONL({ fileName: "./x.jsonl", limit: "10" }), "exportJSONL.limit"),
@@ -5453,6 +5463,642 @@ func TestKVAsync_ClaimRandom_EmptyResolvesNull(t *testing.T) {
 				}
 			});
 	`)
+}
+
+// TestKVAsync_NextCircular_ReturnsPromiseAndWraps verifies that kv async next circular returns a promise and wraps.
+func TestKVAsync_NextCircular_ReturnsPromiseAndWraps(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"search:0003": "monitor",
+			"search:0001": "laptop",
+			"search:0002": "headphones",
+			"other:0001": "ignore"
+		})
+			.then(() => {
+				const pending = __kv.nextCircular({ prefix: "search:" });
+				if (!pending || typeof pending.then !== "function") {
+					throw new Error("nextCircular must return a Promise");
+				}
+				return pending;
+			})
+			.then((first) => {
+				if (!first || first.key !== "search:0001") {
+					throw new Error("expected first circular key");
+				}
+				return __kv.nextCircular({ prefix: "search:" });
+			})
+			.then((second) => {
+				if (!second || second.key !== "search:0002") {
+					throw new Error("expected second circular key");
+				}
+				return __kv.nextCircular({ prefix: "search:" });
+			})
+			.then((third) => {
+				if (!third || third.key !== "search:0003") {
+					throw new Error("expected third circular key");
+				}
+				return __kv.nextCircular({ prefix: "search:" });
+			})
+			.then((fourth) => {
+				if (!fourth || fourth.key !== "search:0001") {
+					throw new Error("expected wrap to first key");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_NextCircular_EmptyResolvesNull verifies that kv async next circular empty resolves null.
+func TestKVAsync_NextCircular_EmptyResolvesNull(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.nextCircular({ prefix: "missing:" })
+			.then((entry) => {
+				if (entry !== null) {
+					throw new Error("expected null");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_NextCircular_PrefixFiltering verifies that kv async next circular applies prefix filters.
+func TestKVAsync_NextCircular_PrefixFiltering(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"users:0001": "Alice",
+			"users:0002": "Bob",
+			"orders:0001": "order-1"
+		})
+			.then(() => __kv.nextCircular({ prefix: "users:" }))
+			.then((first) => {
+				if (!first || !first.key.startsWith("users:")) {
+					throw new Error("expected users prefix on first result");
+				}
+				return __kv.nextCircular({ prefix: "users:" });
+			})
+			.then((second) => {
+				if (!second || !second.key.startsWith("users:")) {
+					throw new Error("expected users prefix on second result");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_NextCircular_InvalidOptionsRejectsPromise verifies that kv async next circular invalid options reject promise.
+func TestKVAsync_NextCircular_InvalidOptionsRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		Promise.all([
+			__kv.nextCircular("bad")
+				.then(() => {
+					throw new Error("expected rejection for non-object options");
+				})
+				.catch((err) => {
+					if (!err || err.name !== "InvalidOptionsError") {
+						throw new Error("unexpected error class: " + String(err && err.name));
+					}
+				}),
+			__kv.nextCircular({ prefix: true })
+				.then(() => {
+					throw new Error("expected rejection for invalid prefix type");
+				})
+				.catch((err) => {
+					if (!err || err.name !== "InvalidOptionsError") {
+						throw new Error("unexpected error class: " + String(err && err.name));
+					}
+				})
+		]);
+	`)
+}
+
+// TestKVAsync_NextCircular_ClosedDiskStoreRejectsPromise verifies that kv async next circular propagates closed disk store errors.
+func TestKVAsync_NextCircular_ClosedDiskStoreRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	diskStore, err := store.NewDiskStore(true, filepath.Join(t.TempDir(), "next-circular-closed-disk.db"), nil)
+	require.NoError(t, err)
+	require.NoError(t, diskStore.Open())
+	require.NoError(t, diskStore.Set("search:0001", "value"))
+	require.NoError(t, diskStore.Close())
+
+	kv := NewKV(runtime.VU, diskStore)
+
+	runKVScript(t, runtime, kv, `
+		__kv.nextCircular({ prefix: "search:" })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "DiskStoreOpenError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+// TestKVAsync_NextCircular_OperationMetrics verifies that kv async next circular operation metrics.
+func TestKVAsync_NextCircular_OperationMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+	samples := attachOperationMetricsForTest(t, runtime, kv)
+
+	runKVScript(t, runtime, kv, `
+		__kv.set("search:0001", "laptop")
+			.then(() => __kv.nextCircular({ prefix: "search:" }))
+			.then((entry) => {
+				if (!entry || entry.key !== "search:0001") {
+					throw new Error("unexpected nextCircular result");
+				}
+			});
+	`)
+
+	var (
+		seenTotal    bool
+		seenDuration bool
+		seenFailed   bool
+		seenEmpty    bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, hasOp := sample.Tags.Get(tagOp)
+			if !hasOp || op != opNextCircular {
+				continue
+			}
+
+			_, hasPrefixTag := sample.Tags.Get("prefix")
+			assert.False(t, hasPrefixTag)
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenTotal = true
+			case metricKVOperationDuration:
+				status, ok := sample.Tags.Get(tagStatus)
+				require.True(t, ok)
+				assert.Equal(t, statusOK, status)
+
+				seenDuration = true
+			case metricKVOperationFailed:
+				assert.InDelta(t, 0.0, sample.Value, 1e-9)
+
+				seenFailed = true
+			case metricKVEmptyResult:
+				assert.InDelta(t, 0.0, sample.Value, 1e-9)
+
+				seenEmpty = true
+			}
+		}
+	}
+
+	assert.True(t, seenTotal)
+	assert.True(t, seenDuration)
+	assert.True(t, seenFailed)
+	assert.True(t, seenEmpty, "nextCircular should emit empty-result metric samples")
+}
+
+// TestKVAsync_NextCircular_EmptyResultMetrics verifies that kv async next circular empty result metrics.
+func TestKVAsync_NextCircular_EmptyResultMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+	samples := attachOperationMetricsForTest(t, runtime, kv)
+
+	runKVScript(t, runtime, kv, `
+		__kv.nextCircular({ prefix: "missing:" })
+			.then((entry) => {
+				if (entry !== null) {
+					throw new Error("expected null");
+				}
+			});
+	`)
+
+	var (
+		seenOpTotal bool
+		seenEmpty   bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, hasOp := sample.Tags.Get(tagOp)
+			if !hasOp || op != opNextCircular {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				seenOpTotal = true
+			case metricKVEmptyResult:
+				if sample.Value > 0 {
+					seenEmpty = true
+				}
+			}
+		}
+	}
+
+	assert.True(t, seenOpTotal)
+	assert.True(t, seenEmpty)
+}
+
+// TestKVAsync_ClaimNext_ResolvesClaim verifies that kv async claim next resolves claim.
+func TestKVAsync_ClaimNext_ResolvesClaim(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"jobs:2": "job-2",
+			"jobs:10": "job-10",
+			"jobs:1": "job-1",
+			"jobs:20": "job-20",
+			"users:1": "user-1"
+		})
+			.then(() => __kv.claimNext({ prefix: "jobs:", owner: "worker:17", ttl: 60000 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing claim");
+				}
+				if (claim.key !== "jobs:1") {
+					throw new Error("claimNext must return lexicographic head");
+				}
+				const owner = claim.owner ?? claim["owner,omitempty"];
+				if (owner !== "worker:17") {
+					throw new Error("claimNext owner must be preserved");
+				}
+				if (typeof claim.expiresAt !== "number" || claim.expiresAt <= 0) {
+					throw new Error("claimNext must expose expiresAt");
+				}
+				return __kv.completeClaim(claim, { deleteKey: true });
+			})
+			.then((completed) => {
+				if (completed !== true) {
+					throw new Error("head completion must succeed");
+				}
+				return __kv.claimNext({ prefix: "jobs:", ttl: 60000 });
+			})
+			.then((second) => {
+				if (!second) {
+					throw new Error("missing second claim");
+				}
+				if (second.key !== "jobs:10") {
+					throw new Error("second claim must follow lexicographic order");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_ClaimNext_EmptyResolvesNull verifies that kv async claim next empty resolves null.
+func TestKVAsync_ClaimNext_EmptyResolvesNull(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.claimNext({ prefix: "missing:" })
+			.then((claim) => {
+				if (claim !== null) {
+					throw new Error("expected null");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_ClaimNext_SkipsLiveHead verifies that kv async claim next skips a busy lexicographic head.
+func TestKVAsync_ClaimNext_SkipsLiveHead(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		let busyHead;
+		let nextClaim;
+
+		__kv.setMany({
+			"jobs:000001": "job-1",
+			"jobs:000002": "job-2",
+			"jobs:000003": "job-3"
+		})
+			.then(() => __kv.claimKey("jobs:000001", { ttl: 60000 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing busy head claim");
+				}
+				busyHead = claim;
+				return __kv.claimNext({ prefix: "jobs:", ttl: 60000 });
+			})
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing claimNext result");
+				}
+				if (claim.key !== "jobs:000002") {
+					throw new Error("claimNext must skip live head");
+				}
+				nextClaim = claim;
+				return Promise.all([
+					__kv.releaseClaim(busyHead),
+					__kv.releaseClaim(nextClaim)
+				]);
+			})
+			.then(([headReleased, nextReleased]) => {
+				if (headReleased !== true || nextReleased !== true) {
+					throw new Error("cleanup releases must succeed");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_ClaimNext_ReleaseRequeuesHead verifies that releasing a claim makes it the next head again.
+func TestKVAsync_ClaimNext_ReleaseRequeuesHead(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		let first;
+
+		__kv.setMany({
+			"jobs:000001": "job-1",
+			"jobs:000002": "job-2"
+		})
+			.then(() => __kv.claimNext({ prefix: "jobs:", ttl: 60000 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing first claim");
+				}
+				first = claim;
+				return __kv.releaseClaim(claim);
+			})
+			.then((released) => {
+				if (released !== true) {
+					throw new Error("release must succeed");
+				}
+				return __kv.claimNext({ prefix: "jobs:", ttl: 60000 });
+			})
+			.then((second) => {
+				if (!second) {
+					throw new Error("missing second claim");
+				}
+				if (second.key !== first.key) {
+					throw new Error("released key must become head again");
+				}
+				if (second.id === first.id || second.token === first.token) {
+					throw new Error("new claim identity expected after release");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_ClaimNext_CompleteDeleteAdvances verifies that deleteKey completion consumes the head key.
+func TestKVAsync_ClaimNext_CompleteDeleteAdvances(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.setMany({
+			"jobs:000001": "job-1",
+			"jobs:000002": "job-2"
+		})
+			.then(() => __kv.claimNext({ prefix: "jobs:", ttl: 60000 }))
+			.then((claim) => {
+				if (!claim || claim.key !== "jobs:000001") {
+					throw new Error("expected first key");
+				}
+				return __kv.completeClaim(claim, { deleteKey: true });
+			})
+			.then((completed) => {
+				if (completed !== true) {
+					throw new Error("completion must succeed");
+				}
+				return __kv.claimNext({ prefix: "jobs:", ttl: 60000 });
+			})
+			.then((next) => {
+				if (!next || next.key !== "jobs:000002") {
+					throw new Error("queue must advance after delete completion");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_ClaimNext_StoreClosedRejectsPromise verifies that kv async claim next rejects after close.
+func TestKVAsync_ClaimNext_StoreClosedRejectsPromise(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+	require.NoError(t, kv.Close())
+
+	runKVScript(t, runtime, kv, `
+		__kv.claimNext({ prefix: "jobs:" })
+			.then(() => {
+				throw new Error("expected rejection");
+			})
+			.catch((err) => {
+				if (!err || err.name !== "StoreClosedError") {
+					throw new Error("unexpected error class: " + String(err && err.name));
+				}
+			});
+	`)
+}
+
+// TestKVAsync_ClaimNext_EmptyResultMetrics verifies that kv async claim next emits empty-result metrics.
+func TestKVAsync_ClaimNext_EmptyResultMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+	samples := attachOperationMetricsForTest(t, runtime, kv)
+
+	runKVScript(t, runtime, kv, `
+		__kv.claimNext({ prefix: "missing:" })
+			.then((claim) => {
+				if (claim !== null) {
+					throw new Error("expected null");
+				}
+			});
+	`)
+
+	var (
+		seenOpTotal bool
+		seenEmpty   bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, hasOp := sample.Tags.Get(tagOp)
+			if !hasOp || op != opClaimNext {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				seenOpTotal = true
+			case metricKVEmptyResult:
+				if sample.Value > 0 {
+					seenEmpty = true
+				}
+			}
+		}
+	}
+
+	assert.True(t, seenOpTotal)
+	assert.True(t, seenEmpty)
+}
+
+// TestKVAsync_ClaimForOwner_ResolvesStickyClaim verifies that kv async claim for owner resolves sticky claim.
+func TestKVAsync_ClaimForOwner_ResolvesStickyClaim(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		let first;
+		__kv.setMany({
+			"users:1": "Alice",
+			"users:2": "Bob"
+		})
+			.then(() => __kv.claimForOwner({ prefix: "users:", owner: "scenario:login:vu:1", ttl: 30000 }))
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing first claim");
+				}
+				first = claim;
+				return __kv.claimForOwner({ prefix: "users:", owner: "scenario:login:vu:1", ttl: 60000 });
+			})
+			.then((claim) => {
+				if (!claim) {
+					throw new Error("missing second claim");
+				}
+				if (claim.id !== first.id || claim.key !== first.key || claim.token !== first.token) {
+					throw new Error("sticky claim identity mismatch");
+				}
+				if (claim.expiresAt !== first.expiresAt) {
+					throw new Error("claimForOwner must not implicitly renew");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_ClaimForOwner_PrefixIsStickyIdentityPart verifies that kv async claim for owner prefix is sticky identity part.
+func TestKVAsync_ClaimForOwner_PrefixIsStickyIdentityPart(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		Promise.all([
+			__kv.set("users:1", "buyer"),
+			__kv.set("admins:1", "admin")
+		])
+			.then(() => __kv.claimForOwner({ prefix: "users:", owner: "vu:7", ttl: 30000 }))
+			.then((usersClaim) => {
+				if (!usersClaim) {
+					throw new Error("missing users claim");
+				}
+				return __kv.claimForOwner({ prefix: "admins:", owner: "vu:7", ttl: 30000 })
+					.then((adminsClaim) => {
+						if (!adminsClaim) {
+							throw new Error("missing admins claim");
+						}
+						if (usersClaim.id === adminsClaim.id || usersClaim.key === adminsClaim.key) {
+							throw new Error("prefix must partition sticky owner identity");
+						}
+					});
+			});
+	`)
+}
+
+// TestKVAsync_ClaimForOwner_EmptyResolvesNull verifies that kv async claim for owner empty resolves null.
+func TestKVAsync_ClaimForOwner_EmptyResolvesNull(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+
+	runKVScript(t, runtime, kv, `
+		__kv.claimForOwner({ prefix: "missing:", owner: "scenario:login:vu:1" })
+			.then((claim) => {
+				if (claim !== null) {
+					throw new Error("expected null");
+				}
+			});
+	`)
+}
+
+// TestKVAsync_ClaimForOwner_EmptyResultMetrics verifies that kv async claim for owner empty result metrics.
+func TestKVAsync_ClaimForOwner_EmptyResultMetrics(t *testing.T) {
+	t.Parallel()
+
+	runtime := modulestest.NewRuntime(t)
+	kv := NewKV(runtime.VU, store.NewMemoryStore(&store.MemoryConfig{TrackKeys: true}))
+	samples := attachOperationMetricsForTest(t, runtime, kv)
+
+	runKVScript(t, runtime, kv, `
+		__kv.claimForOwner({ prefix: "missing:", owner: "scenario:login:vu:1" })
+			.then((claim) => {
+				if (claim !== null) {
+					throw new Error("expected null");
+				}
+			});
+	`)
+
+	var (
+		seenOpTotal bool
+		seenEmpty   bool
+	)
+
+	for _, container := range k6metrics.GetBufferedSamples(samples) {
+		for _, sample := range container.GetSamples() {
+			op, hasOp := sample.Tags.Get(tagOp)
+			if !hasOp || op != opClaimForOwner {
+				continue
+			}
+
+			switch sample.Metric.Name {
+			case metricKVOperationsTotal:
+				seenOpTotal = true
+			case metricKVEmptyResult:
+				if sample.Value > 0 {
+					seenEmpty = true
+				}
+			}
+		}
+	}
+
+	assert.True(t, seenOpTotal)
+	assert.True(t, seenEmpty)
 }
 
 // TestKVAsync_ReleaseClaim_ReturnsTrue verifies that kv async release claim returns true.
@@ -5900,6 +6546,15 @@ func TestKVAsync_Claim_InvalidOptions_RejectsPromise(t *testing.T) {
 			expectInvalidOptions(__kv.claimRandom({ ttl: 1.5 }), "claimRandom.ttl.integer"),
 			expectInvalidOptions(__kv.claimRandom({ ttl: Number.MAX_SAFE_INTEGER }), "claimRandom.ttl.max"),
 			expectInvalidOptions(__kv.claimRandom({ owner: "o".repeat(257) }), "claimRandom.owner.max"),
+			expectInvalidOptions(__kv.claimNext({ ttl: 0 }), "claimNext.ttl.positive"),
+			expectInvalidOptions(__kv.claimNext({ ttl: 1.5 }), "claimNext.ttl.integer"),
+			expectInvalidOptions(__kv.claimNext({ ttl: Number.MAX_SAFE_INTEGER }), "claimNext.ttl.max"),
+			expectInvalidOptions(__kv.claimNext({ owner: "o".repeat(257) }), "claimNext.owner.max"),
+			expectInvalidOptions(__kv.claimForOwner(), "claimForOwner.options.required"),
+			expectInvalidOptions(__kv.claimForOwner({}), "claimForOwner.owner.required"),
+			expectInvalidOptions(__kv.claimForOwner({ owner: "" }), "claimForOwner.owner.empty"),
+			expectInvalidOptions(__kv.claimForOwner({ owner: "o".repeat(257) }), "claimForOwner.owner.max"),
+			expectInvalidOptions(__kv.claimForOwner({ owner: "vu:1", ttl: 0 }), "claimForOwner.ttl.positive"),
 			expectInvalidOptions(__kv.claimKey("", { ttl: 1000 }), "claimKey.key.empty"),
 			expectInvalidOptions(__kv.claimKey("user:1", { ttl: 0 }), "claimKey.ttl.positive"),
 			expectInvalidOptions(__kv.claimRandomMany(), "claimRandomMany.count.required"),
