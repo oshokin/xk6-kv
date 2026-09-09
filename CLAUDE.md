@@ -18,7 +18,7 @@ go test ./kv/store -run TestDiskStore_Get -race
 # Run benchmarks
 go test ./kv/store -bench=. -benchmem -run=^$
 
-# Lint (CI pins golangci-lint v1.64; see .golangci.yml)
+# Lint (CI pins golangci-lint v2.13; see .golangci.yml)
 golangci-lint run
 
 # Vet / build
@@ -62,7 +62,7 @@ The extension is registered once at process start by `register.go`, which calls 
 
 ## Conventions
 
-- Go 1.23+; CI matrix tests 1.23.x and 1.24.x on Ubuntu and Windows.
+- Go 1.25+ (matches k6 v2.2.0); CI matrix tests 1.25.x and 1.27.x on Ubuntu and Windows.
 - Lint config (`.golangci.yml`) is strict — `gochecknoglobals`, `forbidigo` (no `fmt.Print*`, no most `os.*`), `cyclop`, `funlen`, etc. Test files are exempted from several of these via `path: _(test|gen)\.go`.
 - License is AGPL-3.0; module path is `github.com/oleiade/xk6-kv`.
 

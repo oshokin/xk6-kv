@@ -26,15 +26,15 @@ jobs:
         with:
           fetch-depth: 0
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.10
+          version: v2.13
 
   test-go-versions:
     strategy:
       fail-fast: false
       matrix:
-        go-version: [1.23.x, 1.24.x]
+        go-version: [1.25.x, 1.27.x]
         platform: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.platform }}
     steps:
@@ -49,7 +49,7 @@ jobs:
         if: matrix.go-version == 'tip'
         uses: actions/setup-go@v5
         with:
-          go-version: 1.23.x
+          go-version: 1.25.x
       - name: Install Go tip
         shell: bash
         if: matrix.go-version == 'tip'
@@ -74,13 +74,13 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.23.x
+          go-version: 1.27.x
       - name: Check build
         run: |
           go version
           pwd && ls -l
 
-          go install go.k6.io/xk6/cmd/xk6@master
+          go install go.k6.io/xk6/cmd/xk6@latest
           MODULE_NAME=`go list -m`
 
           GOPRIVATE="go.k6.io/k6" xk6 build \
