@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Changed
+
+- Bumped `go.k6.io/k6/v2` from v2.1.0 to v2.2.0 (no breaking changes upstream) and `github.com/grafana/sobek` to the version k6 v2.2.0 pins.
+- CI now tests Go 1.25.x and 1.27.x and lints with golangci-lint v2.13; the Go floor in `go.mod` stays at 1.25.
+- k6 v2 removed the `--no-summary` flag; use `--summary-mode=disabled` in scripts and CI that invoke the built binary.
+
 ## v1.4.0 - 2026-07-27
 
 ### Changed
