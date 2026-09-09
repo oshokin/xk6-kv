@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.5.0 - 2026-09-09
+
 ### Changed
 
 - Bumped `go.k6.io/k6/v2` from v2.1.0 to v2.2.0 (no breaking changes upstream) and `github.com/grafana/sobek` to the version k6 v2.2.0 pins.
