@@ -509,6 +509,10 @@ func TestStore_ClaimNext_ConcurrentReleaseAndCompleteDoesNotDoubleLease(t *testi
 					return
 				}
 
+				// Stop test-level "live claim" tracking before lifecycle finalization.
+				// Once release/complete succeeds, immediate re-lease of the same key is valid.
+				claimEnd(claim)
+
 				var opErr error
 
 				if useCompleteWithoutDelete {
@@ -516,8 +520,6 @@ func TestStore_ClaimNext_ConcurrentReleaseAndCompleteDoesNotDoubleLease(t *testi
 				} else {
 					opErr = releaseLiveClaim(claim)
 				}
-
-				claimEnd(claim)
 
 				if opErr != nil {
 					errCh <- fmt.Errorf("%s lifecycle op failed: %w", name, opErr)
