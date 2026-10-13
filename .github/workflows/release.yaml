@@ -48,7 +48,6 @@ jobs:
         github.event_name == 'workflow_run' &&
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.event == 'push' &&
-        !startsWith(github.event.workflow_run.ref, 'refs/tags/') &&
         github.event.workflow_run.head_branch == github.event.repository.default_branch
       )
     steps:

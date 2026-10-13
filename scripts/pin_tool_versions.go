@@ -90,9 +90,11 @@ const (
 	actionsDirName = "actions"
 	// releaseActionDirName names this repository's release composite action.
 	releaseActionDirName = "release"
-	// extensionCheckWorkflowFile is the workflow that pins Go, xk6, and golangci-lint.
+	// extensionCheckWorkflowFile is the workflow that pins xk6 and golangci-lint.
+	// Go comes from go.mod through setup-go's go-version-file input.
 	extensionCheckWorkflowFile = "extension-check.yaml"
-	// releaseActionFile is the composite action that pins Go and xk6.
+	// releaseActionFile is the composite action that pins xk6.
+	// Go comes from go.mod through setup-go's go-version-file input.
 	releaseActionFile = "action.yml"
 	// taskfileName is updated so local lint tasks use the same pinned tools.
 	taskfileName = "taskfile.yaml"
@@ -110,14 +112,8 @@ const (
 	goModVersionLine = `go %s`
 	// golangCILintVersionPattern matches the workflow env var for golangci-lint.
 	golangCILintVersionPattern = `(?m)^  GOLANGCI_LINT_VERSION: ".*"$`
-	// goVersionPattern matches the workflow env var for Go.
-	goVersionPattern = `(?m)^  GO_VERSION: ".*"$`
 	// xk6VersionPattern matches the workflow env var for xk6.
 	xk6VersionPattern = `(?m)^  XK6_VERSION: ".*"$`
-	// goVersionMatrixPattern matches the workflow build matrix Go version.
-	goVersionMatrixPattern = `(?m)^        go-version: \[".*"\]$`
-	// releaseGoVersionPattern matches the release action Go env export.
-	releaseGoVersionPattern = `(?m)^        echo "GO_VERSION=[^"]+" >> \$GITHUB_ENV$`
 	// releaseXK6VersionPattern matches the release action xk6 env export.
 	releaseXK6VersionPattern = `(?m)^        echo "XK6_VERSION=[^"]+" >> \$GITHUB_ENV$`
 	// taskfileGolangCITagPattern matches the taskfile golangci-lint tag.
@@ -131,14 +127,8 @@ const (
 
 	// golangCILintVersionLine renders the workflow env var for golangci-lint.
 	golangCILintVersionLine = `  GOLANGCI_LINT_VERSION: "%s"`
-	// goVersionLine renders the workflow env var for Go.
-	goVersionLine = `  GO_VERSION: "%s"`
 	// xk6VersionLine renders the workflow env var for xk6.
 	xk6VersionLine = `  XK6_VERSION: "%s"`
-	// goVersionMatrixLine renders the workflow build matrix Go version.
-	goVersionMatrixLine = `        go-version: ["%s"]`
-	// releaseGoVersionLine renders the release action Go env export.
-	releaseGoVersionLine = `        echo "GO_VERSION=%s" >> $GITHUB_ENV`
 	// releaseXK6VersionLine renders the release action xk6 env export.
 	releaseXK6VersionLine = `        echo "XK6_VERSION=%s" >> $GITHUB_ENV`
 	// taskfileGolangCITagLine renders the taskfile golangci-lint tag.
@@ -233,18 +223,8 @@ func buildUpdates(inputs *resolvedInputs) []*fileUpdate {
 					Want: expectedSingleReplacement,
 				},
 				{
-					Re:   regexp.MustCompile(goVersionPattern),
-					With: fmt.Sprintf(goVersionLine, inputs.GoVersion),
-					Want: expectedSingleReplacement,
-				},
-				{
 					Re:   regexp.MustCompile(xk6VersionPattern),
 					With: fmt.Sprintf(xk6VersionLine, inputs.XK6.Version),
-					Want: expectedSingleReplacement,
-				},
-				{
-					Re:   regexp.MustCompile(goVersionMatrixPattern),
-					With: fmt.Sprintf(goVersionMatrixLine, inputs.GoVersion),
 					Want: expectedSingleReplacement,
 				},
 			},
@@ -252,11 +232,6 @@ func buildUpdates(inputs *resolvedInputs) []*fileUpdate {
 		{
 			Path: filepath.Join(inputs.Root, githubDirName, actionsDirName, releaseActionDirName, releaseActionFile),
 			Replacements: []*replacement{
-				{
-					Re:   regexp.MustCompile(releaseGoVersionPattern),
-					With: fmt.Sprintf(releaseGoVersionLine, inputs.GoVersion),
-					Want: expectedSingleReplacement,
-				},
 				{
 					Re:   regexp.MustCompile(releaseXK6VersionPattern),
 					With: fmt.Sprintf(releaseXK6VersionLine, inputs.XK6.Version),
