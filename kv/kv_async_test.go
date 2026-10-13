@@ -767,7 +767,7 @@ func TestKVAsync_DiskReadOnlyMutationRejectsStableError(t *testing.T) {
 	readOnlyStore, err := store.NewDiskStore(
 		true,
 		dbPath,
-		&store.DiskConfig{ReadOnly: store.GetComparablePointer(true)},
+		&store.DiskConfig{ReadOnly: new(true)},
 	)
 	require.NoError(t, err)
 	require.NoError(t, readOnlyStore.Open())

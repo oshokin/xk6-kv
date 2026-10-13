@@ -2,8 +2,6 @@ package kv
 
 import (
 	"testing"
-
-	"github.com/oshokin/xk6-kv/kv/store"
 )
 
 // TestOptionsEqual_MemoryIgnoresPath verifies that options equal memory ignores path.
@@ -32,7 +30,7 @@ func TestOptionsEqual_MemoryIgnoresPath(t *testing.T) {
 func TestOptionsEqual_MemoryIgnoresDiskOptions(t *testing.T) {
 	t.Parallel()
 
-	noSyncTrue := store.GetComparablePointer(true)
+	noSyncTrue := new(true)
 
 	left := Options{
 		Backend:       BackendMemory,

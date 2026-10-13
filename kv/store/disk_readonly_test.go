@@ -34,7 +34,7 @@ func newReadOnlyDiskStoreFixture(t *testing.T, trackKeys bool) (*DiskStore, *Cla
 	require.NoError(t, writable.Close())
 
 	readOnlyStore, err := NewDiskStore(trackKeys, dbPath, &DiskConfig{
-		ReadOnly: GetComparablePointer(true),
+		ReadOnly: new(true),
 	})
 	require.NoError(t, err)
 	require.NoError(t, readOnlyStore.Open())
@@ -336,7 +336,7 @@ func TestDiskAllocationStats_ReadOnlyTrackKeysUsesDurableClaims(t *testing.T) {
 		require.NoError(t, writable.Close())
 
 		readOnlyStore, err := NewDiskStore(true, dbPath, &DiskConfig{
-			ReadOnly: GetComparablePointer(true),
+			ReadOnly: new(true),
 		})
 		require.NoError(t, err)
 		require.NoError(t, readOnlyStore.Open())
@@ -369,7 +369,7 @@ func TestDiskAllocationStats_ReadOnlyTrackKeysUsesDurableClaims(t *testing.T) {
 		require.NoError(t, writable.Close())
 
 		readOnlyStore, err := NewDiskStore(true, dbPath, &DiskConfig{
-			ReadOnly: GetComparablePointer(true),
+			ReadOnly: new(true),
 		})
 		require.NoError(t, err)
 		require.NoError(t, readOnlyStore.Open())
@@ -404,7 +404,7 @@ func TestDiskStats_ReadOnlyTrackKeysUsesDurableClaims_Live(t *testing.T) {
 	require.NoError(t, writable.Close())
 
 	readOnlyStore, err := NewDiskStore(true, dbPath, &DiskConfig{
-		ReadOnly: GetComparablePointer(true),
+		ReadOnly: new(true),
 	})
 	require.NoError(t, err)
 	require.NoError(t, readOnlyStore.Open())
@@ -437,7 +437,7 @@ func TestDiskStats_ReadOnlyTrackKeysUsesDurableClaims_Expired(t *testing.T) {
 	require.NoError(t, writable.Close())
 
 	readOnlyStore, err := NewDiskStore(true, dbPath, &DiskConfig{
-		ReadOnly: GetComparablePointer(true),
+		ReadOnly: new(true),
 	})
 	require.NoError(t, err)
 	require.NoError(t, readOnlyStore.Open())

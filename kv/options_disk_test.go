@@ -5,18 +5,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/oshokin/xk6-kv/kv/store"
 )
 
 // TestDiskOptionsEqual verifies that disk options equal.
 func TestDiskOptionsEqual(t *testing.T) {
 	t.Parallel()
 
-	boolTrue := store.GetComparablePointer(true)
-	boolFalse := store.GetComparablePointer(false)
-	freelistMapUpper := store.GetComparablePointer("MAP")
-	freelistMapLower := store.GetComparablePointer("map")
+	boolTrue := new(true)
+	boolFalse := new(false)
+	freelistMapUpper := new("MAP")
+	freelistMapLower := new("map")
 
 	testCases := []struct {
 		name   string

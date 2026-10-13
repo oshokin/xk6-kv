@@ -388,7 +388,7 @@ func TestDiskStore_Open_ReadOnlyExistingBucket(t *testing.T) {
 	require.NoError(t, rwStore.Set("seed", "value"))
 	require.NoError(t, rwStore.Close())
 
-	diskConfig := &DiskConfig{ReadOnly: GetComparablePointer(true)}
+	diskConfig := &DiskConfig{ReadOnly: new(true)}
 	store, err := NewDiskStore(false, dbPath, diskConfig)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -418,7 +418,7 @@ func TestDiskStore_Open_ReadOnlyMissingBucketFails(t *testing.T) {
 	require.NoError(t, err, "bolt.Open must succeed for empty DB setup")
 	require.NoError(t, db.Close())
 
-	diskConfig := &DiskConfig{ReadOnly: GetComparablePointer(true)}
+	diskConfig := &DiskConfig{ReadOnly: new(true)}
 	store, err := NewDiskStore(false, dbPath, diskConfig)
 	require.NoError(t, err)
 

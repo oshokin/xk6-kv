@@ -228,8 +228,7 @@ func classifyError(err error) *Error {
 		return nil
 	}
 
-	var kvErr *Error
-	if errors.As(err, &kvErr) {
+	if kvErr, ok := errors.AsType[*Error](err); ok {
 		return kvErr
 	}
 
@@ -238,8 +237,7 @@ func classifyError(err error) *Error {
 		return newOperationCanceledError(err)
 	}
 
-	var entryListErr *store.EntryListError
-	if errors.As(err, &entryListErr) {
+	if entryListErr, ok := errors.AsType[*store.EntryListError](err); ok {
 		details := make([]ErrorDetail, 0, len(entryListErr.Errors))
 		for _, item := range entryListErr.Errors {
 			details = append(details, ErrorDetail{

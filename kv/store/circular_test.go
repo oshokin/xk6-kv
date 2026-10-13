@@ -395,7 +395,7 @@ func TestDiskStore_NextCircular_ReadOnlySupported(t *testing.T) {
 			require.NoError(t, writable.Close())
 
 			readOnly, err := NewDiskStore(trackKeys, dbPath, &DiskConfig{
-				ReadOnly: GetComparablePointer(true),
+				ReadOnly: new(true),
 			})
 			require.NoError(t, err)
 			require.NoError(t, readOnly.Open())

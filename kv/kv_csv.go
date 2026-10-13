@@ -667,8 +667,7 @@ func validateCSVRows(
 		}
 
 		if readErr != nil {
-			var parseErr *csv.ParseError
-			if errors.As(readErr, &parseErr) {
+			if _, ok := errors.AsType[*csv.ParseError](readErr); ok {
 				contentErr := fmt.Errorf("%w: validateCSV row %d: %w", store.ErrValueParseFailed, nextRowNo, readErr)
 				return rows, counted.BytesRead(), false, newValidateCSVFirstError(nextRowNo, contentErr), nil
 			}
@@ -722,8 +721,7 @@ func resolveValidateCSVSchema(
 			return nil, 0, 0, io.EOF
 		}
 
-		var parseErr *csv.ParseError
-		if errors.As(err, &parseErr) {
+		if _, ok := errors.AsType[*csv.ParseError](err); ok {
 			return nil, 0, 1, fmt.Errorf("%w: validateCSV header: %w", store.ErrValueParseFailed, err)
 		}
 
