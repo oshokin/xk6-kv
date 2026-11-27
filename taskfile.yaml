@@ -31,11 +31,11 @@ vars:
   # Linting tool version.
   GOLANGCI_TAG: "v2.14.0"
   # k6 extension builder version.
-  XK6_TAG: "v1.4.14"
+  XK6_TAG: "v1.5.1"
   # Go vulnerability scanner version.
   GOVULNCHECK_TAG: "v1.3.0"
   # Go toolchain version used by security checks (must match go.mod).
-  GO_VERSION: "1.26.9"
+  GO_VERSION: "1.26.11"
 
   # -------------------------------
   # Tool Binaries

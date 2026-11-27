@@ -17,7 +17,7 @@ runs:
       shell: bash
       run: |
         # Tool versions. Go comes from the go directive in go.mod.
-        echo "XK6_VERSION=v1.4.14" >> $GITHUB_ENV
+        echo "XK6_VERSION=v1.5.1" >> $GITHUB_ENV
         
         # Git configuration for automated commits.
         echo "GIT_BOT_NAME=github-actions[bot]" >> $GITHUB_ENV
@@ -217,7 +217,7 @@ runs:
         LAST_TAG="${{ steps.bump.outputs.last_tag }}"
         NEXT_TAG="${{ steps.bump.outputs.next_tag }}"
         PREVIOUS_TAG="v${LAST_TAG}"
-        # go env GOVERSION prints go1.26.9; the changelog records 1.26.9.
+        # go env GOVERSION prints go1.26.11; the changelog records 1.26.11.
         GO_VERSION="$(go env GOVERSION)"
         GO_VERSION="${GO_VERSION#go}"
 

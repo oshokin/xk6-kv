@@ -26,7 +26,7 @@ permissions:
 env:
   # Tool versions. Go comes from the go directive in go.mod.
   GOLANGCI_LINT_VERSION: "v2.14.0"
-  XK6_VERSION: "v1.4.14"
+  XK6_VERSION: "v1.5.1"
 
   # Test configuration.
   TEST_TIMEOUT: "600s"

@@ -451,21 +451,21 @@ xk6 build --with github.com/oshokin/xk6-kv@v1.4.31
 ./k6 version
 ```
 
-> **Requirements**: Go 1.25.13 or higher.
+> **Requirements**: Go 1.26.11 or higher.
 
 ## Compatibility
 
-Current development targets **k6 v2.2.x** (`go.k6.io/k6/v2`). The JavaScript import is unchanged:
+Current development targets **k6 v2.4.x** (`go.k6.io/k6/v2`). The JavaScript import is unchanged:
 
 ```javascript
 import { openKv } from "k6/x/kv";
 ```
 
-Use **xk6 v1.4.1** or newer when building this extension from source; xk6 resolves the required k6 major version from the extension dependency graph.
+Use **xk6 v1.5.1** or newer when building this extension from source; xk6 resolves the required k6 major version from the extension dependency graph.
 
 | xk6-kv version | k6 core version | Notes |
 | --- | --- | --- |
-| current development | v2.2.x | Current supported line |
+| current development | v2.4.x | Current supported line |
 | v1.5.0-v1.5.1 | v2.0.x | Previous k6 v2 line |
 | v1.4.31 | v1.7.x | Frozen legacy line; pin this tag when building against k6 v1 |
 
