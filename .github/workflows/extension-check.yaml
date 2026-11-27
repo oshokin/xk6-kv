@@ -25,7 +25,7 @@ permissions:
 # Environment variables (constants for configuration).
 env:
   # Tool versions. Go comes from the go directive in go.mod.
-  GOLANGCI_LINT_VERSION: "v2.14.0"
+  GOLANGCI_LINT_VERSION: "v2.15.0"
   XK6_VERSION: "v1.5.1"
 
   # Test configuration.
@@ -45,21 +45,21 @@ jobs:
     steps:
       # Checkout the repository code with full git history.
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7.0.1
         with:
           # Fetch all commits and branches for complete history.
           fetch-depth: 0
 
       # Install the Go toolchain declared in go.mod so linting does not depend on the runner default.
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7.1.0
         with:
           go-version-file: go.mod
           cache: true
 
       # Run golangci-lint to check code quality, style, and potential bugs.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@v9.3.0
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
 
@@ -69,10 +69,10 @@ jobs:
     steps:
       # Checkout the repository code.
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7.0.1
       # Install Node.js for the TypeScript check.
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: "22"
           cache: "npm"
@@ -95,10 +95,10 @@ jobs:
     steps:
       # Checkout the repository code.
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7.0.1
       # Install the Go toolchain declared in go.mod.
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7.1.0
         with:
           go-version-file: go.mod
           cache: true
@@ -124,10 +124,10 @@ jobs:
     steps:
       # Checkout the repository code.
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7.0.1
       # Install the Go toolchain declared in go.mod.
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7.1.0
         with:
           go-version-file: go.mod
           cache: true

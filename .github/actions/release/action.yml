@@ -31,14 +31,14 @@ runs:
     # For workflow_run, build from upstream head SHA. For push/workflow_dispatch,
     # use the current workflow ref (branch or tag).
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7.0.1
       with:
         fetch-depth: 0 # Fetch all tags and history for semantic versioning.
         ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
 
     # Set up the Go toolchain declared in go.mod.
     - name: Set up Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7.1.0
       with:
         go-version-file: go.mod
 
@@ -278,7 +278,7 @@ runs:
     # Create GitHub release with packaged binaries.
     - name: Create GitHub Release
       if: steps.bump.outputs.has_release == '1' && steps.tag.outputs.should_release != 'false'
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3.0.4
       with:
         tag_name: ${{ steps.bump.outputs.next_tag }}
         name: Release ${{ steps.bump.outputs.next_tag }}
